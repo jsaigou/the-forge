@@ -1,0 +1,23 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Schema v29 (Sprint 12, was H — Settings overhaul, Phase 1, 2026-08-05).
+-- Deletes five settings-KV rows whose keys have zero production readers
+-- anywhere in the repo (verified by grep, not assumed): ui.theme,
+-- ui.bookmarks, notes.sections, hf.token, logging.forward_url. Each existed
+-- only as a name in a vocabulary comment or an old test — none is read by
+-- any handler, collector, or router code today. Leaving them declared made
+-- them look like real, configurable features to anyone reading the
+-- vocabulary list; Sprint 12's "expose every real setting in the UI"
+-- promise depends on that list being honest.
+--
+-- Inherently a no-op on any DB with no matching rows (same idempotent-by-
+-- construction pattern as 0020_gemma_logo.sql / 0024_comfyui_logo.sql), so
+-- no WHERE EXISTS guard is needed.
+--
+-- hf.token is a secret (a Hugging Face access token, if one was ever set via
+-- `foundryd config set hf.token ...`) and this deletion is IRREVERSIBLE —
+-- the standard pre-deploy step of dry-running this migration against a real
+-- copy of the live ForgeHost DB is the backup, not this comment. If a value was
+-- actually set, note it before running for real and have the operator
+-- re-mint a fresh token afterward rather than trying to recover the old one.
+DELETE FROM settings WHERE key IN
+  ('ui.theme', 'ui.bookmarks', 'notes.sections', 'hf.token', 'logging.forward_url');

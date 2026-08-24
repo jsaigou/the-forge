@@ -1,0 +1,41 @@
+{
+  "id": "strix-halo-gfx1151",
+  "verified": true,
+  "source": "live reference host (AMD Ryzen AI Max+ 395, 128 GB unified LPDDR5X, ~120 GB GTT)",
+  "cpu": "AMD Ryzen AI Max+ 395",
+  "gpu_device_id": "gfx1151",
+  "gtt_bytes": 128849018880,
+  "ram_bytes": 137438953472,
+  "recommended_kernel_params": [
+    "amdgpu.mcbp=0",
+    "amdgpu.vm_fragment_size=9"
+  ],
+  "kernel_params_note": "Mitigations for KFD GPU-queue eviction on large cold-start prompts (80K+ tokens after idle). See AGENTS.md 'Known Inference Constraints' and docs/bios-setup.md.",
+  "model_baselines": {
+    "gemma4-e4b-qat": {
+      "source": "pending-benchmark",
+      "prefill_tps": null,
+      "decode_tps": null,
+      "memory_footprint_bytes": null
+    },
+    "gemma4-26b-a4b": {
+      "source": "docs/modes.md live head-to-head (2026-08, gemma4-mtp mode at n_ctx=131072)",
+      "backends": [
+        {
+          "backend": "vulkan",
+          "prefill_tps": 115.6,
+          "decode_tps": 24.4
+        },
+        {
+          "backend": "rocm",
+          "rocm_version": "7.15 (TheRock)",
+          "prefill_tps": 117.9,
+          "decode_tps": 24.3
+        }
+      ],
+      "context_tokens": 131072,
+      "memory_footprint_bytes": 18253611008,
+      "memory_footprint_note": "approximate — Q4_K_M weights + mmproj + MTP draft head + KV at 131072 ctx; estimate, not measured"
+    }
+  }
+}

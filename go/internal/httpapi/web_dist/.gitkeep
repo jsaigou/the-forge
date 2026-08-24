@@ -1,0 +1,5 @@
+sentinel — Phase 4 build runs `cd web && npm run build` to populate this
+directory (vite.config.ts writes here). The embedded PWA shell is served
+from this directory; without it, `go build` would fail on the //go:embed
+directive. The .gitkeep sentinel guarantees the directory exists on a fresh
+clone (CI runs `go build` without first running `npm run build`).

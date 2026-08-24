@@ -1,0 +1,20 @@
+# /etc/systemd/system/forge-a4.service
+# a4 inference slot — always port 8088.
+# Only started when a model is explicitly loaded into this slot.
+[Unit]
+Description=Forge — A4 Inference (port 8088)
+After=network.target
+
+[Service]
+Type=simple
+User=testuser
+Group=testuser
+EnvironmentFile=/etc/sysconfig/forge-a4-env
+ExecStart=/usr/local/lib/forge/start-a4.sh
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-a4
+TimeoutStopSec=300
+ReadWritePaths=/var/lib/forge

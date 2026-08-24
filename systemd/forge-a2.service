@@ -1,0 +1,20 @@
+# /etc/systemd/system/forge-a2.service
+# A2 (formerly "secondary") inference slot — always port 8081.
+# Only started in dual-model modes (e.g. coding).
+[Unit]
+Description=Forge — A2 Inference (port 8081)
+After=network.target
+
+[Service]
+Type=simple
+User=testuser
+Group=testuser
+EnvironmentFile=/etc/sysconfig/forge-a2-env
+ExecStart=/usr/local/lib/forge/start-a2.sh
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-a2
+TimeoutStopSec=300
+ReadWritePaths=/var/lib/forge

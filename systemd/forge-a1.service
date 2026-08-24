@@ -1,0 +1,21 @@
+# /etc/systemd/system/forge-a1.service
+# A1 (formerly "primary") inference slot — always port 8080.
+# Model loaded depends on which mode the engine activated last.
+# Engine writes /etc/sysconfig/forge-a1-{env,args} before starting this unit.
+[Unit]
+Description=Forge — A1 Inference (port 8080)
+After=network.target
+
+[Service]
+Type=simple
+User=testuser
+Group=testuser
+EnvironmentFile=/etc/sysconfig/forge-a1-env
+ExecStart=/usr/local/lib/forge/start-a1.sh
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-a1
+TimeoutStopSec=300
+ReadWritePaths=/var/lib/forge /var/lib/forge/switch.log

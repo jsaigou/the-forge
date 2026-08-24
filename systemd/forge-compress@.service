@@ -1,0 +1,86 @@
+# /etc/systemd/system/forge-compress@.service
+# forge-compress -- Sprint 3 Go replacement for headroom-ai
+# (docs/v5-headroom-replacement.md). Each instantiated unit is one
+# forge-compress proxy process; %i is the store.ProxyRow.Service name --
+# "local" (fronts all A1-A4 slots) or "external" (fronts every remote
+# provider with no dedicated proxy of its own) under Sprint 3's 2-instance
+# topology, replacing one headroom@ unit per remote provider.
+# forge's internal/headroom.Provisioner (a second Provisioner value with
+# TemplatePrefix set to "forge-compress@" -- see provision.go) writes the
+# per-instance EnvironmentFile below before starting/stopping/restarting
+# the instance over the shared D-Bus adapter -- this repo's code never
+# authors unit files at runtime, same convention as headroom@.service.
+#
+# Needs no new polkit grant: forge-compress@*.service already matches
+# polkit/50-forge.rules's existing ^forge-.*\.service$ glob (verified
+# during Sprint 3 planning, docs/v5-headroom-replacement.md).
+#
+# The three Environment= paths below are this binary's own artifacts --
+# constant across every instance on this host, so they're baked in here
+# rather than written per-instance by Provisioner (which only ever varies
+# OPENAI_TARGET_API_URL/HEADROOM_KOMPRESS_ONNX_INTRA_THREADS/
+# HEADROOM_PROXY_TOKEN/HEADROOM_PORT per row, same as it always has for
+# headroom@ instances -- see writeEnv). HEADROOM_PROXY_TOKEN is accepted
+# from that EnvironmentFile but not enforced as an auth gate by this
+# binary; see cmd/forge-compress/config.go's ProxyToken doc comment for
+# why.
+#
+# One-time manual root install (this file only -- not something to script
+# unattended against a live production host, same convention as
+# headroom@.service):
+#
+#   sudo cp systemd/forge-compress@.service /etc/systemd/system/forge-compress@.service
+#   sudo mkdir -p /var/lib/forge/compress
+#   sudo chown testuser:testuser /var/lib/forge/compress
+#   sudo mkdir -p /opt/forge/compress
+#   # Copy the binary + model/tokenizer/runtime artifacts into place --
+#   # forge-compress is built NATIVELY on this host (see
+#   # docs/v5-headroom-replacement.md's "Build & deploy" section -- cgo,
+#   # not cross-compiled), so this step runs here, not on the dev machine:
+#   #   /opt/forge/compress/forge-compress        (the binary itself, chmod 755 + chcon -t bin_t)
+#   #   /opt/forge/compress/kompress-int8-wo.onnx   (~261MB, chopratejas/kompress-v2-base)
+#   #   /opt/forge/compress/tokenizer.json          (answerdotai/ModernBERT-base)
+#   #   /opt/forge/compress/libonnxruntime.so
+#   sudo systemctl daemon-reload
+#
+[Unit]
+Description=forge-compress -- Go compression proxy (%i)
+After=network.target
+
+[Service]
+Type=simple
+User=testuser
+Group=testuser
+WorkingDirectory=/home/testuser
+EnvironmentFile=/var/lib/forge/compress/%i.env
+Environment=FORGE_COMPRESS_MODEL_PATH=/opt/forge/compress/kompress-int8-wo.onnx
+Environment=FORGE_COMPRESS_TOKENIZER_PATH=/opt/forge/compress/tokenizer.json
+Environment=FORGE_COMPRESS_ONNXRUNTIME_LIB=/opt/forge/compress/libonnxruntime.so
+# Legacy aliases -- the currently-deployed binary predates the Foundry->Forge
+# rename and still reads FOUNDRY_COMPRESS_*; remove these three lines once
+# forge-compress is rebuilt natively on this host from the renamed source.
+Environment=FOUNDRY_COMPRESS_MODEL_PATH=/opt/forge/compress/kompress-int8-wo.onnx
+Environment=FOUNDRY_COMPRESS_TOKENIZER_PATH=/opt/forge/compress/tokenizer.json
+Environment=FOUNDRY_COMPRESS_ONNXRUNTIME_LIB=/opt/forge/compress/libonnxruntime.so
+ExecStart=/opt/forge/compress/forge-compress
+Restart=on-failure
+RestartSec=10
+# Defense in depth, added after the 2026-08-20 OOM incident
+# (docs/v5-headroom-replacement.md Sprint 9): the real fix is bounding
+# every Scorer.Score call at the source (internal/compress/chunk.go's
+# scoreChunk), but this unit had NO memory ceiling of its own, so that bug
+# was free to consume the ENTIRE host's RAM (measured peak: 84GB on a
+# 123GB host, global_oom) before the kernel picked a victim. A cgroup
+# ceiling means any future bug in this class fails contained to this one
+# proxy instance instead of threatening every other service on the host.
+# Sized generously above the ~350-650MB steady-state this unit actually
+# uses (confirmed live post-fix) -- this is a backstop, not a normal
+# operating constraint.
+MemoryMax=4G
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-compress-%i
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

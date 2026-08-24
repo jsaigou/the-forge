@@ -1,0 +1,1107 @@
+import { SETTINGS_SECTIONS, type SectionKey } from "./sections";
+
+// settings/fields.ts — Sprint 12 (was H) Phase 6. The field registry: one
+// declarative record per renderable setting, consumed by <Field> (settings/
+// Field.tsx) for presentation and (Phase 8) by SettingsSearch for the index.
+// The registry owns presentation metadata only, never data plumbing — each
+// panel still keeps its own query/mutation hook, draft state, and save via
+// useSettingsGroup. See the sprint plan
+// (/home/testuser/.claude/plans/twinkly-beaming-ullman.md, "Field registry"
+// section) for the full design rationale.
+//
+// Two record kinds keep the diff small: kind:"field" is renderable *and*
+// searchable — used for 100% of the four new panels below (general/routing/
+// monitoring/scheduling). kind:"landmark" is searchable only, pointing at an
+// anchor inside a near-verbatim panel (SecurityPanel/CatalogPanel/
+// ProviderKeys/Billing/Compressor) — Sprint 13 (Sprint 12 Phase 8) added
+// those records alongside the search UI itself (settings/SettingsSearch.tsx),
+// in one pass, rather than half-building an index with no consumer here.
+
+export type ApplyMode = "immediate" | "live" | "restart" | "seed";
+
+export interface SettingRecord {
+  id: string; // e.g. "routing.busy_mode" — stable, doubles as a DOM anchor id
+  kind: "field" | "landmark";
+  section: SectionKey;
+  card?: string;
+  label: string;
+  help: string;
+  keywords?: string[];
+  storeKey: string; // e.g. "router.busy_mode" — also what `forge config get` wants
+  apply: ApplyMode;
+  /** kind:"landmark" only — where search navigation lands. A DOM id for an
+      anchor inside a near-verbatim panel, or a CatalogPanel sub-tab slug
+      (which switches the tab rather than scrolling). Omit = section top.
+      kind:"field" records never set this — their DOM anchor is `id`. */
+  anchor?: string;
+  input?: "number" | "text" | "select" | "toggle" | "textarea" | "path" | "addr" | "cidr";
+  unit?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: { value: string; label: string }[];
+  danger?: boolean;
+  requiresRole?: "admin";
+}
+
+// ── General ──────────────────────────────────────────────────────────────
+
+export const GENERAL_FIELDS: SettingRecord[] = [];
+
+// ── Routing ──────────────────────────────────────────────────────────────
+// Two cards, two different settings groups: "behavior" is router/settings
+// (independent immediate-mode KV toggles, C1-Q5 + Phase 2 + multi-provider
+// additions); "config" is router/config (infra.router, restart-mode —
+// router.Deps.Cfg is constructed once in main.go and never re-read).
+
+export const ROUTING_FIELDS: SettingRecord[] = [
+  {
+    id: "routing.busy_mode",
+    kind: "field",
+    section: "routing",
+    card: "behavior",
+    label: "Busy mode",
+    help: "What a0 does when the target slot is busy loading/switching: wait for it, or fail fast.",
+    keywords: ["busy", "a0", "router"],
+    storeKey: "router.busy_mode",
+    apply: "immediate",
+    input: "select",
+    options: [
+      { value: "wait", label: "Wait" },
+      { value: "fail_fast", label: "Fail fast" },
+    ],
+  },
+  {
+    id: "routing.inject_stream_usage",
+    kind: "field",
+    section: "routing",
+    card: "behavior",
+    label: "Inject stream_options.include_usage",
+    help: "Ask remote providers for a trailing usage chunk on streaming requests, so real API spend can be recorded (BE-4 Phase 4). Local backends are unaffected.",
+    keywords: ["usage", "cost", "streaming", "remote"],
+    storeKey: "usage.inject_stream_usage",
+    apply: "immediate",
+    input: "toggle",
+  },
+  {
+    id: "routing.compressor_local_enabled",
+    kind: "field",
+    section: "routing",
+    card: "behavior",
+    label: "Compressor for local slots",
+    help: "route local A1–A4 traffic through the shared forge-compress@local compression proxy. Remote-provider Compressor proxies are controlled separately, on the Compressor section.",
+    keywords: ["compressor", "compression", "local"],
+    storeKey: "compressor.local_enabled",
+    apply: "immediate",
+    input: "toggle",
+  },
+  {
+    id: "routing.provider_failover",
+    kind: "field",
+    section: "routing",
+    card: "behavior",
+    label: "Provider failover",
+    help: "When the preferred provider for a model errors (transport failure or 5xx), retry the next provider offering the same model, in priority order. Off = the error surfaces instead of silently spending on the next provider. 4xx responses never fail over.",
+    keywords: ["failover", "provider", "redundancy", "priority", "fallback"],
+    storeKey: "router.provider_failover",
+    apply: "immediate",
+    input: "toggle",
+  },
+  {
+    id: "routing.connect_timeout_s",
+    kind: "field",
+    section: "routing",
+    card: "config",
+    label: "Connect timeout",
+    help: "How long a0 waits to establish a TCP connection to a backend before giving up.",
+    keywords: ["timeout", "connect"],
+    storeKey: "infra.router",
+    apply: "restart",
+    input: "number",
+    unit: "s",
+    min: 0.1,
+    max: 300,
+    step: 0.1,
+  },
+  {
+    id: "routing.request_timeout_s",
+    kind: "field",
+    section: "routing",
+    card: "config",
+    label: "Request timeout",
+    help: "0 means unbounded — the deliberate default since the laguna-s-21 fix (2026-07-30): a flat non-zero timeout was severing long-running speculative-decode responses mid-generation. A hung client/upstream is still caught by context cancellation on disconnect.",
+    keywords: ["timeout", "request", "laguna"],
+    storeKey: "infra.router",
+    apply: "restart",
+    input: "number",
+    unit: "s",
+    min: 0,
+    max: 3600,
+    step: 1,
+  },
+  {
+    id: "routing.health_ttl_s",
+    kind: "field",
+    section: "routing",
+    card: "config",
+    label: "Health cache TTL",
+    help: "How long a backend's health probe result is cached before a0 re-checks it.",
+    keywords: ["health", "ttl"],
+    storeKey: "infra.router",
+    apply: "restart",
+    input: "number",
+    unit: "s",
+    min: 0.5,
+    max: 300,
+    step: 0.5,
+  },
+  {
+    id: "routing.max_retries_per_backend",
+    kind: "field",
+    section: "routing",
+    card: "config",
+    label: "Max retries per backend",
+    help: "How many times a0 retries a single backend before failing over or giving up.",
+    keywords: ["retries"],
+    storeKey: "infra.router",
+    apply: "restart",
+    input: "number",
+    min: 0,
+    max: 10,
+    step: 1,
+  },
+  {
+    id: "routing.ensure_loaded_timeout_s",
+    kind: "field",
+    section: "routing",
+    card: "config",
+    label: "Ensure-loaded timeout",
+    help: "How long a0 waits for an on-demand model load to finish before failing the request that triggered it.",
+    keywords: ["timeout", "load", "ensure"],
+    storeKey: "infra.router",
+    apply: "restart",
+    input: "number",
+    unit: "s",
+    min: 5,
+    max: 3600,
+    step: 1,
+  },
+  {
+    id: "routing.embedding_url",
+    kind: "field",
+    section: "routing",
+    card: "config",
+    label: "Embedding URL",
+    help: "Absolute http(s) URL for the embeddings backend a0 proxies to.",
+    keywords: ["embedding", "url"],
+    storeKey: "infra.router",
+    apply: "restart",
+    input: "addr",
+  },
+];
+
+// ── Monitoring ───────────────────────────────────────────────────────────
+// Two cards: "monitor" (infra.monitor, all live) and "metrics" (two fields
+// on ONE endpoint with DIFFERENT apply modes — see MetricsSettings's doc
+// comment in types.ts. Do not badge them the same.)
+
+export const MONITORING_FIELDS: SettingRecord[] = [
+  {
+    id: "monitoring.poll_interval_s",
+    kind: "field",
+    section: "monitoring",
+    card: "monitor",
+    label: "Collector poll interval",
+    help: "How often the collector scrapes each loaded slot's /metrics.",
+    keywords: ["poll", "collector", "cadence"],
+    storeKey: "infra.monitor",
+    apply: "live",
+    input: "number",
+    unit: "s",
+    min: 1,
+    max: 3600,
+    step: 1,
+  },
+  {
+    id: "monitoring.hang_tps_thousandth",
+    kind: "field",
+    section: "monitoring",
+    card: "monitor",
+    label: "Hang TPS threshold",
+    help: "Tokens/sec ×1000 below which a processing request is considered hung (default 100 = 0.1 TPS).",
+    keywords: ["hang", "tps", "threshold"],
+    storeKey: "infra.monitor",
+    apply: "live",
+    input: "number",
+    min: 0,
+    max: 100000,
+    step: 1,
+  },
+  {
+    id: "monitoring.hang_sustain_s",
+    kind: "field",
+    section: "monitoring",
+    card: "monitor",
+    label: "Hang sustain window",
+    help: "How long the TPS threshold must stay breached before a hang alert fires.",
+    keywords: ["hang", "sustain"],
+    storeKey: "infra.monitor",
+    apply: "live",
+    input: "number",
+    unit: "s",
+    min: 1,
+    max: 3600,
+    step: 1,
+  },
+  {
+    id: "monitoring.switch_cooldown_s",
+    kind: "field",
+    section: "monitoring",
+    card: "monitor",
+    label: "Switch cooldown",
+    help: "Minimum time between consecutive mode switches on the same slot.",
+    keywords: ["switch", "cooldown"],
+    storeKey: "infra.monitor",
+    apply: "live",
+    input: "number",
+    unit: "s",
+    min: 0,
+    max: 3600,
+    step: 1,
+  },
+  {
+    id: "monitoring.gtt_warn_pct",
+    kind: "field",
+    section: "monitoring",
+    card: "monitor",
+    label: "GTT warn threshold",
+    help: "GTT pool usage percentage at which a memory-pressure warning fires.",
+    keywords: ["gtt", "memory", "warn"],
+    storeKey: "infra.monitor",
+    apply: "live",
+    input: "number",
+    unit: "%",
+    min: 1,
+    max: 100,
+    step: 1,
+  },
+  {
+    id: "monitoring.retention_days",
+    kind: "field",
+    section: "monitoring",
+    card: "metrics",
+    label: "Metrics retention",
+    help: "How long metric samples are kept before store.RunRetention prunes them. Live — takes effect on the next prune tick.",
+    keywords: ["retention", "metrics", "history"],
+    storeKey: "metrics.retention_days",
+    apply: "live",
+    input: "number",
+    unit: "days",
+    min: 1,
+    max: 3650,
+    step: 1,
+  },
+  {
+    id: "monitoring.sample_interval_s",
+    kind: "field",
+    section: "monitoring",
+    card: "metrics",
+    label: "Metrics sample interval",
+    help: "How often a metric sample is recorded. Restart-required — baked into a ticker once at daemon start, unlike its neighbor above.",
+    keywords: ["sample", "interval", "metrics"],
+    storeKey: "metrics.sample_interval_s",
+    apply: "restart",
+    input: "number",
+    unit: "s",
+    min: 5,
+    max: 3600,
+    step: 1,
+  },
+];
+
+// ── smith (P3 — docs/v5-smith.md §6) ────────────────────────────────────
+// smith.model and smith.handoff_offerings are populated from live catalog
+// data (Configs + Offerings), not a static enum <Field> can render from
+// declarative metadata — both are kind:"landmark" here, pointing at anchors
+// inside settings/panels/Smith.tsx's own bespoke pickers. Schedule/
+// thresholds are plain number/text fields, same shape as Monitoring's.
+
+export const SMITH_FIELDS: SettingRecord[] = [
+  {
+    id: "smith.model",
+    kind: "landmark",
+    section: "smith",
+    card: "reasoning",
+    label: "smith brain model",
+    help: "The Config or Offering smith calls via a0 when it needs to think. Empty or unresolvable means smith answers without a model.",
+    keywords: ["smith", "brain", "model", "reasoning", "chat", "tier"],
+    storeKey: "smith.model",
+    apply: "live",
+    anchor: "smith-model",
+  },
+  {
+    id: "smith.handoff_offerings",
+    kind: "landmark",
+    section: "smith",
+    card: "reasoning",
+    label: "smith handoff offering order",
+    help: "Ordered remote Offerings smith's self-eviction handoff probes when its brain's slot needs to be freed.",
+    keywords: ["smith", "handoff", "offering", "remote", "swap", "eviction"],
+    storeKey: "smith.handoff_offerings",
+    apply: "live",
+    anchor: "smith-handoff-offerings",
+  },
+  {
+    id: "smith.schedule.quick",
+    kind: "field",
+    section: "smith",
+    card: "schedule",
+    label: "Quick sweep interval",
+    help: "How often smith runs its quick checks (a Go duration string, e.g. 60m).",
+    keywords: ["smith", "sweep", "schedule", "quick"],
+    storeKey: "smith.schedule",
+    apply: "live",
+    input: "text",
+  },
+  {
+    id: "smith.schedule.deep",
+    kind: "field",
+    section: "smith",
+    card: "schedule",
+    label: "Deep sweep interval",
+    help: "How often smith runs its full check catalog, including slower network probes.",
+    keywords: ["smith", "sweep", "schedule", "deep"],
+    storeKey: "smith.schedule",
+    apply: "live",
+    input: "text",
+  },
+  {
+    id: "smith.thresholds.gtt_warn_pct",
+    kind: "field",
+    section: "smith",
+    card: "thresholds",
+    label: "GTT warn threshold",
+    help: "GTT pool usage percentage at which smith's gtt_ceiling check reports warn.",
+    keywords: ["smith", "gtt", "threshold", "warn"],
+    storeKey: "smith.thresholds",
+    apply: "live",
+    input: "number",
+    unit: "%",
+    min: 1,
+    max: 100,
+    step: 1,
+  },
+  {
+    id: "smith.thresholds.gtt_crit_pct",
+    kind: "field",
+    section: "smith",
+    card: "thresholds",
+    label: "GTT crit threshold",
+    help: "GTT pool usage percentage at which smith's gtt_ceiling check reports crit.",
+    keywords: ["smith", "gtt", "threshold", "crit"],
+    storeKey: "smith.thresholds",
+    apply: "live",
+    input: "number",
+    unit: "%",
+    min: 1,
+    max: 100,
+    step: 1,
+  },
+  {
+    id: "smith.thresholds.disk_warn_pct",
+    kind: "field",
+    section: "smith",
+    card: "thresholds",
+    label: "Disk warn threshold",
+    help: "Disk usage percentage at which smith's disk_space check reports warn.",
+    keywords: ["smith", "disk", "threshold", "warn"],
+    storeKey: "smith.thresholds",
+    apply: "live",
+    input: "number",
+    unit: "%",
+    min: 1,
+    max: 100,
+    step: 1,
+  },
+  {
+    id: "smith.thresholds.disk_crit_pct",
+    kind: "field",
+    section: "smith",
+    card: "thresholds",
+    label: "Disk crit threshold",
+    help: "Disk usage percentage at which smith's disk_space check reports crit.",
+    keywords: ["smith", "disk", "threshold", "crit"],
+    storeKey: "smith.thresholds",
+    apply: "live",
+    input: "number",
+    unit: "%",
+    min: 1,
+    max: 100,
+    step: 1,
+  },
+  {
+    id: "smith.web.enabled",
+    kind: "field",
+    section: "smith",
+    card: "web",
+    label: "Web research enabled",
+    help: "Master switch for web research (search + fetch). On by default — turn off to keep smith to local evidence only.",
+    keywords: ["smith", "web", "search", "research", "internet"],
+    storeKey: "smith.web.enabled",
+    apply: "live",
+    input: "toggle",
+  },
+  {
+    id: "smith.web.provider_order",
+    kind: "landmark",
+    section: "smith",
+    card: "web",
+    label: "Web provider order",
+    help: "Preference order among the fetch-capable adapters (searxng only searches; direct is always tried last regardless of this order).",
+    keywords: ["smith", "web", "provider", "order", "searxng", "firecrawl", "direct", "fallback"],
+    storeKey: "smith.web.provider_order",
+    apply: "live",
+    anchor: "smith-web-order",
+  },
+  {
+    id: "smith.web.api_keys",
+    kind: "landmark",
+    section: "smith",
+    card: "web",
+    label: "Web provider URLs and API keys",
+    help: "Base URLs and (optional) API keys for searxng and firecrawl.",
+    keywords: ["smith", "web", "api key", "searxng", "firecrawl", "base url", "secret"],
+    storeKey: "smith.web.searxng",
+    apply: "live",
+    anchor: "smith-web-keys",
+  },
+  {
+    id: "smith.web.cache_ttl",
+    kind: "field",
+    section: "smith",
+    card: "web",
+    label: "Web cache TTL",
+    help: "How long a search or fetch result is reused before smith fetches it again (a Go duration string, e.g. 6h).",
+    keywords: ["smith", "web", "cache", "ttl"],
+    storeKey: "smith.web.cache_ttl",
+    apply: "live",
+    input: "text",
+  },
+];
+
+// ── Scheduling ───────────────────────────────────────────────────────────
+// The live scheduler.config card is the shared <SchedulerTunables> component
+// (Phase 0), not registry-driven — it's a straight mirror of the Scheduling
+// page's own editor, not a new form, so it has no SettingRecord entries
+// here. Only the boot-seed card (infra.scheduler) is registry-driven.
+
+export const SCHEDULING_FIELDS: SettingRecord[] = [
+  {
+    id: "scheduling.seed.idle_unload_s",
+    kind: "field",
+    section: "scheduling",
+    card: "seed",
+    label: "Idle unload (boot default)",
+    help: "Seed value sched.Config falls back to if scheduler.config has never been set. Writing this changes nothing on the running daemon — only what the next fresh boot starts from.",
+    keywords: ["idle", "unload", "seed", "boot"],
+    storeKey: "infra.scheduler",
+    apply: "seed",
+    input: "number",
+    unit: "s",
+    min: 0,
+    max: 86400,
+    step: 1,
+  },
+  {
+    id: "scheduling.seed.small_job_token_threshold",
+    kind: "field",
+    section: "scheduling",
+    card: "seed",
+    label: "Small-job token threshold (boot default)",
+    help: "Seed value for the small-job token threshold — see idle unload above for what \"boot default\" means.",
+    keywords: ["small", "job", "threshold", "seed", "boot"],
+    storeKey: "infra.scheduler",
+    apply: "seed",
+    input: "number",
+    min: 0,
+    max: 10_000_000,
+    step: 1,
+  },
+  {
+    id: "scheduling.seed.priority_jump_cap",
+    kind: "field",
+    section: "scheduling",
+    card: "seed",
+    label: "Priority jump cap (boot default)",
+    help: "Seed value for the priority jump cap — see idle unload above for what \"boot default\" means.",
+    keywords: ["priority", "jump", "cap", "seed", "boot"],
+    storeKey: "infra.scheduler",
+    apply: "seed",
+    input: "number",
+    min: 0,
+    max: 100,
+    step: 1,
+  },
+  {
+    id: "scheduling.seed.reservation_soon_min",
+    kind: "field",
+    section: "scheduling",
+    card: "seed",
+    label: "Reservation-soon window (boot default)",
+    help: "Seed value for the reservation-soon window — see idle unload above for what \"boot default\" means.",
+    keywords: ["reservation", "soon", "seed", "boot"],
+    storeKey: "infra.scheduler",
+    apply: "seed",
+    input: "number",
+    unit: "min",
+    min: 0,
+    max: 1440,
+    step: 1,
+  },
+];
+
+// ── Danger Zone (Phase 7) ────────────────────────────────────────────────
+// infra.server + infra.paths + infra.tailscale — every field boot-critical,
+// apply="restart", requiresRole:"admin". infra.ports (a Record<string,number>
+// map) is deliberately absent here — <Field> only renders scalar values, so
+// the Danger panel builds its own small key/value editor for it rather than
+// forcing a map through the registry's scalar shape. router.listen_port is
+// also deliberately absent: infra_handlers.go confirms it's a dead field
+// the router never binds to (main.go only logs it) — the plan's original
+// Sections table listed it, but exposing a control for it would present a
+// setting that does nothing, which the registry's own "expose every real
+// setting" principle argues against, not for.
+
+export const DANGER_FIELDS: SettingRecord[] = [
+  {
+    id: "danger.listen",
+    kind: "field",
+    section: "danger",
+    card: "system",
+    label: "Dashboard listen address",
+    help: "host:port the dashboard + API bind to. Checked with a real bind probe when changed (skipped when unchanged, since the daemon is already bound to it).",
+    keywords: ["listen", "dashboard", "bind", "address"],
+    storeKey: "infra.server",
+    apply: "restart",
+    input: "addr",
+    danger: true,
+    requiresRole: "admin",
+  },
+  {
+    id: "danger.router_listen",
+    kind: "field",
+    section: "danger",
+    card: "system",
+    label: "a0 router listen address",
+    help: "host:port the a0 router binds to.",
+    keywords: ["listen", "router", "a0", "bind"],
+    storeKey: "infra.server",
+    apply: "restart",
+    input: "addr",
+    danger: true,
+    requiresRole: "admin",
+  },
+  {
+    id: "danger.mcp_listen",
+    kind: "field",
+    section: "danger",
+    card: "system",
+    label: "MCP listen address",
+    help: "host:port the MCP server binds to.",
+    keywords: ["listen", "mcp", "bind"],
+    storeKey: "infra.server",
+    apply: "restart",
+    input: "addr",
+    danger: true,
+    requiresRole: "admin",
+  },
+  {
+    id: "danger.db_path",
+    kind: "field",
+    section: "danger",
+    card: "system",
+    label: "State database path",
+    help: "SQLite file the daemon reads/writes all state to. Checked for a writable parent directory and (if a file already exists there) a real SQLite header — never opened directly, to avoid a second writer against a live database.",
+    keywords: ["database", "db", "sqlite", "state"],
+    storeKey: "infra.server",
+    apply: "restart",
+    input: "path",
+    danger: true,
+    requiresRole: "admin",
+  },
+  {
+    id: "danger.tts_unit",
+    kind: "field",
+    section: "danger",
+    card: "system",
+    label: "TTS systemd unit name",
+    help: "Base name (no .service suffix) of the TTS systemd unit forge starts/stops.",
+    keywords: ["tts", "unit", "systemd"],
+    storeKey: "infra.server",
+    apply: "restart",
+    input: "text",
+    danger: true,
+    requiresRole: "admin",
+  },
+  {
+    id: "danger.models_dir",
+    kind: "field",
+    section: "danger",
+    card: "system",
+    label: "Models directory",
+    help: "Directory containing GGUF model weight files.",
+    keywords: ["models", "dir", "path", "weights"],
+    storeKey: "infra.paths",
+    apply: "restart",
+    input: "path",
+    danger: true,
+    requiresRole: "admin",
+  },
+  {
+    id: "danger.sysconfig_dir",
+    kind: "field",
+    section: "danger",
+    card: "system",
+    label: "Sysconfig directory",
+    help: "Directory holding the per-slot systemd env/args files (e.g. forge-a1-env).",
+    keywords: ["sysconfig", "dir", "path", "env"],
+    storeKey: "infra.paths",
+    apply: "restart",
+    input: "path",
+    danger: true,
+    requiresRole: "admin",
+  },
+  {
+    id: "danger.state_dir",
+    kind: "field",
+    section: "danger",
+    card: "system",
+    label: "State directory",
+    help: "Directory the daemon writes runtime state to. Gets a real self-cleaning write probe (create-then-remove) on check, not just an existence check — the only honest way to answer \"is this writable by the daemon.\"",
+    keywords: ["state", "dir", "path", "writable"],
+    storeKey: "infra.paths",
+    apply: "restart",
+    input: "path",
+    danger: true,
+    requiresRole: "admin",
+  },
+  {
+    id: "danger.icons_dir",
+    kind: "field",
+    section: "danger",
+    card: "system",
+    label: "Icons directory",
+    help: "Directory for uploaded model/vendor icon assets. Optional — a warn, not an error, when unset.",
+    keywords: ["icons", "dir", "path"],
+    storeKey: "infra.paths",
+    apply: "restart",
+    input: "path",
+    danger: true,
+    requiresRole: "admin",
+  },
+  {
+    id: "danger.vulkan_bin",
+    kind: "field",
+    section: "danger",
+    card: "system",
+    label: "Vulkan llama-server binary",
+    help: "Path to the Vulkan-backend llama-server executable.",
+    keywords: ["vulkan", "binary", "llama-server"],
+    storeKey: "infra.paths",
+    apply: "restart",
+    input: "path",
+    danger: true,
+    requiresRole: "admin",
+  },
+  {
+    id: "danger.rocm_bin",
+    kind: "field",
+    section: "danger",
+    card: "system",
+    label: "ROCm llama-server binary",
+    help: "Path to the ROCm-backend llama-server executable (used for unified-memory models > ~63 GB).",
+    keywords: ["rocm", "binary", "llama-server"],
+    storeKey: "infra.paths",
+    apply: "restart",
+    input: "path",
+    danger: true,
+    requiresRole: "admin",
+  },
+  {
+    id: "danger.hostname",
+    kind: "field",
+    section: "danger",
+    card: "system",
+    label: "Tailscale hostname",
+    help: "This node's tailnet hostname. Warn-only cosmetic check (doesn't look like a DNS name), not a hard gate.",
+    keywords: ["tailscale", "hostname", "tailnet"],
+    storeKey: "infra.tailscale",
+    apply: "restart",
+    input: "text",
+    danger: true,
+    requiresRole: "admin",
+  },
+];
+
+// ── Security's embedded Danger Zone (forward-auth keys, Phase 7) ───────────
+// The two auth.provider.forward_auth_header.* keys — meaningless outside
+// the network_provider selector that references them (SecurityPanel's own
+// "Auth configuration" card), so they get a small embedded DangerZone
+// instance there rather than living in the standalone "danger" section.
+// No onCheck/dry-run endpoint exists for these — the CIDR lockout check
+// runs inline inside PUT /auth/config itself (auth_handlers.go's
+// checkTrustedCIDRLockout), so DangerZone's Save-is-the-check path (no
+// onCheck prop) is what renders this pair.
+
+export const SECURITY_DANGER_FIELDS: SettingRecord[] = [
+  {
+    id: "security.forward_auth.header_name",
+    kind: "field",
+    section: "security",
+    card: "forward-auth",
+    label: "Forward-auth header name",
+    help: "HTTP header the reverse proxy sets with the authenticated username, when network_provider is forward_auth_header.",
+    keywords: ["forward_auth_header", "header", "proxy"],
+    storeKey: "auth.provider.forward_auth_header.header_name",
+    apply: "restart",
+    input: "text",
+    danger: true,
+    requiresRole: "admin",
+  },
+  {
+    id: "security.forward_auth.trusted_cidrs",
+    kind: "field",
+    section: "security",
+    card: "forward-auth",
+    label: "Trusted CIDRs",
+    help: "Comma-separated CIDR ranges allowed to set the forward-auth header. The highest-value check in this app: a save that would exclude YOUR OWN address is refused outright, not just warned about — total lockout is not recoverable without direct database access.",
+    keywords: ["cidr", "trusted", "forward_auth_header", "lockout"],
+    storeKey: "auth.provider.forward_auth_header.trusted_cidrs",
+    apply: "restart",
+    input: "cidr",
+    danger: true,
+    requiresRole: "admin",
+  },
+];
+
+// ── Landmarks (Sprint 13, Sprint 12 Phase 8) ─────────────────────────────
+// Searchable-only records pointing INTO the near-verbatim panels (and at the
+// two promoted single-card sections), so search covers the whole Settings
+// surface without restructuring those panels. `anchor` is a DOM id added to
+// the target's eyebrow (same additive pattern as SecurityPanel's Phase 5
+// eyebrow ids) — except CatalogPanel, where the anchor is a sub-tab slug
+// that the existing tab machinery already consumes. storeKey/apply are
+// vestigial for landmarks (never rendered, never saved) but kept honest:
+// endpoint/domain-shaped where a real one exists, empty otherwise.
+
+export const LANDMARKS: SettingRecord[] = [
+  {
+    id: "landmark.general.daemon_strip",
+    kind: "landmark",
+    section: "general",
+    label: "Daemon status strip (read-only)",
+    help: "Version, listen addresses, and the restart-required banner — informational, not editable.",
+    keywords: ["version", "daemon", "status", "listen", "restart banner"],
+    storeKey: "",
+    apply: "immediate",
+  },
+  {
+    id: "landmark.providers.index",
+    kind: "landmark",
+    section: "providers",
+    label: "Providers & API keys",
+    help: "External providers routed via a0 — endpoint, write-only key, preset, health.",
+    keywords: ["provider", "api key", "deepseek", "aiand", "preset", "endpoint", "billing api"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "providers-keys",
+  },
+  {
+    id: "landmark.billing.currency",
+    kind: "landmark",
+    section: "billing",
+    label: "Currency",
+    help: "Display currency for every money figure in the PWA, plus the server-side FX source.",
+    keywords: ["currency", "fx", "exchange rate", "iso 4217", "display"],
+    storeKey: "billing.settings",
+    apply: "immediate",
+    anchor: "billing-currency",
+  },
+  {
+    id: "landmark.billing.cost",
+    kind: "landmark",
+    section: "billing",
+    label: "Cost & power",
+    help: "Electricity rate, overhead, PSU efficiency, power-chart ceiling — feeds the Dashboard's cost figures.",
+    keywords: ["cost", "power", "kwh", "electricity", "rate", "psu", "overhead", "watt"],
+    storeKey: "cost.settings",
+    apply: "immediate",
+    anchor: "billing-cost",
+  },
+  {
+    id: "landmark.routing.models",
+    kind: "landmark",
+    section: "routing",
+    label: "Model → provider routing",
+    help: "Which provider a0 presents for each model, and the priority order a failover walks.",
+    keywords: ["routing", "offering", "priority", "provider", "model", "failover", "preferred"],
+    storeKey: "routing",
+    apply: "immediate",
+    anchor: "routing-models",
+  },
+  {
+    id: "landmark.routing.preview",
+    kind: "landmark",
+    section: "routing",
+    label: "Routing map",
+    help: "Read-only provider→model dendrogram — link thickness encodes priority, color encodes active vs disabled.",
+    keywords: ["routing", "map", "tree", "dendrogram", "provider", "model", "link"],
+    storeKey: "routing",
+    apply: "immediate",
+    anchor: "routing-preview",
+  },
+  {
+    id: "landmark.compressor.mode",
+    kind: "landmark",
+    section: "routing",
+    label: "Compressor routing mode",
+    help: "Global passthrough toggle — bypass Compressor compression for every proxy, live, no teardown.",
+    keywords: ["compressor", "passthrough", "bypass", "routing mode"],
+    storeKey: "compressor",
+    apply: "immediate",
+    anchor: "compressor-mode",
+  },
+  {
+    id: "landmark.compressor.proxies",
+    kind: "landmark",
+    section: "routing",
+    label: "Compressor compression proxies",
+    help: "Per-proxy compression on/off, restart/teardown, tokens saved.",
+    keywords: ["proxy", "compression", "restart", "teardown", "tokens saved", "service"],
+    storeKey: "compressor",
+    apply: "immediate",
+    anchor: "compressor-proxies",
+  },
+  {
+    id: "landmark.scheduling.live",
+    kind: "landmark",
+    section: "scheduling",
+    label: "Scheduler tunables (live)",
+    help: "The running scheduler.config — idle unload, small-job threshold, priority jump cap, reservation window. Mirrored on the Scheduling page.",
+    keywords: ["scheduler", "tunables", "idle unload", "priority", "reservation", "live"],
+    storeKey: "scheduler.config",
+    apply: "live",
+    anchor: "scheduling-live",
+  },
+  {
+    id: "landmark.benchmarks.index",
+    kind: "landmark",
+    section: "benchmarks",
+    label: "Benchmarks & Profiling",
+    help: "Curated performance/capability scores grouped by config — SWE-bench, GPQA, HLE, AIME, decode/prefill TPS — alongside each config's own measured profile.",
+    keywords: ["benchmark", "swe-bench", "gpqa", "hle", "aime", "score", "metric", "capability", "tps"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "benchmarks",
+  },
+  {
+    // Phase 8 (pre-release feedback sprint): profiling folded into the
+    // benchmarks section — see settings/panels/Benchmarks.tsx. anchor
+    // matches ProfileRunCard's always-rendered wrapper id.
+    id: "landmark.profiling.index",
+    kind: "landmark",
+    section: "benchmarks",
+    label: "Profiling",
+    help: "Destructive live profiling runs — depth sweep over context sizes on a real slot, evicting whatever is loaded.",
+    keywords: ["profiling", "profile", "depth sweep", "context size", "destructive"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "profiling-runs",
+  },
+  {
+    id: "landmark.danger.restart",
+    kind: "landmark",
+    section: "danger",
+    label: "Restart daemon",
+    help: "Applies every restart-mode change immediately via D-Bus — does not unload models, drops in-flight a0 requests and SSE subscribers.",
+    keywords: ["restart", "reboot", "daemon", "systemctl", "apply"],
+    storeKey: "",
+    apply: "restart",
+    anchor: "danger-restart",
+  },
+];
+
+// Catalog landmarks — one per CatalogPanel sub-tab. `anchor` is the tab
+// slug itself: Settings.tsx's existing isCatalogSubTab machinery switches
+// the controlled tab, so no DOM id is involved (getElementById simply finds
+// nothing and the scroll step no-ops).
+export const CATALOG_LANDMARKS: SettingRecord[] = [
+  {
+    id: "landmark.catalog.configs",
+    kind: "landmark",
+    section: "catalog",
+    label: "Catalog · Configs",
+    help: "Local launch recipes — model + variant + llama.cpp flags (extra_args, ctx, parallel…).",
+    keywords: ["config", "launch recipe", "gguf", "extra args", "llama-server", "flags"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "configs",
+  },
+  {
+    id: "landmark.catalog.offerings",
+    kind: "landmark",
+    section: "catalog",
+    label: "Catalog · Offerings",
+    help: "Remote model offerings, per-provider.",
+    keywords: ["offering", "remote", "per-provider"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "offerings",
+  },
+  {
+    id: "landmark.catalog.models",
+    kind: "landmark",
+    section: "catalog",
+    label: "Catalog · Models",
+    help: "Parent models — weights, capabilities, modalities, logos.",
+    keywords: ["model", "weights", "capabilities", "modalities", "logo"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "models",
+  },
+  {
+    id: "landmark.catalog.taxonomy",
+    kind: "landmark",
+    section: "catalog",
+    label: "Catalog · Model Family",
+    help: "Genealogy/family taxonomy — names and icon inheritance hierarchy.",
+    keywords: ["family", "genealogy", "taxonomy", "lineage", "icon inheritance"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "taxonomy",
+  },
+  {
+    id: "landmark.catalog.notes",
+    kind: "landmark",
+    section: "catalog",
+    label: "Catalog · Notes",
+    help: "Freeform operator notes attached to catalog entries.",
+    keywords: ["note", "notes", "memo"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "notes",
+  },
+  {
+    id: "landmark.catalog.services",
+    kind: "landmark",
+    section: "catalog",
+    label: "Catalog · Services",
+    help: "Managed always-on services (embeddings, STT, TTS) and their unit state.",
+    keywords: ["service", "managed", "tts", "stt", "embedding", "systemd"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "services",
+  },
+];
+
+// Security landmarks — one per SecurityPanel eyebrow. The anchors are the
+// existing Phase 5 eyebrow ids (security-policy, security-auth-config, …),
+// present in every render branch of that panel.
+export const SECURITY_LANDMARKS: SettingRecord[] = [
+  {
+    id: "landmark.security.policy",
+    kind: "landmark",
+    section: "security",
+    label: "Access policy",
+    help: "The resource → minimum-factor matrix — which actions need password, TOTP, or passkey assurance.",
+    keywords: ["policy", "assurance", "step-up", "matrix", "factor", "role", "permission"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "security-policy",
+  },
+  {
+    id: "landmark.security.auth_config",
+    kind: "landmark",
+    section: "security",
+    label: "Auth configuration",
+    help: "Network provider selection (tailscale / forward-auth header) and the embedded forward-auth Danger Zone.",
+    keywords: ["auth", "network provider", "tailscale", "forward auth", "header"],
+    storeKey: "auth.provider",
+    apply: "restart",
+    anchor: "security-auth-config",
+  },
+  {
+    id: "landmark.security.api_keys",
+    kind: "landmark",
+    section: "security",
+    label: "API keys",
+    help: "Mint/revoke dashboard bearer tokens (sk-forge-*).",
+    keywords: ["api key", "mint", "bearer", "revoke", "token", "sk-forge"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "security-api-keys",
+  },
+  {
+    id: "landmark.security.identity_links",
+    kind: "landmark",
+    section: "security",
+    label: "Identity links",
+    help: "Network identity → dashboard account links.",
+    keywords: ["identity", "link", "account", "network"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "security-identity-links",
+  },
+  {
+    id: "landmark.security.totp",
+    kind: "landmark",
+    section: "security",
+    label: "TOTP enrollment",
+    help: "Authenticator-app (time-based one-time password) enrollment.",
+    keywords: ["totp", "authenticator", "2fa", "mfa"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "security-totp",
+  },
+  {
+    id: "landmark.security.webauthn",
+    kind: "landmark",
+    section: "security",
+    label: "Passkeys (WebAuthn)",
+    help: "Passkey / hardware-key enrollment — the L2 assurance factor.",
+    keywords: ["passkey", "webauthn", "fido2", "hardware key"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "security-webauthn",
+  },
+  {
+    id: "landmark.security.recovery",
+    kind: "landmark",
+    section: "security",
+    label: "Recovery codes",
+    help: "One-time recovery codes for lockout — view/regenerate.",
+    keywords: ["recovery", "codes", "backup", "lockout"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "security-recovery-codes",
+  },
+];
+
+// The full search index, flattened in sidebar order (SETTINGS_SECTIONS'
+// order, not declaration order) so results read top-to-bottom the way the
+// page does. ~90 records — a plain filter is instant, no memo machinery
+// beyond one useMemo in the component (see SettingsSearch.tsx).
+export const SETTINGS_INDEX: SettingRecord[] = SETTINGS_SECTIONS.flatMap((s) =>
+  [
+    ...GENERAL_FIELDS,
+    ...ROUTING_FIELDS,
+    ...MONITORING_FIELDS,
+    ...SMITH_FIELDS,
+    ...SCHEDULING_FIELDS,
+    ...DANGER_FIELDS,
+    ...SECURITY_DANGER_FIELDS,
+    ...LANDMARKS,
+    ...CATALOG_LANDMARKS,
+    ...SECURITY_LANDMARKS,
+  ].filter((r) => r.section === s.key),
+);

@@ -1,0 +1,32 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Schema v12 (build-backend explicit field). Fixes a real production bug:
+-- backend (vulkan/rocm/vllm) was never stored explicitly anywhere in the
+-- catalog. It was derived at read time from Build.name containing "ROCM"
+-- (go/cmd/foundryd/merged_config.go's backendFromEngine), and silently
+-- defaulted to "vulkan" whenever a Config had no Build at all (build_id NULL
+-- — the common case, since migrate-v4 only ever created a Build when a mode
+-- had a custom llama_bin override). This caused a real incident: nemotron
+-- (backend='rocm' in foundryd.toml, no custom llama_bin) got the vulkan
+-- binary launched at runtime, OOM'd past Vulkan's ~63GB ceiling, and
+-- eventually took the host down with a kernel panic.
+--
+-- Adds an explicit, required backend column to builds — the natural owner
+-- of this fact (a Build already IS "a specific compiled version", which is
+-- exactly what determines which GPU backend it needs). NOT NULL with a
+-- default of '' (not nullable-then-tightened) because SQLite allows adding a
+-- NOT NULL column with a CHECK constraint via a single ADD COLUMN as long as
+-- the default value itself satisfies the CHECK — no table rebuild needed.
+-- Existing rows get '' (still meaning "not yet classified"); application
+-- code (merged_config.go) treats '' the same as "missing" and refuses to
+-- guess, exactly like it already treats build_id=0. See
+-- `foundryd repair-catalog-backend` for backfilling '' rows on an existing
+-- deployment (a one-time, human-run repair — deliberately NOT part of this
+-- migration, so the automatic migration path never depends on reading
+-- foundryd.toml, which is being phased out as the model/mode source of
+-- truth).
+--
+-- configs.build_id stays nullable in this migration (existing behavior) —
+-- tightening it to NOT NULL is a follow-up migration, gated on the repair
+-- above actually being run and verified clean on every deployment.
+ALTER TABLE builds ADD COLUMN backend TEXT NOT NULL DEFAULT ''
+    CHECK (backend IN ('vulkan', 'rocm', 'vllm', ''));

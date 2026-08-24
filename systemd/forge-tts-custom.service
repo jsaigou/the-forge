@@ -1,0 +1,30 @@
+# /etc/systemd/system/forge-tts-custom.service
+# Resident tts-server for the customvoice model (the hot path: aiden/ryan and
+# any customvoice synthesis). Kept GPU-resident so forge-tts on 8082 can proxy
+# to it with no per-call model reload. The Go service falls back to the CLI
+# backend automatically if this instance is down.
+#
+# To run voicedesign/base resident too, clone this unit (ports 8092/8093) and
+# point FORGE_TTS_SERVER_DESIGN / _BASE at them in
+# /opt/forge/tts_voices/.internal_token_env.
+[Unit]
+Description=Forge — TTS resident customvoice (tts-server, port 8091)
+After=network.target
+
+[Service]
+Type=simple
+User=testuser
+Group=testuser
+WorkingDirectory=/opt/forge
+ExecStart=/opt/forge/qwentts.cpp/build/tts-server \
+  --model /opt/forge/qwentts.cpp/models/qwen-talker-1.7b-customvoice-Q8_0.gguf \
+  --codec /opt/forge/qwentts.cpp/models/qwen-tokenizer-12hz-Q8_0.gguf \
+  --host 127.0.0.1 --port 8091 --alias customvoice
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-tts-custom
+
+[Install]
+WantedBy=multi-user.target

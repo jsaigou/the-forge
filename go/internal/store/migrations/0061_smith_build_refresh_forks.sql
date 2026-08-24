@@ -1,0 +1,40 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Schema v61 — smith.build_refresh.forks seam (open-source-readiness
+-- follow-up to the Sprint 6 build_refresh eval,
+-- .sweep/build-refresh-eval-2026-08-20.md §"Open-source readiness audit"
+-- finding 4).
+--
+-- The build_refresh procedure's fork registry used to be a hardcoded Go map
+-- (buildRefreshForkRegistry) — deployment-specific paths and cmake flags
+-- compiled into the binary, unusable on any other install without code
+-- changes.
+--
+-- TWO-LAYER KNOWLEDGE ARCHITECTURE (operator directive 2026-08-21): product
+-- knowledge ships; live-environment data never ships. This migration
+-- therefore creates the seam EMPTY — no deployment recipes in source. Each
+-- install imports its own reviewed fork recipes from an operator-maintained
+-- local file via `foundryd smith import-local <file>`
+-- (internal/smith/local_seed.go; docs/examples/smith-local-seed.example.json
+-- shows the shape with synthetic values). An empty registry is the intended
+-- posture for trees nobody has reviewed yet: every build_refresh
+-- procedurization fails closed at resolution rather than guessing flags.
+--
+-- Entry shape (imported, not seeded): {"source_ref", "remote",
+-- "upstream_ref", "backends": {backend: {"backend", "configure_flags"[],
+-- "lib_dir_substring"}}, "representative_config": {backend: config-name}}.
+-- The procedure's safety is unchanged — propose→approve gating, the promote
+-- checkpoint, and resolveBuildRefreshFork's fail-closed cross-checks
+-- (tracked-binary agreement, gitRootAllowed, upstream_ref agreement) all
+-- apply to whatever the imported registry says.
+--
+-- Recipe-review lessons from the original (first deployment's) registry
+-- (carry these into
+-- ANY deployment's recipes — they are the mechanism knowledge, while the
+-- concrete flag values are deployment data): the $ORIGIN RPATH literal is
+-- ONE argv element (the procedure has no shell layer); poolside-class forks
+-- may still require -DGGML_HIP_ROCWMMA_FATTN=ON where upstream removed it
+-- elsewhere; read flags off each tree's own working CMakeCache.txt, never
+-- guess; lib_dir_substring guards the wrong-ROCm-root silent-nothing trap.
+
+INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES
+    ('smith.build_refresh.forks', '[]', strftime('%s', 'now'));

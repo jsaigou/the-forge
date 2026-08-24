@@ -1,0 +1,298 @@
+{
+  "_comment": "smith P4 knowledge-base curation manifest (docs/v5-smith.md \u00a74.7). Each entry is one embedded chunk, extracted from the named repo doc by scripts/kb-sync.go (invoked via `go generate ./internal/smith/...`). Slugs are explicit and stable \u2014 checks.go's KBRefs name them directly and must never break on a doc reword. mode: 'heading' captures from a `#`/`##`/`###` heading line to the next heading of the same-or-shallower level; 'line' captures the single physical line containing `anchor` (pitfalls.md's bullets are one line each); 'paragraph' captures the blank-line-delimited block containing `anchor`. category is free-text metadata, loosely following the check categories in checks.go's CheckEnv doc (slots|memory|gpu|network|storage|daemons|services|config) plus a few KB-only categories (build|model-selection|compressor).",
+  "chunks": [
+    {
+      "slug": "gtt-ceiling",
+      "doc": "pitfalls",
+      "source": "docs/pitfalls.md",
+      "category": "memory",
+      "mode": "heading",
+      "anchor": "ROCm & GTT Memory (Strix Halo APU)"
+    },
+    {
+      "slug": "backend-selection",
+      "doc": "pitfalls",
+      "source": "docs/pitfalls.md",
+      "category": "gpu",
+      "mode": "heading",
+      "anchor": "Backend Selection: Vulkan vs ROCm"
+    },
+    {
+      "slug": "hybrid-recurrent-reprocessing",
+      "doc": "pitfalls",
+      "source": "docs/pitfalls.md",
+      "category": "config",
+      "mode": "heading",
+      "anchor": "Hybrid/Recurrent Models Force Full Prompt Reprocessing Every Turn (llama.cpp, not deployment-specific)"
+    },
+    {
+      "slug": "vllm-hipmalloc-ceiling",
+      "doc": "pitfalls",
+      "source": "docs/pitfalls.md",
+      "category": "memory",
+      "mode": "heading",
+      "anchor": "vLLM on Strix Halo APU \u2014 PyTorch `hipMalloc` Ceiling"
+    },
+    {
+      "slug": "inference-hang",
+      "doc": "pitfalls",
+      "source": "docs/pitfalls.md",
+      "category": "gpu",
+      "mode": "heading",
+      "anchor": "Performance Monitoring"
+    },
+    {
+      "slug": "service-reliability",
+      "doc": "pitfalls",
+      "source": "docs/pitfalls.md",
+      "category": "services",
+      "mode": "heading",
+      "anchor": "Service Reliability"
+    },
+    {
+      "slug": "orphaned-slot-unit",
+      "doc": "pitfalls",
+      "source": "docs/pitfalls.md",
+      "category": "slots",
+      "mode": "line",
+      "anchor": "own wait loop is capped at 60s, not `TimeoutStopSec`'s 300s",
+      "title": "A slot can stay occupied after systemd reports the unit inactive"
+    },
+    {
+      "slug": "silent-context-reduction",
+      "doc": "pitfalls",
+      "source": "docs/pitfalls.md",
+      "category": "config",
+      "mode": "line",
+      "anchor": "Contiguous Allocation:",
+      "title": "Contiguous GTT allocation can silently reduce n_ctx"
+    },
+    {
+      "slug": "debugging-gotchas",
+      "doc": "pitfalls",
+      "source": "docs/pitfalls.md",
+      "category": "network",
+      "mode": "heading",
+      "anchor": "Debugging Gotchas"
+    },
+    {
+      "slug": "parallel-context-split-incident",
+      "doc": "modes",
+      "source": "docs/modes.md",
+      "category": "config",
+      "mode": "heading",
+      "anchor": "The `--parallel` context-splitting incident (2026-07-23)"
+    },
+    {
+      "slug": "gemma4-31b-mtp-oom-resolved",
+      "doc": "modes",
+      "source": "docs/modes.md",
+      "category": "memory",
+      "mode": "heading",
+      "anchor": "`gemma4-31b-mtp` OOMs at full context \u2014 RESOLVED (2026-07-29)"
+    },
+    {
+      "slug": "slot-rename-a1-a2",
+      "doc": "modes",
+      "source": "docs/modes.md",
+      "category": "slots",
+      "mode": "heading",
+      "anchor": "Slot rename: `primary`\u2192`a1`, `secondary`\u2192`a2` (2026-07-29)"
+    },
+    {
+      "slug": "critical-runtime-flags",
+      "doc": "modes",
+      "source": "docs/modes.md",
+      "category": "config",
+      "mode": "heading",
+      "anchor": "Critical Runtime Flags"
+    },
+    {
+      "slug": "rocm-rpath-bug",
+      "doc": "diagnosis-trial",
+      "source": "docs/diagnosis-trial.md",
+      "category": "build",
+      "mode": "heading",
+      "anchor": "4. The real bug: CMake's automatic RPATH doesn't cover transitive dependencies"
+    },
+    {
+      "slug": "rocm-flag-audit",
+      "doc": "diagnosis-trial",
+      "source": "docs/diagnosis-trial.md",
+      "category": "build",
+      "mode": "heading",
+      "anchor": "7. Post-upgrade flag audit: what's now obsolete vs. what's still load-bearing"
+    },
+    {
+      "slug": "rocm-live-validation",
+      "doc": "diagnosis-trial",
+      "source": "docs/diagnosis-trial.md",
+      "category": "build",
+      "mode": "heading",
+      "anchor": "8. Live validation: `HSA_ENABLE_SDMA` removal"
+    },
+    {
+      "slug": "rocm-reusable-lessons",
+      "doc": "diagnosis-trial",
+      "source": "docs/diagnosis-trial.md",
+      "category": "build",
+      "mode": "heading",
+      "anchor": "Reusable lessons"
+    },
+    {
+      "slug": "the-1.2x-rule",
+      "doc": "modelselection",
+      "source": "modelselection.md",
+      "category": "model-selection",
+      "mode": "heading",
+      "anchor": "The 1.2\u00d7 Rule"
+    },
+    {
+      "slug": "kv-cache-grows-with-context",
+      "doc": "modelselection",
+      "source": "modelselection.md",
+      "category": "model-selection",
+      "mode": "heading",
+      "anchor": "KV Cache Grows with Context"
+    },
+    {
+      "slug": "dense-model-quant-strategy",
+      "doc": "modelselection",
+      "source": "modelselection.md",
+      "category": "model-selection",
+      "mode": "heading",
+      "anchor": "Dense Models (Gemma 27B, Llama 70B)"
+    },
+    {
+      "slug": "moe-model-quant-strategy",
+      "doc": "modelselection",
+      "source": "modelselection.md",
+      "category": "model-selection",
+      "mode": "heading",
+      "anchor": "MoE Models (Qwen3.6-35B-A3B, Nemotron-3-Super-120B-A12B)"
+    },
+    {
+      "slug": "hybrid-ssm-attention-quant-strategy",
+      "doc": "modelselection",
+      "source": "modelselection.md",
+      "category": "model-selection",
+      "mode": "heading",
+      "anchor": "Hybrid SSM/Attention (Qwen3.6, Nemotron Super)"
+    },
+    {
+      "slug": "mtp-when-it-works",
+      "doc": "modelselection",
+      "source": "modelselection.md",
+      "category": "model-selection",
+      "mode": "heading",
+      "anchor": "When MTP works"
+    },
+    {
+      "slug": "mtp-when-it-fails",
+      "doc": "modelselection",
+      "source": "modelselection.md",
+      "category": "model-selection",
+      "mode": "heading",
+      "anchor": "When MTP fails"
+    },
+    {
+      "slug": "amd-rocm-strix-halo",
+      "doc": "modelselection",
+      "source": "modelselection.md",
+      "category": "gpu",
+      "mode": "heading",
+      "anchor": "AMD (ROCm) \u2014 Strix Halo APU"
+    },
+    {
+      "slug": "picking-a-quantization-level",
+      "doc": "modelselection",
+      "source": "modelselection.md",
+      "category": "model-selection",
+      "mode": "heading",
+      "anchor": "Picking a quantization level"
+    },
+    {
+      "slug": "red-flags-before-you-download",
+      "doc": "modelselection",
+      "source": "modelselection.md",
+      "category": "model-selection",
+      "mode": "heading",
+      "anchor": "Red flags before you download"
+    },
+    {
+      "slug": "llamacpp-build-status",
+      "doc": "research",
+      "source": "research.md",
+      "category": "build",
+      "mode": "heading",
+      "anchor": "0. llama.cpp Build Status (updated 2026-05-19)"
+    },
+    {
+      "slug": "qwen36-mtp-results",
+      "doc": "research",
+      "source": "research.md",
+      "category": "model-selection",
+      "mode": "heading",
+      "anchor": "1. Qwen3.6-35B-A3B \u2014 MTP Results"
+    },
+    {
+      "slug": "compressor-problem",
+      "doc": "compressor-topology",
+      "source": "docs/v5-headroom-topology.md",
+      "category": "compressor",
+      "mode": "heading",
+      "anchor": "1. Problem"
+    },
+    {
+      "slug": "compressor-target-topology",
+      "doc": "compressor-topology",
+      "source": "docs/v5-headroom-topology.md",
+      "category": "compressor",
+      "mode": "heading",
+      "anchor": "4. Target topology: \"one proxy per scope\""
+    },
+    {
+      "slug": "compressor-ssrf-hardening",
+      "doc": "compressor-topology",
+      "source": "docs/v5-headroom-topology.md",
+      "category": "network",
+      "mode": "heading",
+      "anchor": "5b. Header-injection / SSRF hardening on `x-compress-base-url`"
+    },
+    {
+      "slug": "compressor-key-seams",
+      "doc": "compressor-topology",
+      "source": "docs/v5-headroom-topology.md",
+      "category": "compressor",
+      "mode": "heading",
+      "anchor": "6. Key seams (files touched)"
+    },
+    {
+      "slug": "compressor-black-hole",
+      "doc": "pitfalls",
+      "source": "docs/v5-headroom-topology.md",
+      "category": "compressor",
+      "mode": "paragraph",
+      "anchor": "instead of silently blackholing every",
+      "title": "A host reboot can leave every Compressor proxy dead while a0 reports healthy"
+    },
+    {
+      "slug": "tailscale-mesh",
+      "doc": "infrastructure",
+      "source": "docs/infrastructure.md",
+      "category": "network",
+      "mode": "paragraph",
+      "anchor": "settings key (one JSON entry",
+      "title": "Tailscale mesh \u2014 inventory settings and provisioning"
+    },
+    {
+      "slug": "comfyui-pruning-guardrails",
+      "doc": "smith",
+      "source": "docs/v5-smith.md",
+      "category": "config",
+      "mode": "paragraph",
+      "anchor": "Four refusal guardrails, checked in order",
+      "title": "ComfyUI pruning \u2014 the four refusal guardrails"
+    }
+  ]
+}

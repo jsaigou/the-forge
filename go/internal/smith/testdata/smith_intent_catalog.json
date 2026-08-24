@@ -1,0 +1,1407 @@
+{
+  "version": 1,
+  "sprint": "R",
+  "generated": "2026-08-15",
+  "description": "Sprint R intent catalog fixture. Family x entity coverage matrix for the smith fast-path classifier (docs/v5-smith-experience.md s2.7). Every answerable pair has a named live source; gaps are explicit. S2's coverage-matrix test instantiates families from live config at runtime and pins the EXPECTED coverage against this fixture so a newly tracked entity missing from the classifier fails a test instead of silently going unaskable. Entities mined from: checks.go registry (16 checks), propose.go (proposers + servicePortUnit), execute.go (restartAllowed allowlist), binaries.go + smith.binaries.tracked, the KB corpus (mesh inventory doc, corpus entries, pitfalls), the deployment DB (smith_findings, smith_actions, smith_investigations, notifications), and live seam probes (journalctl as the daemon operating user, tailscale version CLI, ComfyUI /system_stats). Reachability mesh entities follow a SYNTHETIC two-host example deployment (host 'alpha', peer 'beta') — two-layer knowledge architecture: real inventories are deployment data imported via smith.mesh.services, never fixtures.",
+  "families": [
+    "health",
+    "version",
+    "quantity",
+    "reachability",
+    "listing",
+    "history",
+    "logs",
+    "kb",
+    "action"
+  ],
+  "family_templates": {
+    "health": "is {thing} healthy / up / responding / working?",
+    "version": "what version of {binary} is running / is it up to date?",
+    "quantity": "how much {resource} is free / used?",
+    "reachability": "is {endpoint} reachable / on the tailnet / what's its address?",
+    "listing": "what's pending / degraded / in the backlog?",
+    "history": "how long has {finding} been happening / how often?",
+    "logs": "what does the error log show?",
+    "kb": "why does {pitfall} happen / what's the recipe for {x}?",
+    "action": "restart / fix {thing}, run a check-up"
+  },
+  "entries": [
+    {
+      "family": "health",
+      "entity": "comfyui",
+      "phrasings": [
+        "is comfyui healthy?",
+        "is comfyui up?",
+        "is comfyui responding?",
+        "comfyui working?"
+      ],
+      "source": "check:comfyui_health (live runSelected - port dial + unit active state)",
+      "answerable": true,
+      "notes": "Live baseline (2026-08-15): ComfyUI DOWN - the comfyui unit inactive, port 3001 refused. comfyui_health fires info 'unreachable (unit_active=false, port_up=false)'. Fast path must report this specific state, not a generic dump."
+    },
+    {
+      "family": "health",
+      "entity": "compressor",
+      "phrasings": [
+        "is compressor responding?",
+        "is compressor healthy?",
+        "are the compressor proxies up?"
+      ],
+      "source": "check:headroom_health (live runSelected - per-proxy active + port dial; KBRefs pitfalls:compressor-black-hole)",
+      "answerable": true,
+      "notes": "Live: all compressor proxies healthy at drill time. headroom_health has fired ok only. The black-hole failure mode (reboot leaves proxies dead while a0 reports healthy) is the canonical pitfall this check reproduces."
+    },
+    {
+      "family": "health",
+      "entity": "a0",
+      "phrasings": [
+        "is a0 working correctly?",
+        "is a0 up?",
+        "is a0 healthy?",
+        "is the router up?"
+      ],
+      "source": "check:a0_reachability (live runSelected - loopback /healthz probe on router port)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "health",
+      "entity": "a1",
+      "phrasings": [
+        "is a1 up?",
+        "is the primary up?",
+        "is a1 healthy?"
+      ],
+      "source": "sched.Status slot state (live) + slot_agreement check",
+      "answerable": true,
+      "notes": "Live: a1 loaded with qwen36-mtp (smith's own brain). 'Is A1 up?' generalizes to every slot a1-a4."
+    },
+    {
+      "family": "health",
+      "entity": "a2",
+      "phrasings": [
+        "is a2 up?",
+        "is the secondary up?"
+      ],
+      "source": "sched.Status slot state (live)",
+      "answerable": true,
+      "notes": "Entity exists whether or not the bay is populated; fast path reports 'empty' honestly when sched shows no mode."
+    },
+    {
+      "family": "health",
+      "entity": "a3",
+      "phrasings": [
+        "is a3 up?"
+      ],
+      "source": "sched.Status slot state (live)",
+      "answerable": true,
+      "notes": "A3/A4 are not exposed as named tailnet services but ARE scheduler slots - askable via sched.Status."
+    },
+    {
+      "family": "health",
+      "entity": "a4",
+      "phrasings": [
+        "is a4 up?"
+      ],
+      "source": "sched.Status slot state (live)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "health",
+      "entity": "embedding",
+      "phrasings": [
+        "is embedding up?",
+        "is the embedding service healthy?"
+      ],
+      "source": "check:always_on_ports (live runSelected, cfg.Ports['embedding']=8083) + servicePortUnit map",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "health",
+      "entity": "stt",
+      "phrasings": [
+        "is stt up?",
+        "is speech-to-text working?",
+        "is transcription up?"
+      ],
+      "source": "check:always_on_ports (cfg.Ports['stt']=8084) + servicePortUnit['stt']='forge-stt'",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "health",
+      "entity": "tts",
+      "phrasings": [
+        "is tts up?",
+        "is text-to-speech working?"
+      ],
+      "source": "check:always_on_ports (cfg.Ports + cfg.Server.TTSUnit) + servicePortUnit",
+      "answerable": true,
+      "notes": "tts unit name comes from cfg.Server.TTSUnit (not a static servicePortUnit key) - verify the always_on_ports cfg.Ports entry exists."
+    },
+    {
+      "family": "health",
+      "entity": "aligner",
+      "phrasings": [
+        "is the aligner up?",
+        "is aligner healthy?"
+      ],
+      "source": "check:always_on_ports (cfg.Ports['aligner']) + servicePortUnit['aligner']='forge-aligner'",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "health",
+      "entity": "forge",
+      "phrasings": [
+        "is forge healthy?",
+        "is the daemon ok?",
+        "is the db ok?"
+      ],
+      "source": "check:forge_self (live runSelected - PRAGMA quick_check + foreign_key_check)",
+      "answerable": true,
+      "notes": "Live: 3 info findings (known FK violations in compatibilities - surfaced, never auto-fixed). Fast path should surface these honestly without alarming."
+    },
+    {
+      "family": "health",
+      "entity": "brain",
+      "phrasings": [
+        "is smith's brain resolvable?",
+        "is the reasoning brain configured?",
+        "is a model loaded for smith?"
+      ],
+      "source": "check:brain_resolvable (live runSelected - resolves smith.model to local slot or remote offering)",
+      "answerable": true,
+      "notes": "Live: smith.model=qwen36-mtp, resolves to local slot A1. 'deterministic_only' brain state is the warn case the fast path reports as 'working without a model right now'."
+    },
+    {
+      "family": "health",
+      "entity": "gpu",
+      "phrasings": [
+        "is the gpu ok?",
+        "is there a gpu hang?",
+        "are there hang indicators?"
+      ],
+      "source": "check:gpu_hang (live runSelected - collector INFERENCE_HANG alerts + per-slot stall metrics; KBRefs pitfalls:inference-hang)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "health",
+      "entity": "search",
+      "phrasings": [
+        "is search working?",
+        "is web search up?"
+      ],
+      "source": "web.Providers status map (live - provider health from the P5 web-research chain)",
+      "answerable": true,
+      "notes": "Distinct from 'is the internet reachable' (seed #6): search = the searcher/fetcher provider chain health; internet = the direct provider probe."
+    },
+    {
+      "family": "health",
+      "entity": "internet",
+      "phrasings": [
+        "are you able to reach the internet?",
+        "do you have internet?",
+        "can smith reach the web?"
+      ],
+      "source": "web direct provider probe (live - the 'direct' fetcher in web/)",
+      "answerable": true,
+      "notes": "Seed #6. Live: smith.web.enabled=true (already on). The probe is a live outbound call, so the fast path answers 'checked just now'."
+    },
+    {
+      "family": "version",
+      "entity": "llama.cpp-vulkan",
+      "phrasings": [
+        "what version of llama.cpp is running?",
+        "is llama.cpp up to date?",
+        "does the vulkan build lag its tree?"
+      ],
+      "source": "check:binary_versions (live runSelected - installed --version vs source-tree HEAD via gitTreeVersion)",
+      "answerable": true,
+      "notes": "Live: STALE - installed 8bf3c1130 vs source 04b2b72c (1 of 5 tracked binaries lagging). smith.binaries.tracked name='llama.cpp (vulkan)' (path/source are deployment data read from the setting). proposeRebuildRunbook fires a runbook for this."
+    },
+    {
+      "family": "version",
+      "entity": "llama.cpp-puzzle",
+      "phrasings": [
+        "is the puzzle build up to date?"
+      ],
+      "source": "check:binary_versions (live runSelected)",
+      "answerable": true,
+      "notes": "Tracked binary 'llama.cpp (puzzle)' (path from smith.binaries.tracked). Family auto-grows when smith.binaries.tracked changes."
+    },
+    {
+      "family": "version",
+      "entity": "llama.cpp-kintsugi",
+      "phrasings": [
+        "is the kintsugi build up to date?"
+      ],
+      "source": "check:binary_versions (live runSelected)",
+      "answerable": true,
+      "notes": "Tracked binary 'llama.cpp (kintsugi)' (path from smith.binaries.tracked)."
+    },
+    {
+      "family": "version",
+      "entity": "llama.cpp-poolside",
+      "phrasings": [
+        "is the poolside build up to date?"
+      ],
+      "source": "check:binary_versions (live runSelected)",
+      "answerable": true,
+      "notes": "Tracked binary 'llama.cpp (poolside)' (path from smith.binaries.tracked). NOTE: the poolside fork MUST be built WITH -DGGML_HIP_ROCWMMA_FATTN=ON (pitfalls.md s1) - a version question may surface this build-flag nuance."
+    },
+    {
+      "family": "version",
+      "entity": "headroom-ai",
+      "phrasings": [
+        "what version of headroom-ai is running?",
+        "is headroom-ai up to date?"
+      ],
+      "source": "check:binary_versions (live runSelected - python_pkg kind; path=/opt/compressor/bin/compressor)",
+      "answerable": true,
+      "notes": "Seed #13. Tracked binary, kind=python_pkg, no source_ref (no source tree to compare - so 'up to date' is partial: 'what version' answerable, 'is it up to date' has no comparison source). The fast path reports the installed version; 'up to date' honest-gap unless a source_ref is added to smith.binaries.tracked."
+    },
+    {
+      "family": "version",
+      "entity": "tailscale",
+      "phrasings": [
+        "what version of tailnet is running?",
+        "what version of tailscale is running?",
+        "is tailscale up to date?"
+      ],
+      "source": "`tailscale version` CLI (Sprint R verified seam - outputs e.g. '1.102.2')",
+      "answerable": true,
+      "notes": "Seed #14. Sprint R verdict: version source = `tailscale version` CLI (first line). NOT yet wired into a check or Deps seam - S2 adds this read (tailscale_peers check already uses `tailscale status --json`, so a tailscale CLI seam exists in the codebase). 'Is it up to date' is a GAP: no upstream-release comparison seam (deliberately descoped per binaries.go comment on upstream tracking). Live version observed: 1.102.2."
+    },
+    {
+      "family": "version",
+      "entity": "comfyui",
+      "phrasings": [
+        "is comfyui up to date?",
+        "what version of comfyui is running?"
+      ],
+      "source": "",
+      "answerable": false,
+      "notes": "GAP (seed #2). No reliable version seam: the ComfyUI install dir is NOT a git repo (git describe fails), and /system_stats (which returns a ComfyUI version field when up) was UNVERIFIABLE live - ComfyUI was DOWN during Sprint R (port 3001 refused, the comfyui unit inactive). Even when up, /system_stats gives a version but there is no source tree or upstream-release seam to compare against (upstream tracking deliberately descoped, binaries.go). So 'what version' is partially answerable (if ComfyUI running); 'is it up to date' is a hard gap. S2 says so honestly."
+    },
+    {
+      "family": "version",
+      "entity": "forge",
+      "phrasings": [
+        "what version of forge is running?",
+        "is the daemon up to date?"
+      ],
+      "source": "",
+      "answerable": false,
+      "notes": "GAP. No version seam probed in Sprint R (out of scope: forge --version not exercised; the binary is cross-compiled and shipped, no source tree comparison on-box). S2 may add a `forge --version` read if cheap, else honest 'not tracked'."
+    },
+    {
+      "family": "quantity",
+      "entity": "ram",
+      "phrasings": [
+        "how much ram is available?",
+        "how much memory is free?",
+        "how much ram is used?"
+      ],
+      "source": "SelfContext.Metrics (live - mem used/free/total from collector snapshot)",
+      "answerable": true,
+      "notes": "Seed #4. Live baseline answer was 'Memory: 31.6% used' (generic dump) - the fast path replaces this with 'X GB of Y GB free (Z%)' from Snap.Metrics."
+    },
+    {
+      "family": "quantity",
+      "entity": "gtt",
+      "phrasings": [
+        "how much gtt is free?",
+        "how much gtt is used?",
+        "is gtt full?",
+        "how much gpu memory is free?"
+      ],
+      "source": "check:gtt_ceiling (live runSelected - gtt_used_bytes/gtt_total_bytes/gtt_pct; KBRefs pitfalls:gtt-ceiling)",
+      "answerable": true,
+      "notes": "GTT is the binding constraint on this host class (AGENTS.md). gtt_ceiling evidence carries the raw bytes. 'Is gtt full' overlaps the health family - the fast path treats 'how much' as quantity and 'is it at the ceiling' as gtt_ceiling's health verdict."
+    },
+    {
+      "family": "quantity",
+      "entity": "disk",
+      "phrasings": [
+        "how much disk is free?",
+        "how much disk is used?",
+        "is disk full?"
+      ],
+      "source": "check:disk_space (live runSelected - disk_used/free/total_bytes/pct)",
+      "answerable": true,
+      "notes": "Live: 43.0% used. Models/data volume."
+    },
+    {
+      "family": "quantity",
+      "entity": "n_ctx",
+      "phrasings": [
+        "what's the context size?",
+        "how big is the context?",
+        "is n_ctx what was configured?",
+        "how much context is available?"
+      ],
+      "source": "check:n_ctx_actual (live runSelected - configured vs actual n_ctx per loaded slot; KBRefs pitfalls:silent-context-reduction)",
+      "answerable": true,
+      "notes": "The silent-reduction pitfall: llama.cpp may initialize a smaller context than configured when GTT allocation fails. Fast path reports actual n_ctx from /props scrape + flags any reduction."
+    },
+    {
+      "family": "reachability",
+      "entity": "a0",
+      "phrasings": [
+        "is a0 reachable?",
+        "what's a0's address?",
+        "is a0 on the tailnet?"
+      ],
+      "source": "settings smith.mesh.services (a0 entry) + port dial + tailscale service status",
+      "answerable": true,
+      "notes": "The mesh inventory has the address; live evidence from a0_reachability check + tailscale_peers."
+    },
+    {
+      "family": "reachability",
+      "entity": "a1",
+      "phrasings": [
+        "is a1 reachable via tailnet?",
+        "what's a1's address?"
+      ],
+      "source": "settings smith.mesh.services (a1 entry) + slot state",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "reachability",
+      "entity": "a2",
+      "phrasings": [
+        "is a2 reachable via tailnet?",
+        "what's a2's address?"
+      ],
+      "source": "settings smith.mesh.services (a2 entry) + slot state",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "reachability",
+      "entity": "tts",
+      "phrasings": [
+        "what's the tts address?",
+        "is tts on the tailnet?"
+      ],
+      "source": "settings smith.mesh.services (tts entry)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "reachability",
+      "entity": "embedding",
+      "phrasings": [
+        "what's the embedding address?",
+        "is embedding on the tailnet?"
+      ],
+      "source": "settings smith.mesh.services (embedding entry)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "reachability",
+      "entity": "stt",
+      "phrasings": [
+        "what's the stt address?",
+        "is stt on the tailnet?"
+      ],
+      "source": "settings smith.mesh.services (stt entry)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "reachability",
+      "entity": "ops",
+      "phrasings": [
+        "what's the ops dashboard address?",
+        "is ops reachable?"
+      ],
+      "source": "settings smith.mesh.services (ops entry)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "reachability",
+      "entity": "comfy-alpha",
+      "phrasings": [
+        "is comfyui available via tailnet?",
+        "what's comfyui's address?",
+        "is comfy-alpha up?"
+      ],
+      "source": "settings smith.mesh.services (comfy-alpha entry) + comfyui_health check + tailscale service status",
+      "answerable": true,
+      "notes": "Seed #3. The mesh inventory (smith.mesh.services) has the address. Live: ComfyUI DOWN, so the honest fast answer is 'the address is <comfy-alpha's inventory address> - but it's not reachable right now (unit inactive, port refused)'. Inventory + live evidence combined."
+    },
+    {
+      "family": "reachability",
+      "entity": "comfy-beta",
+      "phrasings": [
+        "is the beta comfyui up?",
+        "what's comfy-beta's address?"
+      ],
+      "source": "settings smith.mesh.services (comfy-beta entry) + tailscale_peers",
+      "answerable": true,
+      "notes": "Separate install from the main host's; start/stop via the peer's Forge Node Agent."
+    },
+    {
+      "family": "reachability",
+      "entity": "ops-beta",
+      "phrasings": [
+        "is the beta node agent up?",
+        "is ops-beta reachable?"
+      ],
+      "source": "settings smith.mesh.services (ops-beta entry) + tailscale_peers",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "reachability",
+      "entity": "tts-beta",
+      "phrasings": [
+        "is tts-beta up?"
+      ],
+      "source": "settings smith.mesh.services (tts-beta entry)",
+      "answerable": true,
+      "notes": "On-demand service."
+    },
+    {
+      "family": "reachability",
+      "entity": "ghost-beta",
+      "phrasings": [
+        "is ghost-beta up?",
+        "is fim autocomplete up?"
+      ],
+      "source": "settings smith.mesh.services (ghost-beta entry)",
+      "answerable": true,
+      "notes": "On-demand FIM autocomplete on the peer node."
+    },
+    {
+      "family": "reachability",
+      "entity": "librechat",
+      "phrasings": [
+        "is librechat up?",
+        "what's librechat's address?"
+      ],
+      "source": "settings smith.mesh.services (librechat entry - a full peer node, not a proxied svc:)",
+      "answerable": true,
+      "notes": "The inventory notes it's a full peer node, not a proxied service."
+    },
+    {
+      "family": "reachability",
+      "entity": "workspace",
+      "phrasings": [
+        "is the hermes workspace up?",
+        "is workspace reachable?"
+      ],
+      "source": "settings smith.mesh.services (workspace entry)",
+      "answerable": true,
+      "notes": "The inventory notes 'offline, last seen 5d ago'. Fast path reports this honestly."
+    },
+    {
+      "family": "reachability",
+      "entity": "notebook",
+      "phrasings": [
+        "is notebook up?"
+      ],
+      "source": "settings smith.mesh.services (notebook entry)",
+      "answerable": true,
+      "notes": "Open Notebook, Docker sidecar on a peer host."
+    },
+    {
+      "family": "reachability",
+      "entity": "internet",
+      "phrasings": [
+        "can you reach the internet?",
+        "is the internet reachable?"
+      ],
+      "source": "web direct provider probe (live outbound)",
+      "answerable": true,
+      "notes": "Overlaps health/internet entity; reachability framing = 'can smith get OUT', health framing = 'is the web research capability up'. Same seam."
+    },
+    {
+      "family": "reachability",
+      "entity": "tailnet",
+      "phrasings": [
+        "is tailnet able to connect?",
+        "is tailscale up?",
+        "is the mesh connected?"
+      ],
+      "source": "`tailscale status --json` BackendState (== 'Running') + check:tailscale_peers (live runSelected)",
+      "answerable": true,
+      "notes": "Seed #15. Live: BackendState 'Running', TailscaleIPs assigned, self peer online. tailscale_peers check covers watched-peer online state (smith.tailscale.watch_peers is currently empty [])."
+    },
+    {
+      "family": "listing",
+      "entity": "pending_tasks",
+      "phrasings": [
+        "what are the pending tasks?",
+        "what's in the scheduler queue?",
+        "what's queued?"
+      ],
+      "source": "scheduler queue (sched.Status - live queue state)",
+      "answerable": true,
+      "notes": "Seed #8. sched.Status exposes the queue."
+    },
+    {
+      "family": "listing",
+      "entity": "pending_actions",
+      "phrasings": [
+        "what are the pending smith actions?",
+        "what proposals are open?"
+      ],
+      "source": "smith_actions WHERE status='pending' (store read - ListActions)",
+      "answerable": true,
+      "notes": "Live: 1 pending runbook (llama.cpp vulkan rebuild). Distinct from scheduler queue (seed #8) - these are smith's own proposed actions."
+    },
+    {
+      "family": "listing",
+      "entity": "open_investigations",
+      "phrasings": [
+        "what are the pending investigations?",
+        "what's being investigated?"
+      ],
+      "source": "smith_investigations WHERE status NOT IN ('resolved','closed') (store read)",
+      "answerable": true,
+      "notes": "Seed #9. Live: 0 open (1 resolved - 'Wave 2 live-verify'). Low volume today; the family still instantiates and answers 'none open' honestly."
+    },
+    {
+      "family": "listing",
+      "entity": "backlog",
+      "phrasings": [
+        "what's in the backlog?",
+        "what's blocked?",
+        "what work is externally blocked?"
+      ],
+      "source": "docs/investigations.md parser (ListBlockedItems - kb_investigations.go) + check:blocked_work_recheck (live runSelected)",
+      "answerable": true,
+      "notes": "Seed #10. Live: blocked_work_recheck reports '2 of 4 open blocked item(s) may have unblocked - verify manually' (15 checked, 4 open). NOTE: docs/investigations.md has uncommitted operator edits - the parser reads it live, never edits it."
+    },
+    {
+      "family": "listing",
+      "entity": "degraded_services",
+      "phrasings": [
+        "what services are degraded?",
+        "what's down?",
+        "which always-on services are not listening?"
+      ],
+      "source": "check:always_on_ports down list + web provider health + collector unit states (live runSelected union)",
+      "answerable": true,
+      "notes": "Seed #12. Live: ComfyUI is the degraded service (unit inactive). always_on_ports fires warn when a configured port is down; the fast path aggregates that with comfyui_health and provider status."
+    },
+    {
+      "family": "history",
+      "entity": "gtt_ceiling",
+      "phrasings": [
+        "how long has gtt ceiling been happening?",
+        "how often does gtt_ceiling fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='gtt_ceiling' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 8 ok rows. History family instantiates over EVERY check_id that has ever fired; this is the gtt_ceiling instance."
+    },
+    {
+      "family": "history",
+      "entity": "disk_space",
+      "phrasings": [
+        "how long has disk space been happening?",
+        "how often does disk_space fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='disk_space' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 8 ok rows. "
+    },
+    {
+      "family": "history",
+      "entity": "slot_agreement",
+      "phrasings": [
+        "how long has slot agreement been happening?",
+        "how often does slot_agreement fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='slot_agreement' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 8 ok rows. "
+    },
+    {
+      "family": "history",
+      "entity": "n_ctx_actual",
+      "phrasings": [
+        "how long has n ctx actual been happening?",
+        "how often does n_ctx_actual fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='n_ctx_actual' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 8 ok rows. The silent-reduction finding is crit when it fires - history answers 'has this EVER fired' and 'how often'."
+    },
+    {
+      "family": "history",
+      "entity": "gpu_hang",
+      "phrasings": [
+        "how long has gpu hang been happening?",
+        "how often does gpu_hang fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='gpu_hang' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 8 ok rows. "
+    },
+    {
+      "family": "history",
+      "entity": "always_on_ports",
+      "phrasings": [
+        "how long has always on ports been happening?",
+        "how often does always_on_ports fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='always_on_ports' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 8 ok rows. "
+    },
+    {
+      "family": "history",
+      "entity": "forge_self",
+      "phrasings": [
+        "how long has forge self been happening?",
+        "how often does forge_self fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='forge_self' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 3 info rows. "
+    },
+    {
+      "family": "history",
+      "entity": "a0_reachability",
+      "phrasings": [
+        "how long has a0 reachability been happening?",
+        "how often does a0_reachability fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='a0_reachability' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 5 ok rows. "
+    },
+    {
+      "family": "history",
+      "entity": "compressor_reachability",
+      "phrasings": [
+        "how long has compressor reachability been happening?",
+        "how often does compressor_reachability fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='compressor_reachability' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 5 ok rows. The black-hole failure mode is the canonical history question here."
+    },
+    {
+      "family": "history",
+      "entity": "brain_resolvable",
+      "phrasings": [
+        "how long has brain resolvable been happening?",
+        "how often does brain_resolvable fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='brain_resolvable' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 5 ok rows. "
+    },
+    {
+      "family": "history",
+      "entity": "kernel_params",
+      "phrasings": [
+        "how long has kernel params been happening?",
+        "how often does kernel_params fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='kernel_params' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 5 ok rows. "
+    },
+    {
+      "family": "history",
+      "entity": "blocked_work_recheck",
+      "phrasings": [
+        "how long has blocked work recheck been happening?",
+        "how often does blocked_work_recheck fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='blocked_work_recheck' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 1 info rows. "
+    },
+    {
+      "family": "history",
+      "entity": "tailscale_peers",
+      "phrasings": [
+        "how long has tailscale peers been happening?",
+        "how often does tailscale_peers fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='tailscale_peers' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 5 ok rows. watch_peers is empty today, so the check reports 'no watched peers'."
+    },
+    {
+      "family": "history",
+      "entity": "binary_versions",
+      "phrasings": [
+        "how long has binary versions been happening?",
+        "how often does binary_versions fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='binary_versions' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 1 info (1/5 stale) rows. 1 of 5 binaries stale."
+    },
+    {
+      "family": "history",
+      "entity": "comfyui_health",
+      "phrasings": [
+        "how long has comfyui health been happening?",
+        "how often does comfyui_health fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='comfyui_health' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 2 info (unreachable) rows. unreachable."
+    },
+    {
+      "family": "history",
+      "entity": "comfyui_prune",
+      "phrasings": [
+        "how long has comfyui prune been happening?",
+        "how often does comfyui_prune fire?"
+      ],
+      "source": "smith_findings (WHERE check_id='comfyui_prune' - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Live: 5 warn (map unbuildable) rows. Map unbuildable - ComfyUI down."
+    },
+    {
+      "family": "history",
+      "entity": "any_finding_by_text",
+      "phrasings": [
+        "how long has problem X been happening?",
+        "how often does this error come up?"
+      ],
+      "source": "smith_findings (WHERE severity+summary LIKE <text> - MIN(created_at) + COUNT + SUM(repeat_count))",
+      "answerable": true,
+      "notes": "Seeds #16 and #17. The family also matches free-text: a user pastes an error or references 'problem X' and the fast path matches against smith_findings.severity+summary. The context-attach path (R5) seeds the exact code/message, which maps directly to a check_id or notification code for a precise history query."
+    },
+    {
+      "family": "logs",
+      "entity": "forge_unit_error_digest",
+      "phrasings": [
+        "what does the error log show?",
+        "what's in the logs?",
+        "any errors in the journal?"
+      ],
+      "source": "journalctl seam (bounded forge-unit error digest - Sprint R verified forge's run-as user can read `journalctl -u forge-*` and `journalctl -k`)",
+      "answerable": true,
+      "notes": "Seed #5. Sprint R verdict (s7.4): the journal seam IS available - forge runs as a dedicated service user that can read forge-* unit journals and the kernel ring. NO journalctl seam exists in the Go code today (verified by grep). S2 builds a bounded last-N error-lines digest from forge-* units via the same bounded-mechanism pattern gpu_hang could use for journalctl -k. Fallback if the seam doesn't generalize: notifications-only (the notifications table is currently EMPTY on the live deployment, so the journal digest is strictly more useful). Live kernel ring sample showed a compressor OOM-kill (Aug 15 02:39) that is NOT in notifications - reinforces journal seam value."
+    },
+    {
+      "family": "logs",
+      "entity": "notifications",
+      "phrasings": [
+        "what are the recent notifications?",
+        "any active alerts?"
+      ],
+      "source": "notifications table (store read - code, severity, subject, message, occurrences, first/last_seen)",
+      "answerable": true,
+      "notes": "Live: notifications table is EMPTY (0 rows). The seam exists in code but has no data today. Fast path answers 'no active notifications' honestly. This is the fallback for the logs family if the journal digest is descoped."
+    },
+    {
+      "family": "kb",
+      "entity": "silent-context-reduction",
+      "phrasings": [
+        "why is my context smaller than configured?",
+        "why did n_ctx drop?",
+        "smith says context was reduced"
+      ],
+      "source": "KB corpus pitfalls-silent-context-reduction.md (KB-search)",
+      "answerable": true,
+      "notes": "Maps to the n_ctx_actual check + pitfalls:silent-context-reduction KBRef. Symptom phrasing is a direct pattern seed from the pitfall."
+    },
+    {
+      "family": "kb",
+      "entity": "compressor-black-hole",
+      "phrasings": [
+        "why is remote routing failing?",
+        "why does a0 return 502 when the slot is healthy?",
+        "is compressor a black hole after a reboot?"
+      ],
+      "source": "KB corpus pitfalls-compressor-black-hole.md (KB-search)",
+      "answerable": true,
+      "notes": "Maps to headroom_health check + pitfalls:compressor-black-hole KBRef."
+    },
+    {
+      "family": "kb",
+      "entity": "gtt-ceiling",
+      "phrasings": [
+        "why is gtt full?",
+        "how much gtt is free?",
+        "why is rocm capped at ~63 gb?"
+      ],
+      "source": "KB corpus pitfalls-gtt-ceiling.md (KB-search)",
+      "answerable": true,
+      "notes": "Overlaps quantity/gtt; the kb framing is 'why' (explanation), quantity is 'how much' (measurement)."
+    },
+    {
+      "family": "kb",
+      "entity": "orphaned-slot-unit",
+      "phrasings": [
+        "why does the slot show occupied when the unit is inactive?",
+        "why are there orphaned gpu pids after unload?"
+      ],
+      "source": "KB corpus pitfalls-orphaned-slot-unit.md (KB-search)",
+      "answerable": true,
+      "notes": "Maps to slot_agreement check + pitfalls:orphaned-slot-unit KBRef."
+    },
+    {
+      "family": "kb",
+      "entity": "inference-hang",
+      "phrasings": [
+        "how is an inference hang detected?",
+        "why is gpu% not a reliable hang indicator?"
+      ],
+      "source": "KB corpus pitfalls-inference-hang.md (KB-search)",
+      "answerable": true,
+      "notes": "Maps to gpu_hang check + pitfalls:inference-hang KBRef."
+    },
+    {
+      "family": "kb",
+      "entity": "service-reliability",
+      "phrasings": [
+        "why does forge-primary restart-loop on shutdown?",
+        "what should timeoutstopsec be for large models?"
+      ],
+      "source": "KB corpus pitfalls-service-reliability.md (KB-search)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "kb",
+      "entity": "backend-selection",
+      "phrasings": [
+        "vulkan or rocm for the backend?",
+        "why can't vulkan load nemotron (91 gb)?",
+        "is vulkan faster than rocm on strix halo?"
+      ],
+      "source": "KB corpus pitfalls-backend-selection.md (KB-search)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "kb",
+      "entity": "vllm-hipmalloc-ceiling",
+      "phrasings": [
+        "why can't vllm use the full 120 gb gtt?",
+        "why does vllm see only ~66 gb of memory?"
+      ],
+      "source": "KB corpus pitfalls-vllm-hipmalloc-ceiling.md (KB-search)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "kb",
+      "entity": "hybrid-recurrent-reprocessing",
+      "phrasings": [
+        "why does qwen36 reprocess the whole prompt every turn?",
+        "why does ornith get slower each turn?"
+      ],
+      "source": "KB corpus pitfalls-hybrid-recurrent-reprocessing.md (KB-search)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "kb",
+      "entity": "debugging-gotchas",
+      "phrasings": [
+        "why is curl localhost:5000 slow by ~200ms?",
+        "why did the whole dashboard hang on one slow request?"
+      ],
+      "source": "KB corpus pitfalls-debugging-gotchas.md (KB-search)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "kb",
+      "entity": "tailscale-mesh",
+      "phrasings": [
+        "how is the mesh inventory configured?",
+        "how do I provision smith's mesh services?"
+      ],
+      "source": "KB corpus infrastructure-tailscale-mesh.md (KB-search - the mesh inventory provisioning doc; the live inventory itself is smith.mesh.services, layer-2 data)",
+      "answerable": true,
+      "notes": "Overlaps reachability; kb framing is the inventory/explanation, reachability is the live probe."
+    },
+    {
+      "family": "kb",
+      "entity": "comfyui-pruning-guardrails",
+      "phrasings": [
+        "why won't smith prune my comfyui models?",
+        "what are the four comfyui pruning refusal guardrails?"
+      ],
+      "source": "KB corpus smith-comfyui-pruning-guardrails.md (KB-search)",
+      "answerable": true,
+      "notes": "Maps to comfyui_prune check + proposeComfyUIDelete proposer."
+    },
+    {
+      "family": "kb",
+      "entity": "model-selection-quant",
+      "phrasings": [
+        "how do I pick a quantization level?",
+        "what's the 1.2x rule for vram sizing?",
+        "what quant for a dense 70b model?",
+        "what quant for a moe model?"
+      ],
+      "source": "KB corpus modelselection-*.md (6 entries: picking-a-quantization-level, the-1.2x-rule, dense/moe/hybrid-ssm strategies, red-flags-before-you-download, kv-cache-grows-with-context)",
+      "answerable": true,
+      "notes": "Clustered: the modelselection corpus entries all answer 'what quant / how much VRAM' variants. KB-search returns the relevant entry per phrasing."
+    },
+    {
+      "family": "kb",
+      "entity": "mtp",
+      "phrasings": [
+        "when does mtp give a throughput speedup?",
+        "when does mtp speculation not help?",
+        "does mtp work on qwen3.6?"
+      ],
+      "source": "KB corpus modelselection-mtp-when-it-works.md + modelselection-mtp-when-it-fails.md (KB-search)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "kb",
+      "entity": "critical-runtime-flags",
+      "phrasings": [
+        "what --parallel value should a mode use?",
+        "what does --ctx-checkpoints do?",
+        "does qwen36-mtp need a special mmproj file?"
+      ],
+      "source": "KB corpus modes-critical-runtime-flags.md (KB-search)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "kb",
+      "entity": "compressor-topology",
+      "phrasings": [
+        "what's the target compressor proxy topology?",
+        "why is local compressor fronting dead code?",
+        "is x-compress-base-url vulnerable to ssrf?"
+      ],
+      "source": "KB corpus compressor-topology-*.md (4 entries: target-topology, compressor-problem, compressor-key-seams, compressor-ssrf-hardening)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "kb",
+      "entity": "rocm-build-diagnosis",
+      "phrasings": [
+        "why does ldd pass but the binary fails under systemd?",
+        "which rocm compile flags are still needed?",
+        "is it safe to unset hsa_enable_sdma?"
+      ],
+      "source": "KB corpus diagnosis-trial-rocm-*.md (4 entries: rocm-flag-audit, rocm-live-validation, rocm-reusable-lessons, rocm-rpath-bug)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "kb",
+      "entity": "slot-rename-a1-a2",
+      "phrasings": [
+        "why does slot:primary now return 400?",
+        "what happened to the primary/secondary slot names?"
+      ],
+      "source": "KB corpus modes-slot-rename-a1-a2.md (KB-search)",
+      "answerable": true,
+      "notes": ""
+    },
+    {
+      "family": "kb",
+      "entity": "parallel-context-split-incident",
+      "phrasings": [
+        "why is n_ctx half of what I configured?",
+        "does --parallel n multiply the context or split it?"
+      ],
+      "source": "KB corpus modes-parallel-context-split-incident.md (KB-search)",
+      "answerable": true,
+      "notes": "Overlaps quantity/n_ctx; kb framing is the incident explanation."
+    },
+    {
+      "family": "kb",
+      "entity": "llamacpp-build-status",
+      "phrasings": [
+        "what llama.cpp build is currently deployed?",
+        "should I rebuild llama.cpp from mainline?",
+        "does the current deployed build include mtp?"
+      ],
+      "source": "KB corpus research-llamacpp-build-status.md (KB-search)",
+      "answerable": true,
+      "notes": "Overlaps version/binary_versions; kb framing is the build-status explanation."
+    },
+    {
+      "family": "action",
+      "entity": "restart_forge-stt",
+      "phrasings": [
+        "restart stt",
+        "restart forge-stt",
+        "restart speech-to-text"
+      ],
+      "source": "execute.go restartAllowed allowlist (forge-stt) -> restart_forge_unit proposal",
+      "answerable": true,
+      "notes": "servicePortUnit['stt']='forge-stt'. proposeRestartDownService already drafts this from always_on_ports findings."
+    },
+    {
+      "family": "action",
+      "entity": "restart_forge-embedding",
+      "phrasings": [
+        "restart embedding",
+        "restart forge-embedding"
+      ],
+      "source": "restartAllowed allowlist (forge-embedding) -> restart_forge_unit proposal",
+      "answerable": true,
+      "notes": "servicePortUnit['embedding']='forge-embedding'."
+    },
+    {
+      "family": "action",
+      "entity": "restart_forge-aligner",
+      "phrasings": [
+        "restart the aligner",
+        "restart forge-aligner"
+      ],
+      "source": "restartAllowed allowlist (forge-aligner) -> restart_forge_unit proposal",
+      "answerable": true,
+      "notes": "servicePortUnit['aligner']='forge-aligner'."
+    },
+    {
+      "family": "action",
+      "entity": "restart_comfyui",
+      "phrasings": [
+        "restart comfyui",
+        "restart ai-mode-comfyui",
+        "start comfyui"
+      ],
+      "source": "restartAllowed allowlist (ai-mode-comfyui) -> restart_forge_unit proposal",
+      "answerable": true,
+      "notes": "Live: ComfyUI is down - 'restart comfyui' from chat is a high-value action intent right now."
+    },
+    {
+      "family": "action",
+      "entity": "restart_tts",
+      "phrasings": [
+        "restart tts",
+        "restart text-to-speech"
+      ],
+      "source": "restartAllowed allowlist (cfg.Server.TTSUnit) -> restart_forge_unit proposal",
+      "answerable": true,
+      "notes": "Unit name from cfg.Server.TTSUnit (not a static servicePortUnit key)."
+    },
+    {
+      "family": "action",
+      "entity": "restart_compressor",
+      "phrasings": [
+        "restart compressor",
+        "restart the compressor proxy",
+        "restart headroom@local"
+      ],
+      "source": "restartAllowed allowlist (compressorUnitPattern: ^compressor[@-][a-z0-9_-]+$) -> restart_forge_unit proposal",
+      "answerable": true,
+      "notes": "proposeRestartCompressorProxy already drafts this from headroom_health findings. Live: 1 done_unverified + 1 rejected + 1 superseded restart of 'compressor proxy local' in action history."
+    },
+    {
+      "family": "action",
+      "entity": "restart_llama.cpp",
+      "phrasings": [
+        "restart llama.cpp",
+        "restart the model server",
+        "restart the inference server",
+        "restart the llama server"
+      ],
+      "source": "scheduler-mediated restart: resolve slots running a llama.cpp backend -> unload_slot + load_config pair (s3.5)",
+      "answerable": true,
+      "notes": "Seed #7 (R7). The semantics trap (s3.5): 'restart llama.cpp' MUST map to scheduler-mediated unload+reload of the same config, NEVER a raw forge-aN unit restart (restartAllowed refuses slot units: 'belongs to a scheduler slot - use unload_slot/load_config instead'). If nothing is loaded: 'no llama.cpp model is loaded right now - nothing to restart'."
+    },
+    {
+      "family": "action",
+      "entity": "run_check_up",
+      "phrasings": [
+        "run a diagnostic check",
+        "run a check-up",
+        "run the quick sweep",
+        "check everything"
+      ],
+      "source": "RunChecks (scope=quick, persisting - IS a sweep) -> inline fast-path findings rendering",
+      "answerable": true,
+      "notes": "Seed #7 (R7). Distinct from the fast path's runSelected (non-persisting): 'run a check-up' IS a real sweep (RunChecks, persisting findings + proposeFrom). The fast path then renders the fresh findings inline."
+    },
+    {
+      "family": "action",
+      "entity": "unload_slot",
+      "phrasings": [
+        "unload slot a2",
+        "unload the secondary",
+        "free up a slot"
+      ],
+      "source": "proposeReconcileOrphanSlot (orphan direction only) -> unload_slot proposal; manual unload via scheduler",
+      "answerable": true,
+      "notes": "proposeReconcileOrphanSlot already drafts this from slot_agreement findings (orphan direction only). Guardrail 2: smith never proposes unloading its OWN brain's slot."
+    },
+    {
+      "family": "action",
+      "entity": "delete_comfyui_files",
+      "phrasings": [
+        "prune comfyui models",
+        "delete unreferenced comfyui files",
+        "clean up comfyui models"
+      ],
+      "source": "proposeComfyUIDelete -> delete_files proposal (RiskHigh, bundles all candidates from a sweep)",
+      "answerable": true,
+      "notes": "proposeComfyUIDelete already drafts this from comfyui_prune findings. Live: 2 rejected delete_files proposals (20.5 GB each) in history - ComfyUI down so the map is currently unbuildable."
+    },
+    {
+      "family": "action",
+      "entity": "restart_forge-daemon",
+      "phrasings": [
+        "restart forge",
+        "restart the daemon",
+        "restart forge-daemon"
+      ],
+      "source": "",
+      "answerable": false,
+      "notes": "REFUSED (execute.go restartAllowed): 'restarting forge-daemon would kill the executing action itself - propose a runbook instead'. The fast path refuses with this plain-language reason. Live action history confirms: 'allowlist check: forge-daemon' (id 4, failed)."
+    },
+    {
+      "family": "action",
+      "entity": "restart_slot_unit",
+      "phrasings": [
+        "restart forge-a1",
+        "restart forge-a3",
+        "restart the slot unit"
+      ],
+      "source": "",
+      "answerable": false,
+      "notes": "REFUSED (execute.go restartAllowed): 'unit forge-aN belongs to a scheduler slot - use unload_slot/load_config instead of restarting it directly'. The fast path refuses and points the user at the scheduler-mediated path (restart_llama.cpp). Live action history confirms: 'allowlist check: forge-a3' (id 5, failed)."
+    },
+    {
+      "family": "kb",
+      "entity": "build-refresh",
+      "phrasings": [
+        "how do I rebuild a llama.cpp fork?",
+        "what's the procedure for updating kintsugi?",
+        "how do I refresh a model build after upstream moved?",
+        "what's the recipe for a build refresh?"
+      ],
+      "source": "KB runbook:build-refresh (hand-authored runbook; referenced by binary_versions when a tracked build lags upstream)",
+      "answerable": true,
+      "notes": "2026-08-17 build-refresh addition. The full rebase->dual-build->test->promote->deploy procedure, including the RPATH $ORIGIN, clean-env ldd, and SELinux bin_t gotchas."
+    },
+    {
+      "family": "kb",
+      "entity": "model-fork-support",
+      "phrasings": [
+        "does this model need a special llama.cpp fork?",
+        "is qwen38-27b supported by mainline llama.cpp?",
+        "why does nemotron-puzzle need the puzzle fork?",
+        "is a fork required or just better for this model?"
+      ],
+      "source": "KB runbook:model-fork-support (hand-authored runbook: arch-in-mainline check, metadata-compat check, fork-required-vs-optional distinction)",
+      "answerable": true,
+      "notes": "2026-08-17 addition. Encodes the qwen38-27b (no fork needed - arch mainline) and nemotron-puzzle (fork required - expert_used_count array) decisions."
+    }
+  ],
+  "seeds": [
+    {
+      "seed": 1,
+      "question": "Is ComfyUI healthy?",
+      "entry": "health.comfyui"
+    },
+    {
+      "seed": 2,
+      "question": "Is ComfyUI up to date?",
+      "entry": "version.comfyui",
+      "gap": true
+    },
+    {
+      "seed": 3,
+      "question": "Is ComfyUI available via tailnet?",
+      "entry": "reachability.comfy-alpha"
+    },
+    {
+      "seed": 4,
+      "question": "How much RAM is available?",
+      "entry": "quantity.ram"
+    },
+    {
+      "seed": 5,
+      "question": "What does the error log show?",
+      "entry": "logs.forge_unit_error_digest"
+    },
+    {
+      "seed": 6,
+      "question": "Are you able to reach the internet?",
+      "entry": "health.internet"
+    },
+    {
+      "seed": 7,
+      "question": "Is search working?",
+      "entry": "health.search"
+    },
+    {
+      "seed": 8,
+      "question": "What are the pending tasks?",
+      "entry": "listing.pending_tasks"
+    },
+    {
+      "seed": 9,
+      "question": "What are the pending investigations?",
+      "entry": "listing.open_investigations"
+    },
+    {
+      "seed": 10,
+      "question": "What's in the backlog?",
+      "entry": "listing.backlog"
+    },
+    {
+      "seed": 11,
+      "question": "Is compressor responding?",
+      "entry": "health.compressor"
+    },
+    {
+      "seed": 12,
+      "question": "What services are degraded?",
+      "entry": "listing.degraded_services"
+    },
+    {
+      "seed": 13,
+      "question": "What version of headroom-ai is running?",
+      "entry": "version.headroom-ai"
+    },
+    {
+      "seed": 14,
+      "question": "What version of tailnet is running?",
+      "entry": "version.tailscale"
+    },
+    {
+      "seed": 15,
+      "question": "Is tailnet able to connect?",
+      "entry": "reachability.tailnet"
+    },
+    {
+      "seed": 16,
+      "question": "How long has problem X been happening?",
+      "entry": "history.any_finding_by_text"
+    },
+    {
+      "seed": 17,
+      "question": "How often does this error come up?",
+      "entry": "history.any_finding_by_text"
+    },
+    {
+      "seed": 18,
+      "question": "Is A0 working correctly?",
+      "entry": "health.a0"
+    },
+    {
+      "seed": 19,
+      "question": "Is A1 up?",
+      "entry": "health.a1"
+    }
+  ],
+  "baseline_drill": {
+    "date": "2026-08-15",
+    "method": "POST /api/v1/smith/chat for each of the 19 seeds; poll GET /conversations/N until assistant message content non-empty",
+    "result": "ALL 19 seeds returned the identical 862-char deterministic dump: 'Deterministic tier (no reasoning brain in use for this answer). Brain: local config on slot A1. Memory: 31.5-31.6% used. Disk: 43.0% used. Most recent findings: [warn] comfyui_prune ... [info] comfyui_health ... [info] binary_versions ...'. No question understanding, no per-question live check run, no findings-history query, no KB lookup. smith.model=qwen36-mtp (brain IS configured) but tier=deterministic for all (no auto-escalation: zero crit findings). This is the exact R4 gap the fast path (S2) replaces.",
+    "temp_key_id": "454ca343b814 (revoked same day)"
+  },
+  "runbook_audit": {
+    "scope": "s2.4.3 / s5.1 step 4 - audit proposers (propose.go) against live findings for runbook->executable promotions",
+    "proposers": {
+      "always_on_ports": {
+        "proposer": "proposeRestartDownService",
+        "kind": "restart_forge_unit",
+        "executable": true,
+        "verdict": "already executable"
+      },
+      "headroom_health": {
+        "proposer": "proposeRestartCompressorProxy",
+        "kind": "restart_forge_unit",
+        "executable": true,
+        "verdict": "already executable"
+      },
+      "slot_agreement": {
+        "proposer": "proposeReconcileOrphanSlot",
+        "kind": "unload_slot",
+        "executable": true,
+        "verdict": "already executable"
+      },
+      "kernel_params": {
+        "proposer": "proposeKernelParamsRunbook",
+        "kind": "runbook",
+        "executable": false,
+        "verdict": "STAYS runbook - needs bootloader edit + reboot (genuinely out of reach)"
+      },
+      "gtt_ceiling": {
+        "proposer": "proposeFreeMemoryRunbook",
+        "kind": "runbook",
+        "executable": false,
+        "verdict": "STAYS runbook BY DESIGN - guardrail 2: scheduler's eviction policy frees memory, smith only reports (deliberate, not a missing executable sibling)"
+      },
+      "binary_versions": {
+        "proposer": "proposeRebuildRunbook",
+        "kind": "runbook",
+        "executable": false,
+        "verdict": "STAYS runbook - recompiling a binary a live slot may be running is out of reach (compile window + live-slot risk)"
+      },
+      "comfyui_prune": {
+        "proposer": "proposeComfyUIDelete",
+        "kind": "delete_files",
+        "executable": true,
+        "verdict": "already executable"
+      }
+    },
+    "summary": "3 runbook proposers exist (kernel_params, gtt_ceiling, binary_versions). ALL 3 are correctly runbook-only - each has a real reason it can't be an executable kind (reboot, guardrail 2, compile window). NO runbook->executable promotions needed."
+  },
+  "history_query_cost": {
+    "table": "smith_findings",
+    "live_row_count": 85,
+    "distinct_check_ids": 16,
+    "existing_indexes": [
+      "idx_smith_findings_investigation",
+      "idx_smith_findings_check",
+      "idx_smith_findings_created"
+    ],
+    "q1_min_created_at_per_check_x16": "0.06ms total, 0.004ms each",
+    "q2_count_sum_7d_window_x16": "0.09ms total, 0.006ms each",
+    "single_check_full_history_x100": "0.39ms total, 0.004ms each",
+    "verdict": "NO new index needed. idx_smith_findings_check (on check_id) + idx_smith_findings_created (on created_at) already cover both history-query shapes (s3.3) at sub-0.01ms latency. The composite (check_id, created_at) the plan floated is unnecessary at this row count and these query shapes; even at 10k+ rows the check_id index alone makes these index scans. Measure-don't-assume confirmed: no action."
+  },
+  "seam_probes": {
+    "journalctl_as_service_user": {
+      "available": true,
+      "evidence": "`journalctl -u forge-stt -n 2` and `journalctl -k -n 2` both readable as forge's run-as user. Kernel ring showed a compressor OOM-kill (Aug 15 02:39) NOT present in notifications.",
+      "go_seam_exists": false,
+      "note": "No journalctl seam in the Go code today (verified by grep 2026-08-15). S2 builds a bounded forge-unit error digest."
+    },
+    "tailscale_version": {
+      "available": true,
+      "source": "`tailscale version` CLI (first line)",
+      "live_value": "1.102.2",
+      "go_seam_exists": "partial - tailscale_peers check uses `tailscale status --json`; a tailscale CLI seam exists but version is not wired into a check."
+    },
+    "tailscale_state": {
+      "available": true,
+      "source": "`tailscale status --json` BackendState",
+      "live_value": "Running",
+      "note": "tailscale_peers check covers watched-peer online state."
+    },
+    "comfyui_version": {
+      "available": false,
+      "evidence": "ComfyUI DOWN during Sprint R (port 3001 refused, the comfyui unit inactive) - /system_stats unprovable; the ComfyUI install dir is NOT a git repo (git describe fails). Even when up, no source tree or upstream-release seam to compare against.",
+      "verdict": "GAP for 'up to date'; 'what version' partially answerable only when ComfyUI is running."
+    },
+    "notifications_table": {
+      "live_rows": 0,
+      "note": "notifications seam exists in code but is empty on the live deployment today. Logs family falls back to journal digest (strictly more useful)."
+    },
+    "tracked_binaries": {
+      "count": 5,
+      "note": "Mirrors the deployment's smith.binaries.tracked at mining time (four llama.cpp builds + the compressor python pkg); exact paths are deployment data, read live from the setting by the version family."
+    }
+  }
+}

@@ -1,0 +1,16 @@
+[Unit]
+Description=The Forge — TTS resident base (tts-server, port 8093)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/forge
+ExecStart=/opt/forge/qwentts.cpp/build/tts-server   --model /opt/forge/qwentts.cpp/models/qwen-talker-1.7b-base-Q8_0.gguf   --codec /opt/forge/qwentts.cpp/models/qwen-tokenizer-12hz-Q8_0.gguf   --host 127.0.0.1 --port 8093 --alias base
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-tts-base
+
+[Install]
+WantedBy=default.target

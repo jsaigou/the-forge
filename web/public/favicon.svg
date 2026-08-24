@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#241a12"/>
+      <stop offset="1" stop-color="#0b0806"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#f8961e" stop-opacity="0.5"/>
+      <stop offset="0.6" stop-color="#f3722c" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#f3722c" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4b4540"/>
+      <stop offset="0.35" stop-color="#2b2724"/>
+      <stop offset="1" stop-color="#151210"/>
+    </linearGradient>
+    <linearGradient id="bodyheat" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f8961e" stop-opacity="0.45"/>
+      <stop offset="0.5" stop-color="#f3722c" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="melt" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff8e7"/>
+      <stop offset="0.3" stop-color="#f9c74f"/>
+      <stop offset="0.75" stop-color="#f8961e"/>
+      <stop offset="1" stop-color="#f3722c"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="1" y="1" width="62" height="62" rx="14" fill="url(#tile)"/>
+  <rect x="1.5" y="1.5" width="61" height="61" rx="13.5" fill="none" stroke="#f8961e" stroke-opacity="0.25"/>
+
+  <ellipse cx="32" cy="24" rx="26" ry="15" fill="url(#glow)"/>
+
+  <!-- pouring lip -->
+  <path d="M46.5 24.5 C50 22.7 52.8 21.7 54.2 22.1 C55.3 22.5 54.9 23.6 53.9 24.4 C52 25.8 50 26.9 47.6 27.8 Z" fill="#33302c"/>
+  <path d="M47.5 24.4 C50.3 23 52.6 22.2 53.9 22.5" fill="none" stroke="#f8961e" stroke-opacity="0.5" stroke-width="0.9"/>
+
+  <!-- crucible body -->
+  <path d="M15 26 C15.5 34 17 42 20 47 C23 52 27 54.5 32 54.5 C37 54.5 41 52 44 47 C47 42 48.5 34 49 26 Z" fill="url(#body)"/>
+  <path d="M15 26 C15.5 34 17 42 20 47 C23 52 27 54.5 32 54.5 C37 54.5 41 52 44 47 C47 42 48.5 34 49 26 Z" fill="url(#bodyheat)"/>
+  <path d="M17.8 34 Q32 38.5 46.2 34" fill="none" stroke="#000" stroke-opacity="0.22" stroke-width="1.2"/>
+  <path d="M19.6 41 Q32 45 44.4 41" fill="none" stroke="#000" stroke-opacity="0.22" stroke-width="1.2"/>
+
+  <!-- rim + molten surface -->
+  <ellipse cx="32" cy="26" rx="17" ry="5.5" fill="#33302c"/>
+  <path d="M15 26 A17 5.5 0 0 1 49 26" fill="none" stroke="#f8961e" stroke-opacity="0.4" stroke-width="1"/>
+  <ellipse cx="32" cy="26" rx="13.5" ry="4" fill="url(#melt)"/>
+
+  <!-- sparks -->
+  <circle cx="23" cy="13.5" r="1.6" fill="#f9c74f"/>
+  <circle cx="35" cy="9.5" r="1.2" fill="#f8961e"/>
+  <circle cx="42.5" cy="16" r="1" fill="#f3722c"/>
+</svg>

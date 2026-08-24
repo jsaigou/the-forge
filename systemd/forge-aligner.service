@@ -1,0 +1,21 @@
+# Qwen3-ForcedAligner word-timestamp endpoint (port 8086).
+# Matches The Forge service convention — same pattern as forge-tts.
+[Unit]
+Description=The Forge — Forced Aligner (Qwen3-ForcedAligner-0.6B, port 8086)
+After=network.target
+
+[Service]
+Type=simple
+User=testuser
+Group=testuser
+WorkingDirectory=/opt/forge
+ExecStart=/opt/forge/venv-qwen3-aligner/bin/gunicorn -w 1 -k sync --timeout 1800 -b 127.0.0.1:8086 aligner_server:app
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-aligner
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

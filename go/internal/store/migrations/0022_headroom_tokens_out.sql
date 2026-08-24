@@ -1,0 +1,16 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Schema v22 (cost/savings sprint, Phase 3, 2026-07-30).
+--
+-- headroom_samples.tokens_out was missed in migration 0021: that table was
+-- designed before Headroom's live /metrics catalog was ground-truthed
+-- against all three real proxies, and headroom_tokens_output_total turned
+-- out to be a real, cheaply-available counter worth keeping.
+--
+-- Note for future readers: 0021's cache_read_tokens/uncached_tokens columns
+-- on this same table are DEAD — that ground-truthing pass also found no
+-- per-provider cache-hit token metric exists in the current Headroom build
+-- (only a request COUNT, headroom_requests_cached_total). The application
+-- never writes non-zero values to those two columns; they're harmless
+-- NOT NULL DEFAULT 0 leftovers, not real measurements, and must not be
+-- surfaced anywhere as if they were.
+ALTER TABLE headroom_samples ADD COLUMN tokens_out INTEGER;

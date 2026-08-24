@@ -1,0 +1,26 @@
+# Qwen3-Embedding-0.6B-Q8_0 — CPU-only embedding server, port 8083.
+[Unit]
+Description=The Forge — Embedding Server (port 8083)
+After=network.target
+
+[Service]
+Type=simple
+User=testuser
+Group=testuser
+ExecStart=/opt/forge/llama.cpp/build-smith-vulkan/bin/llama-server \
+    -m /opt/forge/models/Qwen3-Embedding-0.6B/Qwen3-Embedding-0.6B-Q8_0.gguf \
+    --embedding \
+    -ngl 0 \
+    -c 8192 -b 8192 -ub 8192 \
+    -t 4 \
+    --port 8083 \
+    --host 127.0.0.1
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-embedding
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

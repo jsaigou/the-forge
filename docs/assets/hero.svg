@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120" role="img" aria-label="The Forge banner">
+  <!-- Deterministic geometric forge/anvil motif. Dark-theme friendly:
+       charcoal ground, ember accent, cool steel strokes. No external assets. -->
+  <rect width="320" height="120" fill="#101318"/>
+  <g fill="none" stroke="#f59e0b" stroke-width="4">
+    <path d="M40 92 L70 52 H120 L150 92 Z" fill="#1c232e"/>
+    <rect x="85" y="92" width="20" height="8" stroke-width="3"/>
+  </g>
+  <!-- sparks -->
+  <circle cx="160" cy="30" r="3" fill="#f59e0b" opacity="0.9"/>
+  <circle cx="176" cy="22" r="2" fill="#fbbf24" opacity="0.7"/>
+  <circle cx="148" cy="20" r="2" fill="#fbbf24" opacity="0.6"/>
+  <!-- workpiece on second bench -->
+  <g stroke="#7b8794" stroke-width="3" fill="none">
+    <path d="M190 92 L210 64 H270 L290 92Z"/>
+    <line x1="210" y1="64" x2="240" y2="36"/>
+    <line x1="270" y1="64" x2="240" y2="36"/>
+  </g>
+  <circle cx="240" cy="30" r="8" fill="#f59e0b"/>
+</svg>
