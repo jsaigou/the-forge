@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "_notes": [
+    "dest_rel_path is resolved against provision.py --root (reference host uses /opt/forge, so models land at /opt/forge/models/<family>/<model>/<file>).",
+    "null sha256/size_bytes = unknown, to be pinned after first verified download. null hf_repo or filename = TBD upstream; provisioner reports these as PENDING and skips them.",
+    "gguf:true entries are additionally checked for the 'GGUF' magic bytes.",
+    "type:\"service\" entries have no files — they are deployed separately (systemd unit / external install)."
+  ],
+  "models": [
+    {
+      "id": "gemma4-e4b-qat",
+      "role": "mandatory",
+      "hf_repo": null,
+      "gguf": true,
+      "dest_rel_path": "models/gemma4/gemma4-e4b-qat",
+      "files": [
+        { "filename": "gemma4-e4b-qat.gguf", "sha256": null, "size_bytes": null }
+      ],
+      "notes": "Default brain model (Gemma 4 E4B QAT). Exact upstream HF repo + filename TBD — placeholder filename until pinned."
+    },
+    {
+      "id": "qwen3-embedding-0.6b",
+      "role": "mandatory",
+      "hf_repo": "Qwen/Qwen3-Embedding-0.6B-GGUF",
+      "gguf": true,
+      "dest_rel_path": "models/Qwen3-Embedding-0.6B",
+      "files": [
+        { "filename": "Qwen3-Embedding-0.6B-Q8_0.gguf", "sha256": null, "size_bytes": null }
+      ],
+      "notes": "CPU-only always-on embedding server (forge-embedding.service, port 8083)."
+    },
+    {
+      "id": "parakeet-stt-0.6b",
+      "role": "mandatory",
+      "hf_repo": null,
+      "gguf": true,
+      "dest_rel_path": "models/parakeet",
+      "files": [
+        { "filename": "nemotron-3.5-asr-streaming-0.6b-f16.gguf", "sha256": null, "size_bytes": null }
+      ],
+      "notes": "STT server model (forge-stt.service). Upstream repo TBD."
+    },
+    {
+      "id": "qwen-tts",
+      "role": "mandatory",
+      "hf_repo": null,
+      "gguf": true,
+      "dest_rel_path": "models/qwentts",
+      "files": [
+        { "filename": "qwen-talker-1.7b-base-Q8_0.gguf", "sha256": null, "size_bytes": null },
+        { "filename": "qwen-tokenizer-12hz-Q8_0.gguf", "sha256": null, "size_bytes": null }
+      ],
+      "notes": "Qwen3-TTS talker + codec pair (forge-tts-base.service). Reference host keeps these under qwentts.cpp/models; mirrored into the models/ layout here."
+    },
+    {
+      "id": "qwen3-forced-aligner",
+      "role": "mandatory",
+      "hf_repo": null,
+      "gguf": false,
+      "dest_rel_path": "models/qwen3-aligner",
+      "files": [
+        { "filename": "Qwen3-ForcedAligner-0.6B.gguf", "sha256": null, "size_bytes": null }
+      ],
+      "notes": "Forced aligner word-timestamp endpoint (forge-aligner.service, port 8086). Repo/filename TBD; gguf:false pending confirmation."
+    },
+    {
+      "id": "gemma4-26b-a4b",
+      "role": "optional",
+      "hf_repo": "HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP",
+      "gguf": true,
+      "dest_rel_path": "models/gemma4/gemma4-26b-a4b-qat-hauhau-balanced-mtp",
+      "variants": {
+        "mtp": "includes the release's tuned draft head mtp-gemma-4-26B-A4B-it.gguf (used with --spec-type draft-mtp --spec-draft-n-max 4 --swa-full)"
+      },
+      "files": [
+        { "filename": "Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf", "sha256": null, "size_bytes": null },
+        { "filename": "mmproj-Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-BF16.gguf", "sha256": null, "size_bytes": null },
+        { "filename": "mtp-gemma-4-26B-A4B-it.gguf", "sha256": null, "size_bytes": null }
+      ],
+      "notes": "Source: docs/modes.md gemma4-mtp/gemma4-mtp-nothink modes."
+    },
+    {
+      "id": "qwen38-27b",
+      "role": "optional",
+      "hf_repo": null,
+      "gguf": true,
+      "dest_rel_path": "models/qwen38/qwen38-27b",
+      "variants": {
+        "rocm": "ROCm-target build variant of the same weights",
+        "vulkan": "Vulkan-target build variant of the same weights"
+      },
+      "files": [
+        { "filename": null, "sha256": null, "size_bytes": null }
+      ],
+      "notes": "Placeholder entry — exact upstream identity TBD."
+    },
+    {
+      "id": "comfyui",
+      "role": "optional",
+      "type": "service",
+      "hf_repo": null,
+      "gguf": false,
+      "dest_rel_path": null,
+      "files": [],
+      "notes": "ComfyUI runs as a service (forge-comfyui.service / remote PairNode node), not a downloaded asset."
+    }
+  ]
+}

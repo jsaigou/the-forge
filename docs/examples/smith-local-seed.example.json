@@ -1,0 +1,55 @@
+{
+  "_comment": "EXAMPLE ONLY — the synthetic two-host example deployment (host 'alpha', peer 'beta', tailnet example.ts.net) that the smith test fixtures describe. Copy this SHAPE into a LOCAL file that never ships (on the host: /var/lib/forge/smith-local-seed.json), fill in your real values, and import with `forge smith import-local <file>`. Sections are optional; a present section replaces the live setting wholesale, an absent section is left untouched. Schema: internal/smith/local_seed.go.",
+  "mesh_services": [
+    { "name": "a0", "aliases": ["a0", "router"], "address": "a0.example.ts.net:8085" },
+    { "name": "a1", "aliases": ["a1", "primary"], "address": "a1.example.ts.net:8080" },
+    { "name": "a2", "aliases": ["a2", "secondary"], "address": "a2.example.ts.net:8081" },
+    { "name": "tts", "aliases": ["tts", "text-to-speech"], "address": "tts.example.ts.net:8082" },
+    { "name": "embedding", "aliases": ["embedding"], "address": "embedding.example.ts.net:8083" },
+    { "name": "stt", "aliases": ["stt", "speech-to-text"], "address": "stt.example.ts.net:8084" },
+    { "name": "ops", "aliases": ["ops", "ops dashboard", "dashboard address"], "address": "ops.example.ts.net:5000" },
+    { "name": "comfy-alpha", "aliases": ["comfy-alpha", "comfy alpha", "comfyui"], "address": "comfy-alpha.example.ts.net:3001" },
+    { "name": "comfy-beta", "aliases": ["comfy-beta", "comfy beta", "beta comfyui"], "address": "comfy-beta.example.ts.net:7860" },
+    { "name": "ops-beta", "aliases": ["ops-beta", "ops beta", "beta node agent"], "address": "ops-beta.example.ts.net:9200" },
+    { "name": "tts-beta", "aliases": ["tts-beta", "tts beta"], "address": "tts-beta.example.ts.net:8082" },
+    { "name": "ghost-beta", "aliases": ["ghost-beta", "ghost beta", "fim autocomplete"], "address": "ghost-beta.example.ts.net:8090" },
+    { "name": "librechat", "aliases": ["librechat"], "address": "librechat.example.ts.net:3000" },
+    { "name": "workspace", "aliases": ["workspace", "hermes workspace"], "address": "workspace.example.ts.net" },
+    { "name": "notebook", "aliases": ["notebook"], "address": "notebook.example.ts.net:8502" }
+  ],
+  "build_refresh_forks": [
+    {
+      "source_ref": "/opt/example/llama.cpp",
+      "remote": "origin",
+      "upstream_ref": "origin/master",
+      "backends": {
+        "vulkan": {
+          "backend": "vulkan",
+          "configure_flags": ["-DGGML_VULKAN=ON", "-DGGML_NATIVE=ON", "-DGGML_OPENMP=ON", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN"]
+        }
+      },
+      "representative_config": { "vulkan": "example-small-model" }
+    }
+  ],
+  "binaries_tracked": [
+    {
+      "name": "llama.cpp (vulkan)",
+      "kind": "llama_build",
+      "path": "/opt/example/llama.cpp/build/bin/llama-server",
+      "source_kind": "git",
+      "source_ref": "/opt/example/llama.cpp",
+      "upstream_ref": "origin/master"
+    }
+  ],
+  "web_providers": {
+    "searxng": { "base_url": "https://search-alpha.example.ts.net", "enabled": true, "api_key": "" },
+    "firecrawl": { "base_url": "https://fetch-alpha.example.ts.net", "enabled": true, "api_key": "" },
+    "direct": { "base_url": "", "enabled": true, "api_key": "" }
+  },
+  "comfyui": {
+    "unit": "ai-mode-comfyui",
+    "url": "http://127.0.0.1:3001",
+    "model_roots": ["/opt/example/comfyui/models", "/opt/example/comfyui/extra-models"],
+    "workflow_dirs": ["/opt/example/comfyui/user/default/workflows"]
+  }
+}

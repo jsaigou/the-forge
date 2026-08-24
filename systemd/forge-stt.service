@@ -1,0 +1,22 @@
+[Unit]
+Description=The Forge — STT Server (Nemotron ASR, port 8084)
+After=network.target
+
+[Service]
+Type=simple
+User=testuser
+Group=testuser
+ExecStart=/opt/forge/parakeet-src/build/examples/server/parakeet-server \
+    --model /opt/forge/models/parakeet/nemotron-3.5-asr-streaming-0.6b-f16.gguf \
+    --host 127.0.0.1 \
+    --port 8084 \
+    --threads 4
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-stt
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

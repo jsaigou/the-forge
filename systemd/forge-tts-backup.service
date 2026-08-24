@@ -1,0 +1,9 @@
+[Unit]
+Description=Backup Forge TTS voice registry to Google Drive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=testuser
+ExecStart=/opt/forge/scripts/backup-tts-voices.sh

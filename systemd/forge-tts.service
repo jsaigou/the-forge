@@ -1,0 +1,41 @@
+# /etc/systemd/system/forge-tts.service
+# Qwen3-TTS OpenAI-compatible speech endpoint (port 8082).
+# Enabled at boot (~4.8GB GTT footprint); can still be toggled off from the
+# ops dashboard topbar — the toggle just starts/stops this unit.
+[Unit]
+Description=Forge — TTS (Qwen3-TTS via ggml/qwentts.cpp, port 8082)
+After=network.target forge-tts-custom.service
+Wants=forge-tts-custom.service
+
+[Service]
+Type=simple
+User=testuser
+Group=testuser
+WorkingDirectory=/opt/forge
+# Pure-Go replacement for scripts/tts_server.py. Build from ai-mode:
+#   cd go && go build -o /opt/forge/forge-tts ./cmd/forge-tts
+# Inference backend (FORGE_TTS_INFERENCE):
+#   cli    (default) shell the qwen-tts CLI — model reloaded per call.
+#   server front resident tts-server instances (one per model variant) for
+#          GPU-resident models. Requires companion units
+#          forge-tts-custom.service / forge-tts-design.service /
+#          forge-tts-base.service (tts-server --model ... --port 8081/8082/8083),
+#          and FORGE_TTS_SERVER_CUSTOM/_DESIGN/_BASE pointing at them.
+ExecStart=/opt/forge/forge-tts
+Environment=FORGE_TTS_LISTEN=127.0.0.1:8082
+Environment=FORGE_TTS_INFERENCE=cli
+Environment=FORGE_TTS_BIN_DIR=/opt/forge/qwentts.cpp/build
+Environment=FORGE_TTS_MODELS_DIR=/opt/forge/qwentts.cpp/models
+Environment=FORGE_TTS_SIZE=1.7b
+Environment=FORGE_TTS_BACKEND=Vulkan0
+Environment=FORGE_TTS_REGISTRY=/opt/forge/tts_voices
+EnvironmentFile=-/opt/forge/tts_voices/.internal_token_env
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-tts
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

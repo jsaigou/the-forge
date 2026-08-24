@@ -1,0 +1,11 @@
+# Build artifacts from `cd web && npm run build` — not committed. The
+# .gitkeep sentinel (kept via emptyOutDir:false in vite.config.ts) is the
+# only file tracked here so the //go:embed directive in pwa.go always finds
+# at least one file. CI runs `go build` without first running
+# `npm run build`, so the embedded PWA shell is whatever was built locally
+# and committed (typically nothing — the build runs in CI's separate web
+# job and is deployed alongside the binary, not embedded from this dir at
+# CI time).
+*
+!.gitkeep
+!.gitignore

@@ -1,0 +1,13 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Schema v23 (cost/savings sprint, Phase 4, 2026-07-30).
+--
+-- usage_events.unmetered distinguishes "this external request genuinely
+-- cost/used 0 tokens" (impossible in practice, but the column default
+-- covers it) from "the provider's response completed but carried no
+-- parseable usage object, so prompt_tokens/completion_tokens/cost_usd are
+-- placeholders, not real measurements." Default 0 (false) means every
+-- pre-existing row (all "inference"/"load_*" kinds, which always came from
+-- a real token-count source) is correctly unmetered=false without a
+-- backfill — only the new router-written "external_request" rows ever set
+-- it to 1.
+ALTER TABLE usage_events ADD COLUMN unmetered INTEGER NOT NULL DEFAULT 0;

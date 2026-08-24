@@ -1,0 +1,11 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Schema v45 (smith P7 retention sprint, 2026-08-14).
+--
+-- Crit dedup with counter: repeated crit findings from the same check_id are
+-- now collapsed to a single row (the newest) carrying a repeat_count of how
+-- many times it occurred, instead of piling up as one row per sweep (the
+-- "every check writes a row every hour, forever" growth retention.go calls
+-- out). Existing rows default to repeat_count = 1 — additive, no backfill
+-- needed; the dedup pass (retention.go's dedupCritFindings, run after each
+-- sweep) accumulates the count going forward.
+ALTER TABLE smith_findings ADD COLUMN repeat_count INTEGER NOT NULL DEFAULT 1;

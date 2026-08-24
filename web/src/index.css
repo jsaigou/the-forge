@@ -1,0 +1,3 @@
+/* Minimal reset — the real design system lives in styles/theme.css */
+* { box-sizing: border-box; }
+body { margin: 0; }

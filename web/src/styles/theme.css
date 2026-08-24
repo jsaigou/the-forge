@@ -1,0 +1,2062 @@
+/* Ported from the approved design mockup (artifact 2fc158c4). Class names are
+   kept identical to the mockup so the visual result matches 1:1; this file is
+   the mockup's own <style> block, adapted for a real app (tab switching is
+   now React conditional rendering, not display:none toggling) plus a small
+   number of new states (loading/empty/error) the static mockup didn't need. */
+
+:root {
+  /* Retheme round 2 (2026-08-05): dark palette now sourced from coolors.co/
+     f94144-f3722c-f8961e-f9c74f-90be6d-43aa8b-577590, all 7 colors used at
+     full, unmodified saturation. The 2026-08-04 re-theme below ran every
+     color through HSL+WCAG contrast math and desaturated the accents to
+     hit target ratios, which read as bland; this pass fixes contrast with
+     targeted outlines/backdrops in specific spots instead of muting hues
+     everywhere. Mapping: crit=f94144(red), heat=f3722c(orange-red),
+     heat-2=f8961e(orange), warn=f9c74f(yellow), ok=90be6d(green),
+     cool=43aa8b(teal), reserved=577590(slate — split off cool, which used
+     to double as both "remote backend" and "slot reservation", a real
+     pre-existing ambiguity fixed for free here). heat-deep is a derived
+     shadow tone (color-mix, not an 8th literal color, same role it always
+     played). tab-active (indigo) is a deliberate non-palette addition —
+     every given hue already carries a semantic role, so "which tab is
+     selected" needed a color of its own; nothing in the palette is
+     indigo/violet, so it reads as clearly its own thing. See progress.md's
+     2026-08-05 retheme entry for the full round-by-round history. */
+  --bg: #0a1012; --bg-2: #0d1619; --panel: #121d21; --panel-2: #162429;
+  --border: #1f2f35; --border-strong: #283d46;
+  --text: #e0eaee; --text-dim: #a6bbc4; --text-mute: #6f8892; --label: #89a0a9;
+  --crit: #f94144; --heat: #f3722c; --heat-2: #f8961e; --warn: #f9c74f;
+  --ok: #90be6d; --cool: #43aa8b; --reserved: #577590;
+  /* VRAM ring identity color — muted steel blue. Operator feedback
+     2026-08-14 #2: the palette greens read too close to the temp ring's cool
+     ramp (~h155 green), and every mint candidate shares that hue, so VRAM
+     moved out of the green family entirely. #6FA3C8 on dark / #33658A on
+     light reads clearly distinct from Temp (green→fuchsia) and GPU (orange),
+     and is less saturated than the previously-rejected #3A86FF. */
+  --ring-vram: #6FA3C8;
+  --heat-deep: color-mix(in srgb, var(--heat) 55%, black);
+  --tab-active: #7c5cff;
+  --load-btn-bg: var(--heat); --load-btn-text: #100a06;
+  --confirm-armed-bg: var(--crit); --confirm-armed-border: #fff;
+  --card-border-bay: color-mix(in srgb, var(--reserved) 55%, var(--border-strong));
+  --card-border-mcard: color-mix(in srgb, var(--cool) 55%, var(--border-strong));
+  --card-border-stat: color-mix(in srgb, var(--warn) 45%, var(--border-strong));
+  --card-border-info: color-mix(in srgb, var(--reserved) 40%, var(--border-strong));
+  --eyebrow-text: #fff; --eyebrow-bg: rgba(0,0,0,.5); --eyebrow-line: #fff;
+  --outline-contrast: #000;
+  /* Diagonal background bands — dedicated stripe colors, decoupled from the
+     status palette (--crit/--heat/--heat-2/--warn) so status color changes
+     never ripple into the background. 4 bands, 102px each, 672px black gap. */
+  --stripe-1: #f94144; --stripe-2: #f3722c; --stripe-3: #f8961e; --stripe-4: #f9c74f;
+  --stripe-gradient: repeating-linear-gradient(135deg,
+    var(--stripe-1) 0 102px, var(--stripe-2) 102px 204px, var(--stripe-3) 204px 306px, var(--stripe-4) 306px 408px,
+    transparent 408px 1080px);
+  /* Dashboard follow-up round 2 — categorical per-loaded-model segment
+     colors (memory-usage bar). Every other color var is already reserved
+     (heat* = brand/action, cool = remote/reserved, ok/warn/crit = status), so
+     these 4 draw from the light palette's 4 otherwise-unused hues (navy/
+     purple/pink/crimson), re-lightened/re-saturated and validated (dataviz
+     skill's scripts/validate_palette.js, --pairs all since any two segments
+     can end up adjacent depending on load order) for CVD-safety in both
+     themes. Pink (m3) and crimson (m4) sit only ~20° apart in hue, so which
+     of the two needs white vs. near-black segment text FLIPS between themes
+     (dark: m2+m4 white; light: m2+m3 white) — see the .seg.m3/.seg.m4
+     data-theme overrides below .seg.m4's rule. */
+  --m1: #299dd2; --m2: #6a59d0; --m3: #e651b2; --m4: #cd1543;
+  /* Sprint L — activity heatmap sequential ramp (dataviz skill: one hue,
+     light→dark, one step per level). Steps mix a fixed #F72585 (pre-release
+     feedback round, 2026-08-06 — previously derived from --cool) toward the
+     panel surface at 52/68/84/100%; step 4 IS #F72585 itself. 4 steps also
+     matches GitHub's own contribution-graph level count. */
+  --usage-1: color-mix(in srgb, #F72585 52%, var(--panel));
+  --usage-2: color-mix(in srgb, #F72585 68%, var(--panel));
+  --usage-3: color-mix(in srgb, #F72585 84%, var(--panel));
+  --usage-4: #F72585;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+  --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --radius: 12px;
+  --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 30px rgba(0,0,0,.45);
+  /* Pre-release feedback round (2026-08-12) — panel surfaces (cards, bays,
+     stat tiles, modals, etc.) go from solid --panel to 90%-opaque + blurred,
+     letting the striped body background show faintly through. Values
+     (90% / 12px) picked live against an Artifact preview built from these
+     same tokens. One indirection (--panel-glass, not touching --panel
+     itself) so text/icons that sit *inside* those surfaces keep reading
+     against a solid --panel in any spot that still wants one (e.g.
+     color-mix bases like --usage-*, --heat-deep above, which must stay
+     opaque or their own math breaks). */
+  --panel-glass: color-mix(in srgb, var(--panel) 90%, transparent);
+  --panel-blur: blur(12px);
+  /* Usability pass #3 (2026-07-30): load bays sized to match the external-
+     provider column so the row reads as one grid. .wrap caps content at
+     1180px with 20px side padding = 1140px; 5 columns (4 bays + the
+     provider column) at 12px gaps: (1140 - 4*12) / 5 = 218.4px. */
+  --bay-w: 218px;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    /* Retheme round 2 (2026-08-05): light palette sourced from coolors.co/
+       390099-9e0059-ff0054-ff5400-ffbd00 — violet→wine→pink-red→orange→
+       gold, one continuous warm gradient with no green and no blue. cool/
+       crit/heat/heat-2/warn map onto the 5 given hues as-is; ok (green) is
+       a genuine addition since forcing "success" onto violet or gold would
+       misread against everyone's green-means-go instinct. reserved is a
+       lightened tint of cool (35% white mixed in), the same derived-not-
+       literal treatment heat-deep always got. navy-electric and
+       tab-active are both deliberate non-palette additions, same reasoning
+       as the dark theme's tab-active: every given hue already carries a
+       meaning, and nothing in this set is blue. See progress.md's
+       2026-08-05 retheme entry for the full round-by-round history. */
+    --bg: #edf3f2; --bg-2: #e0edec; --panel: #fbfcfc; --panel-2: #f1f6f6;
+    --border: #d2e8e7; --border-strong: #b1dad8;
+    --text: #112a39; --text-dim: #3e5c6d; --text-mute: #6a8797;
+    --label: #4d6b7d;
+    --cool: #390099; --crit: #9e0059; --heat: #ff0054; --heat-2: #ff5400; --warn: #ffbd00;
+    --heat-deep: color-mix(in srgb, var(--heat) 55%, black);
+    --reserved: color-mix(in srgb, var(--cool) 65%, white);
+    --ok: #17a34a;
+    --ring-vram: #33658A;
+    --tab-active: #00b4d8;
+    --navy-electric: #1421c4;
+    --load-btn-bg: var(--navy-electric); --load-btn-text: #fff;
+    --confirm-armed-bg: var(--heat); --confirm-armed-border: #000;
+    --card-border-bay: var(--navy-electric);
+    --card-border-mcard: var(--navy-electric);
+    --card-border-stat: var(--navy-electric);
+    --card-border-info: var(--navy-electric);
+    --eyebrow-text: var(--text); --eyebrow-bg: rgba(255,255,255,.78); --eyebrow-line: var(--label);
+    --outline-contrast: #fff;
+    /* Light-theme stripes: green palette from
+       coolors.co/palette/f5fffa-e6ffeb-aaf0d1-3eb489-98ff98.
+       5 bands at 102px each (510px total), gap from 510→978 (468px). */
+    --stripe-1: #F5FFFA; --stripe-2: #E6FFEB; --stripe-3: #AAF0D1; --stripe-4: #3EB489; --stripe-5: #98FF98;
+    --stripe-gradient: repeating-linear-gradient(135deg,
+      var(--stripe-1) 0 102px, var(--stripe-2) 102px 204px, var(--stripe-3) 204px 306px,
+      var(--stripe-4) 306px 408px, var(--stripe-5) 408px 510px,
+      transparent 510px 978px);
+    --m1: #1f96d9; --m2: #3c1fec; --m3: #a12a74; --m4: #e92156;
+    --usage-1: color-mix(in srgb, var(--cool) 52%, var(--panel));
+    --usage-2: color-mix(in srgb, var(--cool) 68%, var(--panel));
+    --usage-3: color-mix(in srgb, var(--cool) 84%, var(--panel));
+    --usage-4: var(--cool);
+    --shadow: 0 1px 0 rgba(255,255,255,.6) inset, 0 6px 20px rgba(120,20,80,.12);
+    color-scheme: light;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0a1012; --bg-2: #0d1619; --panel: #121d21; --panel-2: #162429;
+  --border: #1f2f35; --border-strong: #283d46; --text: #e0eaee; --text-dim: #a6bbc4;
+  --text-mute: #6f8892; --label: #89a0a9;
+  --crit: #f94144; --heat: #f3722c; --heat-2: #f8961e; --warn: #f9c74f;
+  --ok: #90be6d; --cool: #43aa8b; --reserved: #577590;
+  /* VRAM ring identity color — muted steel blue. Operator feedback
+     2026-08-14 #2: the palette greens read too close to the temp ring's cool
+     ramp (~h155 green), and every mint candidate shares that hue, so VRAM
+     moved out of the green family entirely. #6FA3C8 on dark / #33658A on
+     light reads clearly distinct from Temp (green→fuchsia) and GPU (orange),
+     and is less saturated than the previously-rejected #3A86FF. */
+  --ring-vram: #6FA3C8;
+  --heat-deep: color-mix(in srgb, var(--heat) 55%, black);
+  --tab-active: #7c5cff;
+  --load-btn-bg: var(--heat); --load-btn-text: #100a06;
+  --confirm-armed-bg: var(--crit); --confirm-armed-border: #fff;
+  --card-border-bay: color-mix(in srgb, var(--reserved) 55%, var(--border-strong));
+  --card-border-mcard: color-mix(in srgb, var(--cool) 55%, var(--border-strong));
+  --card-border-stat: color-mix(in srgb, var(--warn) 45%, var(--border-strong));
+  --card-border-info: color-mix(in srgb, var(--reserved) 40%, var(--border-strong));
+  --eyebrow-text: #fff; --eyebrow-bg: rgba(0,0,0,.5); --eyebrow-line: #fff;
+  --outline-contrast: #000;
+  --stripe-1: #f94144; --stripe-2: #f3722c; --stripe-3: #f8961e; --stripe-4: #f9c74f;
+  --stripe-gradient: repeating-linear-gradient(135deg,
+    var(--stripe-1) 0 102px, var(--stripe-2) 102px 204px, var(--stripe-3) 204px 306px, var(--stripe-4) 306px 408px,
+    transparent 408px 1080px);
+  --m1: #299dd2; --m2: #6a59d0; --m3: #e651b2; --m4: #cd1543;
+  --usage-1: color-mix(in srgb, #F72585 52%, var(--panel));
+  --usage-2: color-mix(in srgb, #F72585 68%, var(--panel));
+  --usage-3: color-mix(in srgb, #F72585 84%, var(--panel));
+  --usage-4: #F72585;
+  --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 30px rgba(0,0,0,.45);
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #edf3f2; --bg-2: #e0edec; --panel: #fbfcfc; --panel-2: #f1f6f6;
+  --border: #d2e8e7; --border-strong: #b1dad8; --text: #112a39; --text-dim: #3e5c6d;
+  --text-mute: #6a8797; --label: #4d6b7d;
+  --cool: #390099; --crit: #9e0059; --heat: #ff0054; --heat-2: #ff5400; --warn: #ffbd00;
+  --heat-deep: color-mix(in srgb, var(--heat) 55%, black);
+  --reserved: color-mix(in srgb, var(--cool) 65%, white);
+  --ok: #17a34a;
+  --ring-vram: #33658A;
+  --tab-active: #00b4d8;
+  --navy-electric: #1421c4;
+  --load-btn-bg: var(--navy-electric); --load-btn-text: #fff;
+  --confirm-armed-bg: var(--heat); --confirm-armed-border: #000;
+  --card-border-bay: var(--navy-electric);
+  --card-border-mcard: var(--navy-electric);
+  --card-border-stat: var(--navy-electric);
+  --card-border-info: var(--navy-electric);
+  --eyebrow-text: var(--text); --eyebrow-bg: rgba(255,255,255,.78); --eyebrow-line: var(--label);
+  --outline-contrast: #fff;
+  /* Light-theme stripes: green palette from
+     coolors.co/palette/f5fffa-e6ffeb-aaf0d1-3eb489-98ff98. */
+  --stripe-1: #F5FFFA; --stripe-2: #E6FFEB; --stripe-3: #AAF0D1; --stripe-4: #3EB489; --stripe-5: #98FF98;
+  --stripe-gradient: repeating-linear-gradient(135deg,
+    var(--stripe-1) 0 102px, var(--stripe-2) 102px 204px, var(--stripe-3) 204px 306px,
+    var(--stripe-4) 306px 408px, var(--stripe-5) 408px 510px,
+    transparent 510px 978px);
+  --m1: #1f96d9; --m2: #3c1fec; --m3: #a12a74; --m4: #e92156;
+  --usage-1: color-mix(in srgb, #F72585 52%, var(--panel));
+  --usage-2: color-mix(in srgb, #F72585 68%, var(--panel));
+  --usage-3: color-mix(in srgb, #F72585 84%, var(--panel));
+  --usage-4: #F72585;
+  --shadow: 0 1px 0 rgba(255,255,255,.6) inset, 0 6px 20px rgba(62,180,137,.15);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--stripe-gradient),
+    radial-gradient(1200px 600px at 80% -10%, color-mix(in srgb, var(--heat) 8%, transparent), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+  color: var(--text); font-family: var(--ui); line-height: 1.5; -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 22px 20px 60px; }
+h1,h2,h3 { text-wrap: balance; margin: 0; }
+
+.boot-loading, .boot-error {
+  display: flex; align-items: center; justify-content: center; height: 100vh;
+  font-family: var(--mono); color: var(--text-dim); background: var(--bg);
+}
+.boot-error { color: var(--crit); padding: 20px; text-align: center; }
+
+/* header */
+/* Pre-release feedback round (2026-08-12) — locked in place while the page
+   scrolls. Negative side margins bleed it out to .wrap's own edges (20px
+   padding) so the sticky bar reads as a full-width strip rather than
+   floating narrower than the content beneath it; z-index sits above every
+   panel surface (highest in the app is the .rail/.modal-backdrop family at
+   50-60, but this only ever needs to clear in-page cards) so blurred cards
+   scrolling underneath never bleed through. */
+.top {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  position: sticky; top: 0; z-index: 30;
+  margin: 0 -20px 6px; padding: 14px 20px 10px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-mark { flex: 0 0 auto;
+  filter: drop-shadow(0 0 9px color-mix(in srgb, var(--heat) 45%, transparent)); }
+/* Retheme round 2: 50% larger (18px -> 27px), subtitle removed (App.tsx no
+   longer renders .sub). Outline is text-shadow only, never
+   -webkit-text-stroke — stroke paints centered ON the glyph edge and eats
+   into the fill; shadow copies sit behind the real glyph and only show
+   past its edge, so it outlines without ever overlapping the text. Needed
+   because the brand row now sits directly over the diagonal stripe
+   background instead of a plain panel. */
+.brand h1 {
+  font-size: 27px; letter-spacing: .3px; font-weight: 650;
+  text-shadow:
+    -1px 0 0 var(--outline-contrast), 1px 0 0 var(--outline-contrast), 0 -1px 0 var(--outline-contrast), 0 1px 0 var(--outline-contrast),
+    -1px -1px 0 var(--outline-contrast), 1px -1px 0 var(--outline-contrast), -1px 1px 0 var(--outline-contrast), 1px 1px 0 var(--outline-contrast);
+}
+.top .spacer { flex: 1; }
+.tabs { display: flex; gap: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 4px; }
+.tab { font-size: 12.5px; padding: 6px 13px; border-radius: 999px; color: var(--text-dim); cursor: pointer; white-space: nowrap; border: none; background: transparent; font-family: var(--ui); }
+/* Retheme round 2: active tab gets its own color pop instead of the
+   neutral panel-2 fill — --tab-active is deliberately outside the palette
+   proper (see :root), so it reads as "you are here" rather than borrowing
+   an already-meaningful accent. */
+.tab.active { background: var(--tab-active); color: #fff; box-shadow: 0 0 12px color-mix(in srgb, var(--tab-active) 50%, transparent); }
+.icon-btn { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--border); background: var(--panel); color: var(--text-dim); cursor: pointer; font-size: 15px; }
+.icon-btn:disabled { opacity: .4; cursor: default; }
+/* Eject — colored to match the load buttons (product feedback), distinct
+   from the neutral .icon-btn default the theme toggle keeps. */
+.icon-btn.action { color: var(--heat); border-color: color-mix(in srgb, var(--heat) 45%, var(--border)); background: color-mix(in srgb, var(--heat) 10%, var(--panel)); }
+.icon-btn.action:hover:not(:disabled) { background: color-mix(in srgb, var(--heat) 18%, var(--panel)); }
+/* Sprint K: CopyButton — small inline variant (sits next to name text, not
+   a card-corner action), morph-to-checkmark on copy (amicro "Copy Hash"). */
+.copy-btn:not(.labeled) { width: 20px; height: 20px; border-radius: 6px; font-size: 11px; flex: none; }
+.copy-btn.sm { width: 15px; height: 15px; border-radius: 4px; font-size: 8.5px; }
+.copy-btn.labeled .copy-glyph { font-size: 11px; }
+/* Sprint K: ConfirmButton — inline arm-then-confirm delete (amicro
+   "Delete" shake, reworked from window.confirm() per operator's call).
+   .confirm-btn-wrap is position:relative so .confirm-warning can bubble
+   above it without disturbing row layout, same pattern as .infotip. */
+.confirm-btn-wrap { position: relative; display: inline-flex; }
+.confirm-btn.shake { animation: shake .4s ease; }
+/* Retheme round 2: solid fill + a full contrasting border instead of a
+   tinted panel — deliberately loud, matches the severity of the action.
+   --confirm-armed-bg/border are theme-scoped (see :root): dark theme is
+   crit-red with a white border, light theme is heat/fuchsia with a black
+   border, whichever reads as unmistakable against that theme's own panel. */
+.confirm-btn.armed { background: var(--confirm-armed-bg); color: #fff; border: 2px solid var(--confirm-armed-border); }
+.confirm-btn.fading { opacity: 0; transform: scale(.9); transition: opacity .2s ease, transform .2s ease; }
+.confirm-warning {
+  position: absolute; bottom: calc(100% + 8px); right: 0;
+  width: max-content; max-width: 240px; padding: 9px 11px; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid color-mix(in srgb, var(--crit) 45%, var(--border-strong));
+  box-shadow: var(--shadow); font-size: 11.5px; line-height: 1.5; color: var(--text-dim);
+  text-align: left; white-space: normal; z-index: 60; pointer-events: none;
+}
+/* Sprint K: Settings save rotate-to-check (amicro "Settings"). */
+.save-btn.saved { background: color-mix(in srgb, var(--ok) 25%, var(--panel-2)); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
+.save-btn.saved .check { display: inline-block; animation: rotate-check .3s ease; }
+/* Sprint K: Favorite color-morph (amicro "Favorite") — now meaningful
+   since useAddFavorite/useRemoveFavorite (lib/queries.ts) flip the cached
+   state optimistically; before that fix there was nothing to morph in
+   response to for a full round trip. */
+.star-btn { color: var(--text-dim); transition: color .2s ease, transform .2s ease; }
+.star-btn.starred { color: var(--heat); animation: star-pop .3s ease; }
+@keyframes star-pop { 0% { transform: scale(1); } 40% { transform: scale(1.3); } 100% { transform: scale(1); } }
+/* Sprint K: Reload/restart icon spin (amicro "Reload") while pending. */
+.spin-icon { display: inline-block; animation: spin .8s linear infinite; }
+.copy-btn .copy-glyph { display:inline-block; transition: transform .18s ease, opacity .18s ease; }
+.copy-btn.copied { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
+.copy-btn.copied .copy-glyph { animation: rotate-check .25s ease; }
+.username { font-family: var(--mono); font-size: 11px; color: var(--text-mute); }
+
+/* Retheme round 2: backdrop behind the whole row (label + trailing line) —
+   eyebrows now sit directly over the diagonal stripes instead of bare
+   page background, so they need their own contrast panel. --eyebrow-*
+   vars are theme-scoped (see :root): black/white text on dark, white
+   panel/dark ink on light. */
+.eyebrow { font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--eyebrow-text); margin: 26px -8px 10px -8px; display: flex; align-items: center; gap: 8px; background: var(--eyebrow-bg); padding: 4px 8px; border-radius: 4px; }
+.eyebrow::after { content:""; height:1px; flex:1; background: linear-gradient(90deg,var(--eyebrow-line),transparent); }
+.page { animation: fade .2s ease; }
+@keyframes fade { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .page { animation: none; } }
+
+/* Sprint K (2026-08-05): keyframes live at global scope, never nested
+   inside a @media query — a rule that GATES an animation's usage under
+   reduced-motion is fine (see .page/fade above), but a keyframe DEFINED
+   only inside @media(prefers-reduced-motion:no-preference) is undefined at
+   global scope, so any consumer outside that block silently animates
+   nothing. Found live: ConfigCardView.tsx's inline
+   animation:"pulse 2.4s ease-in-out infinite" (the Loading… button dot)
+   resolved to nothing because @keyframes pulse used to be nested exactly
+   that way — accidentally correct under reduced-motion, broken everywhere
+   else. Every animation this sprint adds follows the pattern below: define
+   the keyframes here, gate each consumer's *usage* individually. */
+@keyframes pulse { 50% { opacity: .55; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes shake { 20%, 60% { transform: translateX(-3px); } 40%, 80% { transform: translateX(3px); } }
+@keyframes rotate-check { from { transform: rotate(-90deg); opacity: 0; } to { transform: rotate(0deg); opacity: 1; } }
+@keyframes glare-sweep { from { transform: translateX(-120%) skewX(-20deg); } to { transform: translateX(220%) skewX(-20deg); } }
+@keyframes ss-glow { 0%, 100% { opacity: .18; } 40% { opacity: 1; } }
+@keyframes deck-pop { from { opacity: 0; transform: scale(.97); } }
+@media (prefers-reduced-motion: reduce) {
+  .dot-busy, .spin-icon, .star-btn.starred, .copy-btn.copied .copy-glyph,
+  .save-btn.saved .check, .go.loading-glare::after, .square-snake .ss-cell,
+  .confirm-btn.armed, .scan-frame .scan-ring {
+    animation: none !important;
+  }
+}
+
+.empty-note { font-size: 12px; color: var(--text-mute); padding: 14px; text-align: center; }
+.error-note { font-size: 12px; color: var(--crit); padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--crit) 40%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--crit) 8%, var(--panel)); }
+
+/* services bar — content-sized flex chips (2026-07-31 Console polish pass;
+   was CSS grid with minmax(150px,1fr) columns, chosen 2026-07-29 so rows
+   filled evenly instead of raggedly). The grid stretched every tile to its
+   full column width, so a buttonless chip (STT/Embedding/…) left a large
+   blank gap on the right only — operator: "left and right margins should be
+   the same". Flex chips size to their own content, so the 10px left/right
+   padding is equal by construction; this reverses the earlier "no ragged
+   rows" call in exchange for that. Usability pass #2 (2026-07-29):
+   padding/gap tightened (operator: too much whitespace). Same-day follow-up
+   (2026-08-06): back to a flex row beside the resource dials' chip — see
+   .resources-row below — rather than its own section below Resources. */
+/* Operator feedback 2026-08-14: padding gone — the strip sits flush, the
+   chips' own border glow is the section's only chrome. */
+.services { display: flex; flex-wrap: wrap; gap: 8px; background: linear-gradient(100deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--card-border-info); border-radius: var(--radius); padding: 0; box-shadow: var(--shadow); }
+/* Resources section: the resource-dial chip beside the Services strip,
+   dials on the left, services filling the remaining width to the right
+   (2026-08-06 follow-up — was stacked with Services below). */
+/* flex-start (operator feedback 2026-08-14, padding removal): stretch made
+   the services strip inherit the ring chip's height and its chips blew up
+   into tall empty boxes; the strip now hugs its own row of chips. */
+.resources-row { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.resources-row .stat { flex: 1 1 220px; min-width: 0; }
+/* Console chip system (.cchip). Three chip types share a base visual
+   language (border + glow communicates status, no status light dot):
+   - Service status chips (always-on daemons: LLM Router, STT, Embedding,
+     Aligner, TTS, Compression) — base .cchip, no vertical padding.
+   - Provider tiles (external API providers: OpenAI, DeepSeek, etc.) —
+     .cchip-provider, restored vertical padding.
+   - Add-on tiles (start/stop services: ComfyUI) — same as provider tiles.
+   - Resource dials chip (RingCluster: VRAM/GPU/Temp) — .cchip-resources,
+     reduced padding. */
+.cchip { display: flex; align-items: center; gap: 5px; padding: 0 7px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; min-width: 0; flex: 0 0 auto; transition: border-color .2s ease, box-shadow .2s ease; }
+.cchip-on { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); box-shadow: 0 0 12px color-mix(in srgb, var(--ok) 55%, transparent); }
+.cchip-warn { border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); box-shadow: 0 0 12px color-mix(in srgb, var(--warn) 55%, transparent); }
+.cchip-crit { border-color: color-mix(in srgb, var(--crit) 50%, var(--border)); box-shadow: 0 0 14px color-mix(in srgb, var(--crit) 65%, transparent); }
+.cchip-off { box-shadow: none; }
+/* Operator feedback 2026-08-14: the service chips' label text carries the
+   status color + glow (the border glow alone was too subtle at a glance).
+   Scoped to .services so it follows the strip (Dashboard → Overview as of
+   the same feedback round). Off stays unlit. */
+.services .cchip-on .nm { color: var(--ok); text-shadow: 0 0 9px color-mix(in srgb, var(--ok) 60%, transparent); }
+.services .cchip-warn .nm { color: var(--warn); text-shadow: 0 0 9px color-mix(in srgb, var(--warn) 60%, transparent); }
+.services .cchip-crit .nm { color: var(--crit); text-shadow: 0 0 10px color-mix(in srgb, var(--crit) 70%, transparent); }
+/* Provider/add-on tiles: restored vertical padding (operator feedback
+   2026-08-14: the QA sprint wrongly stripped vertical padding from ALL
+   chips including providers; providers and add-ons need it). */
+.cchip-provider { padding: 3px 7px; }
+/* Resource dials chip: the RingCluster (VRAM/GPU/Temp concentric rings).
+   Padding gone with the rest of the section's (operator feedback
+   2026-08-14; was 14px 18px originally, 4px 10px after the QA sprint). */
+.cchip-resources { flex: 0 0 auto; gap: 16px; padding: 0; }
+.cchip .sd { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+/* Chip vendor logo. Sized to roughly match .nm's 12.5px text rather than
+   the 26px .icon.sm default — an icon glyph fills its whole box while text
+   glyphs don't, so a slightly-larger-than-text box still reads as
+   text-sized. */
+.cchip .icon { width: 11px; height: 11px; border-radius: 3px; }
+.cchip .icon.sm { width: 13px; height: 13px; border-radius: 4px; }
+.cchip .nm { font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.cchip .pu { font-family: var(--mono); font-size: 10px; color: var(--text-mute); white-space: nowrap; flex-shrink: 0; }
+.sd.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.sd.off { background: var(--border-strong); }
+.sd.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.sd.crit { background: var(--crit); box-shadow: 0 0 8px var(--crit); }
+@media (max-width: 900px) {
+  .cchip { padding: 0 6px; gap: 5px; }
+  .cchip .nm { font-size: 11.5px; }
+  .cchip-resources { gap: 12px; }
+}
+@media (max-width: 640px) {
+  .services { gap: 4px; }
+  .cchip { padding: 0 5px; gap: 4px; }
+  .cchip .nm { font-size: 11px; }
+  .cchip .pu { font-size: 9px; }
+  .cchip-resources { gap: 8px; }
+}
+
+/* Console resource bar (2026-08-15): one full-width panel of two stacked
+   GPU / VRAM bars — label on the left, bars filling the rest. Sitting above
+   smith's suggestions; replaces the removed Resources dials chip. */
+.resbar { display: flex; flex-direction: column; gap: 0; margin-bottom: 12px; background: rgba(0,0,0,.5); border-radius: 0; padding: 5px 14px; }
+.resbar .rb-row { display: flex; align-items: center; gap: 12px; }
+.resbar .rb-k { flex: 0 0 40px; font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: #fff; }
+.resbar .rb-track { flex: 1 1 auto; height: 3px; border-radius: 0; background: var(--bg-2); overflow: hidden; }
+.resbar .rb-fill { height: 100%; transition: width .4s ease; clip-path: polygon(0 0, 100% 25%, 100% 75%, 0 100%); }
+
+/* slot bays
+   2026-07-29 Console usability pass (whitespace): align-items:start stops
+   short/empty bays stretching to the tallest row-mate (same fix as
+   .gallery the same day — grid stretch + pinned-to-bottom content was the
+   whole bug class), min-height:200px dropped so bays size to content, and
+   the readout goes 3-col so footprint/context/badges share one row instead
+   of wrapping 2+1.
+   Usability pass #2 (same day): bays are now progressively revealed
+   (1–4 visible, see Console.tsx visibleSlotKeys), so the fixed 4-col track
+   is gone — auto-fill keeps card width consistent at any count. External-
+   provider status tiles sit in a fixed column on the right (.provider-col)
+   inside .bays-row.
+   Usability pass #3 (2026-07-30): bay width now matches the provider
+   column exactly (--bay-w, defined with its column-count math at :root)
+   so a full-width screen reads as one uniform 5-column grid. A fixed
+   track (not minmax(…, 1fr)) is required here — with 1fr, one or two
+   progressively-revealed bays would stretch to fill the row instead of
+   matching the provider tiles' width. */
+.bays-row { display: flex; gap: 12px; align-items: flex-start; }
+.bays-row .bays { flex: 1 1 auto; min-width: 0; }
+.provider-col { flex: 0 0 var(--bay-w); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.provider-divider { height: 1px; background: var(--border); margin: 2px 0; }
+.bays { display: grid; grid-template-columns: repeat(auto-fill, var(--bay-w)); justify-content: start; gap: 12px; align-items: start; }
+.bay { background: var(--panel); border: 1px solid var(--card-border-bay); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); position: relative; overflow: hidden; display: flex; flex-direction: column; }
+.bay .slotid { font-family: var(--mono); font-size: 11px; color: var(--text-mute); letter-spacing: .1em; }
+/* Sprint K: diagonal warning-stripe overlay while a profiling run holds the
+   fleet (see Bay.tsx's profilingHold comment for why this applies to every
+   loaded bay rather than guessing which slot). Low-opacity so the bay's own
+   content stays legible underneath. */
+.bay.profiling-hold::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 1;
+  background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--warn) 14%, transparent) 0 10px, transparent 10px 20px);
+}
+.bay .statusdot { position:absolute; top:14px; right:14px; width:9px; height:9px; border-radius:50%; }
+/* Sprint K: SquareSnake occupies the same corner as .statusdot when a
+   loaded slot is actively generating (Bay.tsx swaps one for the other,
+   never both). Slightly larger than the 9px dot since it's a 3×3 grid,
+   not a single circle, but kept badge-sized — see SquareSnake.tsx's doc
+   comment for why this is deliberately not a card-border effect. */
+.bay .square-snake { position:absolute; top:12px; right:12px; }
+.square-snake { display:inline-grid; grid-template-columns:repeat(3,3px); grid-template-rows:repeat(3,3px); gap:1.5px; }
+.square-snake .ss-cell { width:3px; height:3px; border-radius:1px; background:var(--heat); opacity:.18; animation:ss-glow 1.35s ease-in-out infinite; animation-delay:calc(var(--ss-step) * 120ms); }
+/* Sprint K: ScanFrame — amicro "Face ID" throbber, replaces ProfilingPanel's
+   plain 7px dot-busy pulse. Four corner brackets (static) + a pulsing
+   center ring (reuses ss-glow, the same opacity-pulse SquareSnake's cells
+   use). */
+.scan-frame { position: relative; display: inline-block; width: 16px; height: 16px; flex: none; }
+.scan-corner { position: absolute; width: 5px; height: 5px; border: 1.5px solid var(--warn); }
+.scan-corner.tl { top: 0; left: 0; border-right: none; border-bottom: none; border-radius: 2px 0 0 0; }
+.scan-corner.tr { top: 0; right: 0; border-left: none; border-bottom: none; border-radius: 0 2px 0 0; }
+.scan-corner.bl { bottom: 0; left: 0; border-right: none; border-top: none; border-radius: 0 0 0 2px; }
+.scan-corner.br { bottom: 0; right: 0; border-left: none; border-top: none; border-radius: 0 0 2px 0; }
+.scan-ring { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--warn); animation: ss-glow 1.2s ease-in-out infinite; }
+.dot-ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.dot-busy { background: var(--heat); box-shadow: 0 0 8px var(--heat); animation: pulse 2.4s ease-in-out infinite; }
+.dot-empty { background: var(--border-strong); }
+.dot-res { background: var(--reserved); box-shadow: 0 0 8px var(--reserved); }
+.bay .mhead { display:flex; align-items:center; gap:9px; margin-top:6px; }
+.bay .mhead > div { min-width: 0; }
+.bay .model { font-weight: 620; font-size: 14px; line-height: 1.2; min-width: 0; }
+.bay .model .mn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bay .maker { font-size: 11px; color: var(--text-mute); }
+/* 2-col readout with the badges cell spanning full width (.ro-badges):
+   text-pill fallback badges (no icon slug) stacked one-per-line when
+   squeezed into a narrow column, tripling a loaded bay's height (caught
+   live 2026-07-29). Full width lets them flow horizontally. */
+.bay .readout { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.bay .readout .ro-badges { grid-column: 1 / -1; }
+.ro .v { font-family: var(--mono); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.ro .v small { color: var(--text-mute); font-size: 10.5px; }
+.ro .k { font-size: 10px; color: var(--text-mute); letter-spacing: .05em; text-transform: uppercase; }
+.heatbar { height: 3px; border-radius: 3px; background: var(--border); margin-top: 12px; overflow: hidden; }
+.heatbar i { display:block; height:100%; background: linear-gradient(90deg,var(--heat-2),var(--heat)); }
+.bay .state { font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; margin-top: 6px; }
+.bay.empty { border-style: dashed; align-items: stretch; justify-content: center; text-align: center; color: var(--text-mute); }
+.bay .load-btn { margin-top: 10px; align-self: center; font-size: 12.5px; color: var(--heat); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 12px; cursor: pointer; background: transparent; }
+.bay .load-btn:disabled { opacity: .4; cursor: default; }
+.bay.reserved { border-left: 3px solid var(--reserved); }
+.chip { display:inline-block; font-family: var(--mono); font-size: 10px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-dim); letter-spacing: .04em; }
+.chip.rocm { color: var(--cool); border-color: color-mix(in srgb, var(--cool) 40%, var(--border)); }
+.chip.vulkan { color: var(--heat-2); border-color: color-mix(in srgb, var(--heat) 40%, var(--border)); }
+.chip.remote { color: var(--cool); border-color: color-mix(in srgb, var(--cool) 40%, var(--border)); }
+/* ApplyBadge (Sprint 12 Phase 6) — same tinted-chip pattern as .chip.rocm/
+   .vulkan/.remote above, one modifier per apply mode. No new color system:
+   --ok/--cool/--warn/--text-mute are all pre-existing. */
+.chip.apply-immediate { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }
+.chip.apply-live { color: var(--cool); border-color: color-mix(in srgb, var(--cool) 40%, var(--border)); }
+.chip.apply-restart { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); }
+.chip.apply-seed { color: var(--text-mute); border-color: var(--border); }
+
+/* company logo mark */
+.logo { width: 34px; height: 34px; border-radius: 9px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15px; letter-spacing: -.5px; color: #fff; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); background: linear-gradient(135deg,#3a3f4b,#20242c); }
+.logo.sm { width: 26px; height: 26px; border-radius: 7px; font-size: 12px; }
+/* Sprint B: 128×128 for the portrait model card face + the config/model
+   expanded detail views — a third size alongside the default and .sm. */
+.logo.xl { width: 128px; height: 128px; border-radius: 22px; font-size: 48px; }
+.logo.google { background: linear-gradient(135deg,#4285f4,#34a853 40%,#fbbc05 70%,#ea4335); }
+.logo.gemma { background: linear-gradient(135deg,#4285f4,#1a73e8); }
+.logo.nvidia { background: #76b900; color: #0b1500; }
+.logo.alibaba { background: linear-gradient(135deg,#6d5efc,#8b5cf6); }
+.logo.oss { background: linear-gradient(135deg,#2f3a3a,#12b0a8); }
+.logo.moonshot { background: linear-gradient(135deg,#1a1a2e,#4b3f8f); }
+.logo.deepseek { background: linear-gradient(135deg,#2b6cff,#1e3a8a); }
+.logo.anthropic { background: #d97a4f; color:#231a12; }
+.logo.meta { background: linear-gradient(135deg,#0668e1,#0081fb); }
+.logo.mistral { background: linear-gradient(135deg,#fa5f24,#f7a13e); }
+.logo.openai { background: #10a37f; }
+/* .logo.swallow removed — Phase 3 (2026-08-12): the hand-authored bird mark
+   is gone from the icon manifest; Swallow models fall back to this same
+   plain letter badge like any other unsourced mark. */
+
+/* Icon system (Sprint 0 §0.8) — vendored SVG + edge/ring normalization.
+   <Icon> drop-replaces <Logo>: same footprint, but renders the committed
+   brand/badge SVG inline (CSP-safe; no runtime fetch). Ring rule: edge "dark"
+   (near-black border) → white ring on dark themes; edge "light" (near-white
+   border) → black ring on light themes; "none" (colored / currentColor) → no
+   ring. `edge` is precomputed into the manifest at build time, so the runtime
+   just applies a class — no image analysis. The container is transparent so
+   self-contained brand marks + currentColor badges render without a chip bg. */
+.icon { position: relative; width: 34px; height: 34px; border-radius: 9px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; overflow: hidden; line-height: 0; }
+.icon.sm { width: 26px; height: 26px; border-radius: 7px; }
+.icon.xl { width: 160px; height: 160px; border-radius: 26px; }
+.icon > svg, .icon svg { width: 100%; height: 100%; display: block; }
+/* Uploaded data-URL icons (Sprint A2) — same full-bleed box as inline SVGs. */
+.icon > img { width: 100%; height: 100%; display: block; object-fit: cover; }
+/* Default theme is dark (:root + [data-theme="dark"]): a near-black-edged mark
+   blends into the dark panel → add a contrasting white ring; a near-white-edged
+   mark already contrasts → no ring. */
+.icon.edge-dark { box-shadow: inset 0 0 0 1px rgba(255,255,255,.55); }
+.icon.edge-light { box-shadow: none; }
+.icon.edge-none { box-shadow: none; }
+/* Light theme ([data-theme="light"], or prefers-color-scheme: light when no
+   explicit data-theme): mirror the rule — black ring for near-white edges,
+   drop the white ring for near-black edges. */
+:root[data-theme="light"] .icon.edge-dark { box-shadow: none; }
+:root[data-theme="light"] .icon.edge-light { box-shadow: inset 0 0 0 1px rgba(0,0,0,.22); }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .icon.edge-dark { box-shadow: none; }
+  :root:not([data-theme]) .icon.edge-light { box-shadow: inset 0 0 0 1px rgba(0,0,0,.22); }
+}
+
+/* Phase 3 (pre-release feedback sprint) — light/dark icon variant pair
+   (Icon.tsx). Only rendered when a subject actually has a separate dark
+   mark; the common single-mark case above is untouched. Both variants sit
+   absolutely inside the now-`position:relative` .icon box (border-radius:
+   inherit keeps the ring's rounding matched to the container); exactly one
+   shows via the identical three-branch selector the edge-* rules above use
+   — [data-theme="light"] override, @media prefers-color-scheme fallback for
+   :root:not([data-theme]). Default (no explicit attr, or [data-theme="dark"])
+   is dark theme, so .icon-v.dark starts visible. */
+.icon-v { position: absolute; inset: 0; border-radius: inherit; display: none; }
+.icon-v > svg, .icon-v > img { width: 100%; height: 100%; display: block; }
+.icon-v > img { object-fit: cover; }
+.icon-v.dark { display: block; }
+.icon-v.light { display: none; }
+:root[data-theme="light"] .icon-v.dark { display: none; }
+:root[data-theme="light"] .icon-v.light { display: block; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .icon-v.dark { display: none; }
+  :root:not([data-theme]) .icon-v.light { display: block; }
+}
+/* Ring per variant is a STATIC function of that variant's own edge, not
+   theme-conditional like .icon.edge-* above — a variant only ever renders
+   in its own home theme (dark mark in dark theme, light mark in light
+   theme), so there's no "same asset crossing both themes" case to flip a
+   ring for. */
+.icon-v.dark.edge-dark { box-shadow: inset 0 0 0 1px rgba(255,255,255,.55); }
+.icon-v.light.edge-light { box-shadow: inset 0 0 0 1px rgba(0,0,0,.22); }
+
+/* memory budget */
+.budget { background: var(--panel); border: 1px solid var(--card-border-info); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); }
+.budget .row1 { display:flex; align-items:baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.budget h3 { font-size: 14px; font-weight: 600; }
+.budget .free { margin-left:auto; font-family: var(--mono); font-size: 13px; color: var(--text-dim); }
+.budget .free b { color: var(--ok); }
+/* Dashboard follow-up round 2: +50% taller (26px -> 39px) and larger in-bar
+   text (10.5px -> 15px) so per-model labels ("config name · ~NN GB") read at
+   a glance now that the below-bar model list is gone (the bar carries that
+   info itself via color + label). */
+/* Retheme round 2: square edges (operator request — no rounded corners
+   on the memory meter). */
+.meter { height: 39px; border-radius: 0; background: var(--bg-2); border: 1px solid var(--border); display: flex; overflow: hidden; }
+.seg { height: 100%; display:flex; align-items:center; justify-content:center; font-family: var(--mono); font-size: 15px; color: #10100e; font-weight: 600; white-space: nowrap; overflow: hidden; padding: 0 8px; }
+/* One categorical color per loaded model (was 4 shades of one orange hue —
+   not meaningfully distinct). Built from the --m1-4 vars (validated for
+   CVD-safety against each other, see :root) rather than hardcoded hex, so
+   both themes get correct, separately-validated values. */
+/* Retheme round 2: flat fill, no vertical gradient — matches the flatter,
+   cleaner button treatment below; a gradient looked odd once the meter's
+   edges went sharp. Text-color choice per swatch is unchanged (see the
+   .seg.m3/.seg.m4 data-theme overrides below). */
+.seg.m1 { background: var(--m1); }
+.seg.m2 { background: var(--m2); color: #fff; }
+.seg.m3 { background: var(--m3); }
+.seg.m4 { background: var(--m4); color: #fff; }
+/* m3/m4 sit close in hue (pink/crimson) and cross the near-black/white text
+   threshold in opposite directions per theme — dark wants m3 black (default)
+   + m4 white (set above); light wants the reverse. Mirrors the .icon.edge-*
+   theme-scoped override pattern already used above for the same reason
+   (per-theme swatch lightness, not a single global default). */
+:root[data-theme="light"] .seg.m3 { color: #fff; }
+:root[data-theme="light"] .seg.m4 { color: #10100e; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .seg.m3 { color: #fff; }
+  :root:not([data-theme]) .seg.m4 { color: #10100e; }
+}
+.seg.free { background: repeating-linear-gradient(135deg, transparent, transparent 7px, color-mix(in srgb,var(--ok) 18%, transparent) 7px, color-mix(in srgb,var(--ok) 18%, transparent) 14px); color: var(--text-mute); }
+/* S2 attribution: non-slot GPU holders (ComfyUI / always-on services) get a
+   distinct neutral fill so they read as "named but not a model slot"; the
+   unattributed remainder gets a flat muted fill — deliberately duller than
+   everything else, since its whole point is honesty about NOT knowing. */
+.seg.aux { background: color-mix(in srgb, var(--m2) 45%, var(--bg-2)); color: #10100e; }
+:root[data-theme="light"] .seg.aux { color: #10100e; }
+@media (prefers-color-scheme: light) { :root:not([data-theme]) .seg.aux { color: #10100e; } }
+.seg.other { background: color-mix(in srgb, var(--text-mute) 30%, var(--bg-2)); color: var(--text-dim); font-size: 12px; }
+/* Attribution legend under the meter: every named holder with its byte
+   figure. Stacks naturally at narrow widths (no fixed columns — the F2
+   WebKit min-width lesson); each row is a plain flex line. */
+.memlegend { display: flex; flex-direction: column; gap: 3px; margin-top: 10px; }
+.memlegend .row { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 12px; }
+.memlegend .row .dot { width: 9px; height: 9px; flex: none; align-self: center; border: 1px solid var(--border); }
+.memlegend .row .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memlegend .row .bytes { margin-left: auto; font-family: var(--mono); color: var(--text-mute); white-space: nowrap; }
+.fit { display:flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.fit .f { display:flex; align-items:center; gap:8px; font-size: 12px; border:1px solid var(--border); border-radius: 8px; padding: 7px 11px; background: var(--panel-2); }
+.fit .f .name { font-weight:600; }
+.fit .f .req { font-family: var(--mono); color: var(--text-mute); }
+.badge { font-family: var(--mono); font-size:10px; padding: 2px 7px; border-radius: 999px; letter-spacing:.04em; }
+.badge.yes { color: var(--ok); background: color-mix(in srgb,var(--ok) 15%, transparent); }
+.badge.evict { color: var(--warn); background: color-mix(in srgb,var(--warn) 15%, transparent); }
+.badge.no { color: var(--crit); background: color-mix(in srgb,var(--crit) 15%, transparent); }
+
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); }
+.card h3 { font-size: 13px; font-weight: 600; display:flex; align-items:center; gap: 8px; margin-bottom: 12px; }
+.card h3 .tick { width:7px; height:7px; border-radius:50%; background: var(--heat); box-shadow:0 0 7px var(--heat); }
+
+/* queue */
+.qrow { display:flex; align-items:center; gap: 10px; font-size: 12.5px; padding: 8px 0; border-top: 1px solid var(--border); }
+.qrow:first-of-type { border-top: none; }
+.qrow .who { font-family: var(--mono); color: var(--cool); font-size: 11.5px; }
+.qrow .want { font-weight: 600; }
+.qrow .pos { margin-left:auto; font-family: var(--mono); font-size: 11px; color: var(--text-mute); }
+/* Compact brand mark inside CatalogPanel rows (Sprint A2/A5) — 18px, inline. */
+.qrow .icon, .qrow .logo { width: 18px; height: 18px; border-radius: 4px; display: inline-flex; vertical-align: middle; margin-right: 4px; font-size: 10px; letter-spacing: 0; }
+/* Offering/provider tiles + provider chips (Sprint A5). */
+.prox .icon, .prox .logo { width: 18px; height: 18px; border-radius: 4px; display: inline-flex; font-size: 10px; letter-spacing: 0; }
+.chip .icon, .chip .logo { width: 11px; height: 11px; border-radius: 3px; display: inline-flex; vertical-align: -2px; margin-right: 3px; font-size: 8px; letter-spacing: 0; box-shadow: none; }
+.qrow .pos.run { color: var(--ok); }
+
+/* calendar */
+.calwrap { overflow-x: auto; }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(120px,1fr)); gap: 8px; min-width: 760px; }
+.calday { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-height: 200px; display:flex; flex-direction:column; gap:7px; }
+.calday.today { border-color: color-mix(in srgb, var(--heat) 45%, var(--border)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--heat) 30%, transparent); }
+.calday .dh { display:flex; align-items:baseline; justify-content:space-between; margin-bottom: 4px; }
+.calday .dh .dn { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-mute); }
+.calday .dh .dd { font-family: var(--mono); font-size: 14px; }
+.calday.today .dh .dd { color: var(--heat); }
+.resblk { border-radius: 8px; padding: 7px 8px; font-size: 11px; border-left: 3px solid var(--reserved); background: color-mix(in srgb, var(--reserved) 12%, var(--panel-2)); cursor: pointer; }
+.resblk.box { border-left-color: var(--heat); background: color-mix(in srgb, var(--heat) 12%, var(--panel-2)); }
+.resblk .rt { font-family: var(--mono); font-size: 10px; color: var(--text-mute); }
+.resblk .rl { font-weight: 600; margin-top: 2px; line-height: 1.25; }
+.resblk .rs { font-size: 9.5px; color: var(--text-mute); margin-top: 2px; }
+
+/* model gallery — align-items:start (not the grid default stretch): cards
+   carry organically varying content (badges, capability bars, description
+   length), so no amount of clamping one field ever makes every card in a
+   row the same height. Stretching them anyway just relocates the mismatch
+   into a gap before .mfoot's pinned-bottom footer instead of removing it.
+   Letting each card size to its own content means row-mates' *headers*
+   still align (grid columns), which is what actually reads as "aligned" —
+   uneven card bottoms in a content grid is normal and expected. */
+/* minmax(0,1fr) — not bare 1fr (= minmax(auto,1fr)) — so a card's content
+   min-content can never inflate the track past its share of the container
+   (mobile F2: fresh 390px loads grew two tracks to 588px of page scroll).
+   min-width:0 on the items is the other half: a stretched grid item's
+   automatic minimum size is still min-content (spec), and WebKit enforces
+   that clamp even when the track min is 0 — Chromium forgives, Safari
+   rendered 262px cards in a 169px track until the items got min-width:0. */
+.gallery { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.gallery > .mcard { aspect-ratio: 2 / 3; overflow: hidden; }
+.gallery > *, .bays > *, .stats > *, .sys > * { min-width: 0; }
+/* Usability pass #3 (2026-07-30): the whole card opens the expanded detail
+   view — cursor + focus ring make that discoverable/keyboard-accessible
+   (star/edit/load stopPropagation so they don't also trigger it). */
+.mcard { background: var(--panel); border: 1px solid var(--card-border-mcard); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow); display:flex; flex-direction:column; cursor: pointer; gap: 6px; }
+.mcard:focus-visible { outline: 2px solid var(--heat); outline-offset: 2px; }
+/* flex-wrap: at narrow phone card widths the icon + badge column + name +
+   star no longer fit one row — let them wrap instead of forcing the card's
+   min-content wide (second half of the mobile F2 overflow fix). */
+.mcard .mtop { display:flex; align-items:flex-start; gap: 11px; flex-wrap: wrap; }
+.mcard .mname { font-weight: 640; font-size: 14.5px; line-height: 1.2; min-width: 0; overflow-wrap: anywhere; }
+.mcard .mmaker { font-size: 12px; color: var(--text-mute); margin-top:3px; }
+/* Sprint J2: badge glyphs move off the inline .mname row and onto the icon
+   itself — BadgeCluster wraps <Icon> in a column stack of up to 4 circular
+   chips sitting below it (operator feedback: chips originally overlapped
+   the icon's bottom edge — shifted to normal flow underneath instead so
+   they never cover the artwork). .bcluster needs flex:0 0 auto since it
+   now sits where a bare .icon (already flex:0 0 auto) used to be a direct
+   flex child of .mtop / the portrait card. Operator feedback after the
+   first browser pass: the default chip size (13px, sized to the unchanged
+   34px config icon) read as too small — both chips bumped 2.5x, and the
+   config-card icon itself bumped 2x (34px -> 68px, scoped to .bcluster's
+   non-xl case only via :not(.xl) so the many other .icon call sites
+   elsewhere in the app are untouched). The xl (128px) model-card icon is
+   unchanged — only the chips on it grew. */
+.bcluster { display: inline-flex; flex-direction: column; align-items: center; flex: 0 0 auto; }
+.bcluster:not(.xl) .icon { width: 68px; height: 68px; border-radius: 15px; }
+.bcluster .bchips { display: flex; margin-top: 6px; }
+.bcluster .bchip { width: 33px; height: 33px; border-radius: 50%; background: var(--panel); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; overflow: hidden; margin-left: -10px; box-shadow: var(--shadow); }
+.bcluster .bchip:first-child { margin-left: 0; }
+.bcluster .bchip .icon { width: 23px; height: 23px; border-radius: 0; }
+.bcluster.xl .bchips { margin-top: 8px; }
+.bcluster.xl .bchip { width: 50px; height: 50px; margin-left: -15px; }
+.bcluster.xl .bchip .icon { width: 33px; height: 33px; }
+/* Sprint K (operator addition): config cards move badges off the icon
+   entirely — .bcluster there now wraps a bare icon (no .bchips inside;
+   still reuses its 68px :not(.xl) sizing above), and a separate .bcolumn
+   sits between it and the name/creator text as its own vertical stack.
+   Portrait model cards are untouched — they still use .bcluster's own
+   .bchips row below the icon (J2 above), never .bcolumn. Chip size (22px)
+   and overlap (-7px) are tuned so 4 stacked chips roughly match the 68px
+   icon's height, keeping .mtop's row height consistent whether or not a
+   config card has any badges at all. */
+.bcolumn { display: flex; flex-direction: column; flex: 0 0 auto; }
+.bcolumn .bchip { width: 22px; height: 22px; border-radius: 50%; background: var(--panel); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; overflow: hidden; margin-top: -7px; box-shadow: var(--shadow); }
+.bcolumn .bchip:first-child { margin-top: 0; }
+.bcolumn .bchip .icon { width: 15px; height: 15px; border-radius: 0; }
+/* .mbadges (BadgeIcon plain-list rows — text pills + glyphs together) came
+   off the two card faces but stays live for ModelDetailView/ConfigDetailView
+   (rendered next to the detail-view <h3>, not inside .mcard's own layout).
+   Deliberately NOT re-scoped under .mcard: DetailModal happens to render as
+   a DOM descendant of the triggering .mcard today (no portal — see the
+   text-align inheritance bug fixed in Sprint B), but that's an accident of
+   how modals are mounted, not something this rule should depend on. */
+.mbadges { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; vertical-align: middle; }
+.mbadges .icon { width: 16px; height: 16px; border-radius: 4px; }
+.mbadges .kf { font-size: 9.5px; padding: 1px 6px; }
+/* Sprint B: portrait model cards on the Models page — narrower columns (the
+   whole point is a taller, narrower card with a prominent icon, not the
+   wide 3-up layout the config gallery keeps) and a centered header instead
+   of .mtop's left-icon/right-text row, since there's no per-row content
+   (star, edit) fighting for the same line anymore. */
+.gallery.portrait { grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
+/* Operator feedback 2026-08-14: drilled-in model cards center instead of
+   left-packing, and the min track width grew with the card size. */
+.umc-expanded .gallery.portrait { justify-content: center; }
+/* Strict 5:7 portrait ratio (visual pass 2026-08-14): the card box is
+   always exactly 5:7 regardless of content volume. Interior sections get
+   min-height:0 so a worst-case card lets them compress (clipping at the
+   card edge via overflow:hidden) instead of stretching the box off-ratio. */
+.mcard.portrait { align-items: center; text-align: center; aspect-ratio: 5 / 7; overflow: hidden; }
+.mcard.portrait .mdesc, .mcard.portrait .caps, .mcard.portrait .mproviders, .mcard.portrait .mbench { min-height: 0; }
+.mcard.portrait .mname { margin-top: 12px; }
+.mcard.portrait .caps { width: 100%; text-align: left; }
+
+/* ── Playing-card chrome (PlayingCard.tsx, playing-card redesign 2026-08-14)
+   ─────────────────────────────────────────────────────────────────────────
+   Family + model cards render as playing cards: a solid card-stock face
+   (paper is opaque, so the face deliberately uses solid --panel, not the
+   glass treatment), a stacked-shadow 3D edge reading as card thickness on
+   the bottom edge, a double inner frame INTERRUPTED at top-center by the
+   nameplate (the model/family name sits in the gap), the model/family logo
+   top-left capped at ≤30% of the card width, and the maker's mark bottom-
+   right as a grayscale, half-alpha watermark. */
+:root {
+  /* Card-stock edge tones derived from the theme tokens so both themes get
+     a visible "paper core" without a third palette block: dark theme lands
+     on a lighter slate strip under the dark face, light theme on a shaded
+     strip under the near-white face. */
+  --pcard-edge: color-mix(in srgb, var(--text) 18%, var(--panel));
+  --pcard-edge-dk: color-mix(in srgb, var(--text) 9%, var(--panel));
+  /* Selected-card inner-frame glow (operator feedback 2026-08-14). */
+  --gold: #e8b64c;
+}
+.pcard { position: relative; }
+.pcard.portrait { aspect-ratio: 5 / 7; }
+.pcard.interactive { cursor: pointer; }
+.pcard:focus-visible { outline: 2px solid var(--heat); outline-offset: 3px; border-radius: var(--radius); }
+.pcard-face {
+  position: relative;
+  width: 100%; height: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--card-border-mcard);
+  background: var(--panel);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  /* 3D edge: stacked 1px shadows = card-stock thickness; the soft drop
+     then floats the card off the page. */
+  box-shadow:
+    0 1px 0 var(--pcard-edge),
+    0 2px 0 var(--pcard-edge),
+    0 3px 0 var(--pcard-edge-dk),
+    0 4px 0 var(--pcard-edge-dk),
+    0 16px 32px rgba(0,0,0,.4);
+}
+/* Card-stock sheen — a separate layer instead of tinting the face
+   background, so the nameplate's solid --panel patch always matches the
+   flat face color exactly where it interrupts the frame. */
+.pcard-face::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: linear-gradient(155deg, rgba(255,255,255,.055), rgba(255,255,255,0) 42%, rgba(0,0,0,.12));
+}
+/* Inner frame — double rule like a court card's border. The nameplate sits
+   over the top run and visually interrupts it. Operator feedback
+   2026-08-14: border moved in ~double the old 9px margin (18px), the model
+   logo rides IN FRONT of it (z 3 > 1) and the company mark BEHIND it
+   (z 0 < 1), both pushed toward the edges so they overlap the border. */
+.pcard-frame {
+  position: absolute; inset: 18px; z-index: 1; pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 72%, var(--text-mute));
+  border-radius: calc(var(--radius) - 5px);
+  transition: border-color .25s ease, box-shadow .25s ease;
+}
+.pcard-frame::after {
+  content: ""; position: absolute; inset: 4px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 40%, transparent);
+  border-radius: calc(var(--radius) - 8px);
+  transition: border-color .25s ease;
+}
+/* Selected card: the inner border gets a golden glow. */
+.umc-slide.active .pcard-frame,
+.umc-fan-deck .pcard-frame {
+  border-color: color-mix(in srgb, var(--gold) 70%, var(--border-strong));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--gold) 50%, transparent),
+    inset 0 0 8px color-mix(in srgb, var(--gold) 30%, transparent);
+}
+.umc-slide.active .pcard-frame::after,
+.umc-fan-deck .pcard-frame::after {
+  border-color: color-mix(in srgb, var(--gold) 40%, transparent);
+}
+.pcard-nameplate {
+  position: absolute; top: 18px; left: 50%; transform: translate(-50%, -52%);
+  z-index: 4; display: flex; align-items: center; gap: 5px;
+  max-width: 70%; padding: 2px 12px;
+  background: var(--panel); border-radius: 999px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.28);
+}
+.pcard-name {
+  font-weight: 700; font-size: 16px; line-height: 1.35; letter-spacing: .01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text);
+}
+.pcard-logo {
+  /* Almost touching the outer border (operator feedback QA sprint). */
+  position: absolute; top: 4px; left: 4px; z-index: 3;
+  width: 27%; /* logo-≤30%-of-card-width contract */
+  container-type: inline-size;
+}
+.pcard-logo .bcluster { width: 100%; align-items: flex-start; }
+.pcard-logo .bcluster > .icon, .pcard-logo .bcluster > .logo {
+  width: 100%; height: 100cqw; border-radius: 18%;
+}
+.pcard-logo .bcluster > .logo { font-size: 38cqw; }
+.pcard-logo .bchips { margin-top: 5px; }
+.pcard-logo .bchip { width: 22px; height: 22px; margin-left: -8px; }
+.pcard-logo .bchip .icon { width: 15px; height: 15px; aspect-ratio: auto; border-radius: 0; }
+/* Company watermark — bottom-right, black & white at 50% alpha. Operator
+   feedback 2026-08-14: 25% smaller than the model/family logo (20% vs 27%),
+   BEHIND the inner frame (z 0 < 1), and pushed to the edge so it overlaps
+   the border. */
+.pcard-mark {
+  position: absolute; right: 10px; bottom: 10px; z-index: 0;
+  width: 20%; pointer-events: none;
+  filter: grayscale(1); opacity: .75;
+  color: var(--border-strong);
+  container-type: inline-size;
+}
+.pcard-mark .icon, .pcard-mark .logo { width: 100%; height: 100cqw; border-radius: 16%; }
+.pcard-mark .logo { font-size: 34cqw; }
+.pcard-body {
+  position: relative; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 7px; min-height: 0; height: 100%;
+  /* Clear the top-left logo box + inner frame inset (18px). Padding ensures
+     content stays within the inner border with breathing room. */
+  padding: calc(27% + 36px) 28px 20px;
+  overflow: hidden;
+}
+.pcard-body > * { min-height: 0; max-width: 100%; }
+.pcard-body .mfoot { margin-top: auto; }
+.pcard-body .caps { width: 100%; text-align: left; }
+/* Hero-size variant — the zoomed detail card (ModelHeroView). height:100%
+   fills the .mhero-face box (itself sized by the .mhero-card's 5:7 width);
+   the aspect-ratio then keeps the box honest in both axes. */
+.pcard.hero { aspect-ratio: 5 / 7; height: 100%; }
+.pcard.hero .pcard-frame { inset: 24px; }
+.pcard.hero .pcard-frame::after { inset: 5px; }
+.pcard.hero .pcard-nameplate { top: 24px; padding: 3px 16px; max-width: 82%; }
+.pcard.hero .pcard-name { font-size: 20px; }
+.pcard.hero .pcard-logo { top: 14px; left: 14px; }
+.pcard.hero .pcard-mark { right: 14px; bottom: 14px; }
+/* The hero face is information-dense: left-aligned rows, and the body may
+   scroll rather than clip if a model's config list runs long (a carousel
+   face still clips — its content is a fixed teaser set). */
+.pcard.hero .pcard-body {
+  align-items: stretch; text-align: left; gap: 9px;
+  padding: calc(27% + 52px) 32px 20px;
+  overflow-y: auto; overflow-x: hidden;
+}
+
+/* Phase 3 (pre-release feedback sprint) — family carousel (ModelDeck.tsx).
+   Collapsed: one native <button> whose content is a fan of ModelCardViews,
+   the front one in normal flow (sizes the button), the rest position:
+   absolute + a per-index translate/rotate peeking out behind it — a plain
+   card-fan, no measurement/JS layout needed. `all: unset` on the button
+   strips native button chrome (border/background/font) so the fanned cards
+   underneath are the only visible surface; the button still keeps its real
+   focus ring, click target, and (critically) its content-model rule that no
+   descendant can itself be focusable — see ModelDeck.tsx's doc comment.
+   `pointer-events: none` on `.mcard` isn't needed: interactive={false}
+   already strips every handler, so there's nothing to intercept the click
+   from bubbling to the button. */
+.deck-face { all: unset; box-sizing: border-box; cursor: pointer; display: block; position: relative; width: 100%; max-width: 200px; border-radius: var(--radius); }
+.deck-face:focus-visible { outline: 2px solid var(--heat); outline-offset: 2px; }
+.deck-slide { display: block; }
+.deck-slide:not(.deck-slide-front) { position: absolute; inset: 0 0 auto 0; transition: transform .15s ease; }
+.deck-face:hover .deck-slide-front .mcard { box-shadow: 0 6px 18px rgba(0,0,0,.22); }
+.deck-more { position: absolute; bottom: 8px; right: 8px; z-index: 5; }
+.deck-collapse { all: unset; box-sizing: border-box; cursor: pointer; display: inline-block; margin-bottom: 10px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 11.5px; color: var(--text-dim); background: var(--panel); }
+.deck-collapse:hover { color: var(--text); }
+.deck-collapse:focus-visible { outline: 2px solid var(--heat); outline-offset: 2px; }
+/* Expand "pop": defined at global scope per the reduced-motion convention
+   established in Sprint K (a keyframe DEFINED only inside a
+   prefers-reduced-motion:no-preference block is undefined everywhere else —
+   gate each consumer's usage instead, never the keyframe itself). */
+.deck-expand-in { animation: deck-pop .18s ease; }
+/* Fan-out "deal": member cards of an expanded family stack deal in with a
+   slight tilt, staggered by index, like cards being laid on a table.
+   Operator feedback 2026-08-14 #2 ("they should fan out when we tap"). */
+.umc-deal-cell { display: contents; } /* grid child stays the .mcard; the wrap only carries --deal-i */
+@keyframes deck-deal {
+  from { opacity: 0; transform: translateY(14px) rotate(-2deg) scale(.97); }
+  to { opacity: 1; transform: translateY(0) rotate(0) scale(1); }
+}
+.umc-expanded .gallery .mcard {
+  animation: deck-deal .3s cubic-bezier(.2, .9, .3, 1) backwards;
+  animation-delay: calc(var(--deal-i, 0) * 40ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .deck-expand-in { animation: none; }
+  .umc-expanded .gallery .mcard { animation: none; }
+  .deck-slide:not(.deck-slide-front) { transition: none; }
+}
+/* Clamped to 2 lines AND given a 2-line min-height: .mfoot is pinned to the
+   card bottom (margin-top:auto), so with only the clamp, a 1-line
+   description next to a 2-line row-mate still left an uneven gap before the
+   footer — clamping bounds the worst case (3+ lines) but doesn't equalize
+   the common case. The min-height reserves the same block size regardless
+   of actual text length, so every card in a row hits its footer at the same
+   height without needing the row to stretch unevenly to get there. */
+.mdesc { font-size: 13px; line-height: 1.45; color: var(--text-dim); margin: 4px 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* Vertical benchmark bars (operator feedback 2026-08-14: the old horizontal
+   rows wasted vertical space — 3 stacked rows at ~15px each. Switching to
+   side-by-side vertical bars saves ~50% vertical space and makes the bars
+   taller and more visually impactful). */
+.caps { display:flex; flex-direction:row; gap:6px; margin-bottom: 6px; }
+/* Operator feedback 2026-08-14: bars were stretching to fill the card
+   whatever their count (3 bars = 3 fat columns). Cap each bar at a quarter
+   of the row — spaced as though we expect 4 benchmarks by default — so a
+   short list left-packs instead of ballooning. */
+.cap { display:flex; flex-direction:column; align-items:center; gap:4px; font-size: 13px; flex: 1; min-width: 0; max-width: calc((100% - 18px) / 4); }
+.cap .lab { width: auto; text-align: center; font-size: 10px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.cap .track { width: 100%; height: 60px; position: relative; border-radius: 4px; background: var(--bg-2); overflow: hidden; }
+/* Fill animates bottom-to-top (vertical bar). */
+.cap .track i { position: absolute; bottom: 0; left: 0; width: 100%; background: linear-gradient(180deg, var(--ok), var(--reserved)); }
+.cap .pct { width: auto; text-align: center; font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
+.cap .bench { display: none; } /* tooltip only */
+.keyf { display:flex; flex-wrap:wrap; gap:5px; margin-bottom: 14px; }
+.kf { font-size: 10.5px; padding: 3px 8px; border-radius: 999px; background: var(--panel-2); border:1px solid var(--border); color: var(--text-dim); }
+.mfoot { margin-top:auto; display:flex; align-items:center; gap: 10px; padding-top: 8px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.mfoot .perf { font-family: var(--mono); font-size: 12px; }
+.mfoot .perf .k { font-size: 9.5px; color: var(--text-mute); display:block; text-transform:uppercase; letter-spacing:.05em; }
+.mfoot .perf .unprofiled { font-size: 10.5px; color: var(--text-mute); font-style: italic; }
+/* Load-button heat gradient — shared with .btn.primary below (:283), which
+   used to duplicate this exact gradient byte-for-byte; merged into one rule.
+   Sprint B: de-scoped from `.mfoot .go` to a bare `.go` so the config/model
+   detail views' Load/Edit actions (outside any .mfoot) get the same
+   treatment — "edit-in-place button visually matching Load buttons" only
+   works if .go itself carries the look, not just its .mfoot-nested use.
+   `.mfoot .go` keeps its own rule for the auto-right-align that only makes
+   sense inside a card footer. */
+/* Retheme round 2: flat single-color fill, no gradient, tighter corners —
+   flatter/cleaner per operator request. --load-btn-bg/text are
+   theme-scoped (see :root): dark is a flat --heat fill with near-black
+   text, light is a flat --navy-electric fill (an addition outside the
+   5-color palette) with white text. */
+.go, .btn.primary { font-weight:600; color: var(--load-btn-text); background: var(--load-btn-bg); border:none; }
+.go { font-size: 12.5px; border-radius:4px; padding: 8px 14px; cursor:pointer; position: relative; overflow: hidden; }
+.mfoot .go { margin-left:auto; }
+.go:disabled { opacity: .5; cursor: default; }
+.go.wontfit { background: var(--panel-2); color: var(--text-mute); border:1px solid var(--border); }
+.go.loaded { background: var(--panel-2); color: var(--text-mute); border:1px solid var(--border); cursor: default; }
+/* Sprint K: Load button diagonal glare sweep (amicro "Glare Interaction"),
+   scoped to .loading-glare only — the three Load-button "Loading…" states
+   (ConfigCardView/ConfigRow/ConfigDetailView), not every .go use (Save/Edit
+   buttons reuse .go's look but shouldn't glare). */
+.go.loading-glare::after {
+  content: ""; position: absolute; inset: 0; width: 45%;
+  background: linear-gradient(115deg, transparent, rgba(255,255,255,.45), transparent);
+  animation: glare-sweep 1.6s ease-in-out infinite;
+}
+
+/* hazard badge (Sprint B) — a config carrying a known-hazardous llama.cpp
+   flag (e.g. a --parallel that silently splits rather than multiplies
+   context) gets a warning marker on the compact card face, not just an
+   explanation buried in the expanded view. --warn (amber), not --crit: a
+   hazard is advisory ("verify this is intentional"), never an error. */
+.hazard-badge { color: var(--warn); font-size: 12px; margin-left: 5px; cursor: default; }
+.load-opt.hazard .flag { color: var(--warn); }
+
+/* InfoTip (Sprint B) — the app's first positioned tooltip; see
+   components/InfoTip.tsx's doc comment for why the native `title` attribute
+   wasn't enough for this content. */
+.infotip { position: relative; display: inline-flex; vertical-align: middle; cursor: help; }
+.infotip-glyph { color: var(--text-mute); font-size: 12px; }
+.infotip-bubble {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: 260px; padding: 9px 11px; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+  font-size: 11.5px; line-height: 1.5; color: var(--text-dim); text-align: left;
+  white-space: normal; z-index: 60; pointer-events: none;
+}
+.infotip-bubble::after {
+  content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: var(--border-strong);
+}
+.hazard-tip .infotip-bubble { border-color: color-mix(in srgb, var(--warn) 45%, var(--border-strong)); }
+/* Load-option rows put their info icon at the row's right edge, right up
+   against `.modal.wide`'s scroll container — a center-anchored bubble there
+   overflows past the modal and gets clipped (overflow-y:auto forces
+   overflow-x to clip too, a real CSS-spec quirk, not a bug in this rule).
+   Found live in browser verification: right-anchor instead, so the bubble
+   grows leftward into the row's own width rather than off the modal edge. */
+.load-opt .infotip-bubble { left: auto; right: 0; transform: none; }
+.load-opt .infotip-bubble::after { left: auto; right: 10px; transform: none; }
+
+/* Detail view stack (Sprint B) — DetailModal/ConfigDetailView/ModelDetailView.
+   `.modal.detail-modal` (not a bare `.detail-modal`): needs to out-specificity
+   `.modal.wide`'s own max-width, which also applies here since DetailModal
+   carries both classes. */
+.modal.detail-modal { max-width: 760px; }
+.detail-modal-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.detail-view .detail-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
+/* wrap: on narrow phones the no-wrap row let the copy chip overflow the
+   text column and land on top of the Edit button (visual pass 2026-08-14).
+   Desktop has room, so wrapping never triggers there. */
+.detail-view .detail-head h3 { font-size: 18px; flex-wrap: wrap; }
+@media (max-width: 560px) {
+  .detail-view .detail-head { gap: 12px; }
+  .detail-view .detail-head .icon.xl, .detail-view .detail-head .logo.xl { width: 96px; height: 96px; border-radius: 18px; }
+}
+/* Justified two-column spec table: label left (its own natural width),
+   value right-aligned into the remaining column — replaces the old
+   `<b>label</b> value` prose run's ragged left-aligned pairs. */
+.spec-table { display: grid; grid-template-columns: max-content 1fr; column-gap: 18px; row-gap: 7px; font-size: 12.5px; }
+.spec-row { display: contents; }
+.spec-row .k { color: var(--text-mute); white-space: nowrap; }
+.spec-row .v { color: var(--text-dim); text-align: right; }
+.load-opts { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.load-opt { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11.5px; padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; }
+.load-opt.hazard { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.load-opt .flag { color: var(--text); flex: 0 0 auto; }
+.load-opt .val { color: var(--text-mute); flex: 1 1 auto; }
+
+/* LoadOptionsEditor (Sprint C) — the tap-to-select flag picker. Reuses
+   .load-opt/.load-opts (Sprint B) for its editable rows so both the
+   read-only detail view and the editor read as one visual system. */
+.load-opt.editable { gap: 6px; }
+.load-opt .val-input, .load-opt .flag-input {
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+  padding: 4px 7px; font-family: var(--mono); font-size: 11.5px; min-width: 0;
+}
+.load-opt .val-input { flex: 1 1 auto; }
+.load-opt .flag-input { flex: 0 0 auto; width: 130px; }
+.load-opt .row-remove {
+  flex: 0 0 auto; background: none; border: none; color: var(--text-mute); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 0 2px;
+}
+.load-opt .row-remove:hover { color: var(--crit); }
+.flag-presets { display: flex; gap: 4px; flex: 0 0 auto; }
+.preset {
+  font-family: var(--mono); font-size: 10px; padding: 2px 7px; border-radius: 999px;
+  border: 1px solid var(--border-strong); background: var(--panel); color: var(--text-mute); cursor: pointer;
+}
+.preset.active { color: var(--heat-2); border-color: color-mix(in srgb, var(--heat) 40%, var(--border)); }
+.flag-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.flag-chip {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 5px 10px;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text-mute); cursor: pointer;
+}
+.flag-chip.on { color: var(--text); border-color: color-mix(in srgb, var(--heat) 40%, var(--border)); background: color-mix(in srgb, var(--heat) 10%, var(--panel-2)); }
+.add-option {
+  margin-top: 8px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim);
+  padding: 6px 10px; font-size: 11.5px; font-family: var(--ui);
+}
+
+/* ChangeHistory (Sprint C) — the read side of audit_log's optional
+   operator "why this change" reason, shown in the config/model detail
+   views. */
+.change-history { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.change-entry { padding: 7px 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; font-size: 11.5px; }
+.change-meta { display: flex; gap: 8px; align-items: baseline; color: var(--text-mute); }
+.change-meta .who { color: var(--text-dim); font-weight: 600; }
+.change-meta .what { font-family: var(--mono); }
+.change-detail { margin-top: 3px; color: var(--text-dim); }
+
+/* stats */
+.stats { display:grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.stat { background: var(--panel); border:1px solid var(--card-border-stat); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); overflow: hidden; }
+.stat .k { font-size: 10px; text-transform:uppercase; letter-spacing:.08em; color: var(--text-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat .v { font-family: var(--mono); font-size: 22px; font-variant-numeric: tabular-nums; margin-top:6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat .d { font-size: 11px; margin-top:4px; color: var(--text-dim); }
+.stat .d.up { color: var(--ok); } .stat .d.bad { color: var(--crit); }
+/* Right Now (Dashboard Overview) — pre-release feedback round, 2026-08-06:
+   bigger title/value, no sub-text, and cost/savings values tinted from the
+   existing status palette (--crit/--ok) instead of the plain default text
+   color. */
+.stats-hero .stat .k { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-hero .stat .v { font-size: 36px; }
+.stats-hero .stat .d { display: none; }
+.stat .v.cost { color: var(--crit); }
+.stat .v.saved { color: var(--ok); }
+
+/* compressor */
+.hoom { display:flex; flex-direction:column; gap: 8px; }
+.prox { display:flex; align-items:center; gap: 12px; padding: 11px 14px; background: var(--panel-2); border:1px solid var(--card-border-info); border-radius: 10px; flex-wrap: wrap; }
+.prox .pn { font-weight: 600; font-size: 13px; }
+.prox .pu { font-family: var(--mono); font-size: 11px; color: var(--text-mute); }
+.prox .saved { margin-left:auto; font-family: var(--mono); font-size: 12px; color: var(--ok); text-align:right; }
+.prox .saved .k { display:block; font-size: 9.5px; color: var(--text-mute); text-transform:uppercase; letter-spacing:.05em; }
+.prox .actions { display: flex; gap: 6px; }
+
+/* Remote offerings (operator feedback 2026-08-14 round 2: "janky… missing
+   transparency and blur… reduce white space… left justified"). Each provider
+   is a compact GLASS chip (the same --panel-glass/--panel-blur treatment the
+   rest of the app uses for floating surfaces) with a small provider icon and
+   three tight left-justified lines — wire model / provider+residency /
+   cost+context. */
+.ro-group { display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.ro-head { display: flex; align-items: center; gap: 6px; }
+.ro-head .icon { width: 20px; height: 20px; border-radius: 5px; }
+.ro-head .ro-model-name { font-weight: 700; font-size: 13px; }
+.ro-provider {
+  display: grid; grid-template-columns: 26px 1fr; gap: 9px; align-items: center;
+  padding: 6px 9px;
+  background: var(--panel-glass);
+  backdrop-filter: var(--panel-blur);
+  -webkit-backdrop-filter: var(--panel-blur);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.ro-provider > .icon { width: 26px; height: 26px; border-radius: 7px; }
+.ro-lines { display: flex; flex-direction: column; gap: 2px; min-width: 0; text-align: left; }
+.ro-line1 { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--text); }
+.ro-line1 .ro-mname { font-family: var(--ui); font-size: 11.5px; color: var(--text-dim); font-weight: 400; }
+.ro-line2 { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; flex-wrap: wrap; }
+.ro-line3 { font-family: var(--mono); font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* ── Routing tree (components/RoutingTree.tsx — extracted from Routing.tsx,
+   Sprint 10, docs/v5-headroom-replacement.md) ──
+   Provider/model nodes are an HTML overlay on top of an SVG link layer, so
+   icons stay crisp. Compressing links get a static GLOW (not an animation),
+   and a legend under the diagram decodes the states. Sprint 10 grew the
+   four-state color key into the full compressor state × health matrix:
+   hue = severity, dash = the compression path itself is broken, glow = a
+   compressor is actively in the path (see RoutingTree.tsx's header). */
+.rtree { overflow: visible; }
+.rtree-node { position: absolute; display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.rtree-prov { justify-content: flex-end; text-align: right; cursor: pointer; padding: 4px 6px; border-radius: 8px; user-select: none; -webkit-user-select: none; }
+.rtree-prov:hover { background: var(--panel-2); }
+/* The Dashboard copy is read-only — no long-press interaction to offer. */
+.rtree-readonly .rtree-prov { cursor: default; }
+.rtree-readonly .rtree-prov:hover { background: transparent; }
+.rtree-model { justify-content: flex-start; padding: 4px 6px; }
+.rtree-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rtree-lpress { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+.rtree-lpress circle { animation: rt-lpress .6s linear forwards; }
+@keyframes rt-lpress { from { stroke-dashoffset: 107; } to { stroke-dashoffset: 0; } }
+/* Compressor-in-path links: static glow — a "lit conduit", not a moving dash
+   animation (operator feedback: asked for glow, not animation). The glow
+   marks BOTH compressing states (healthy teal, degraded amber). */
+.rtree-link.compressing { filter: drop-shadow(0 0 5px var(--cool)); }
+.rtree-link.degraded { filter: drop-shadow(0 0 5px var(--heat-2)); }
+.rtree-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 0 0 12px; font-size: 11px; color: var(--text-dim); }
+.rtree-lg { display: inline-flex; align-items: center; gap: 6px; }
+.rtree-lg-line { display: inline-block; width: 26px; height: 0; border-top: 3px solid; border-radius: 2px; }
+.rtree-lg-line.direct { border-top-color: var(--ok); }
+.rtree-lg-line.compressing { border-top-color: var(--cool); filter: drop-shadow(0 0 3px var(--cool)); }
+.rtree-lg-line.degraded { border-top-color: var(--heat-2); filter: drop-shadow(0 0 3px var(--heat-2)); }
+.rtree-lg-line.bypassed { border-top-color: var(--reserved); }
+.rtree-lg-line.autobypass { border-top-color: var(--heat); border-top-style: dashed; border-top-width: 2px; }
+.rtree-lg-line.failing { border-top-color: var(--crit); }
+.rtree-lg-line.disabled { border-top-color: var(--text-mute); opacity: .3; }
+.rtree-lg-line.unreachable { border-top-color: var(--crit); border-top-style: dashed; border-top-width: 2px; }
+.rtree-lg-note { color: var(--text-mute); font-size: 10.5px; margin-left: auto; }
+@media (max-width: 560px) { .rtree { overflow-x: auto; } .rtree-lg-note { margin-left: 0; width: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .rtree-lpress circle { animation: none; }
+}
+.prox .actions button { font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 7px; padding: 5px 9px; background: var(--panel); cursor: pointer; }
+.prox .actions button:disabled { opacity: .4; cursor: default; }
+
+.toggle { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-dim); cursor: pointer; user-select: none; }
+.toggle.disabled { cursor: default; opacity: .55; }
+.sw { width: 38px; height: 21px; border-radius: 999px; background: var(--border-strong); position: relative; transition: background .2s; flex: 0 0 auto; border: none; padding: 0; }
+.sw::after { content:""; position:absolute; top:2px; left:2px; width:17px; height:17px; border-radius:50%; background:#fff; transition:left .2s; }
+.sw.on { background: var(--cool); } .sw.on::after { left: 19px; }
+.sw.heat.on { background: var(--heat); }
+
+.sys { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+
+.form-row { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
+.form-row input, .form-row select {
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+  padding: 8px 10px; font-family: var(--ui); font-size: 13px;
+}
+.form-row textarea {
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+  padding: 8px 10px; font-family: var(--ui); font-size: 13px; resize: vertical; min-height: 64px;
+}
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+/* Sprint 12: the Danger Zone's path/URL fields (icons_dir, embedding_url,
+   trusted_cidrs…) read poorly split across two narrow columns — a single
+   full-width column, opt-in per grid rather than fighting .form-grid's
+   default with inline styles everywhere it's needed. */
+.form-grid.wide { grid-template-columns: 1fr; }
+.form-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.btn { font-size: 12.5px; font-weight: 600; border-radius: 4px; padding: 8px 14px; cursor: pointer; border: 1px solid var(--border-strong); background: var(--panel-2); color: var(--text); }
+.btn.sm { font-size: 11px; padding: 4px 10px; border-radius: 4px; }
+/* .btn.primary's gradient is declared with .mfoot .go at :243 (shared rule). */
+.btn:disabled { opacity: .5; cursor: default; }
+
+/* ── Settings overhaul (Sprint 12, was H) ──────────────────────────────────
+   Left sidebar + content pane. .tabs/.tab (see :224) is a horizontal pill
+   nav with no vertical/hover/disabled variant — genuinely new CSS, not a
+   reuse, since a page this size (12 sections) needs a persistent nav that
+   horizontal pills don't give. Collapses to the existing horizontal .tabs
+   pattern below the sidebar breakpoint — this is a PWA, a desktop-only
+   Settings page isn't shippable. */
+.settings-shell { display: grid; grid-template-columns: 220px 1fr; gap: 20px; align-items: start; }
+/* Mobile fallback pill row is hidden by default (desktop uses .side-nav
+   only) — only the media query below reveals it, swapping which nav is
+   visible rather than showing both. */
+.settings-shell .tabs { display: none; }
+/* Live-verified, real bug: with no backdrop of its own the nav sat directly
+   over the diagonal stripe background (same class of issue .eyebrow already
+   solves — see its own comment above) and the group labels went near-
+   illegible over a bright stripe. A card backdrop for the whole nav fixes
+   both the labels and gives .side-nav-item.active a stable surface to read
+   against instead of the busy background. */
+.side-nav {
+  display: flex; flex-direction: column; gap: 2px; position: sticky; top: 14px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px; box-shadow: var(--shadow);
+}
+/* This block MUST stay physically after the .side-nav rule above — same
+   specificity (one class each), so CSS resolves the tie by source order,
+   not by whether the media query currently matches. Sprint 12 Phase 6, live
+   bug found via computed-style inspection (device viewport constraints
+   meant a screenshot alone couldn't show it): with .side-nav declared AFTER
+   this block, its plain `display: flex` unconditionally won the cascade at
+   every viewport width, so the sidebar never actually collapsed below
+   860px — the mobile-breakpoint check in every prior phase's browser pass
+   had been "inconclusive" for exactly this reason, not a fluke. */
+@media (max-width: 860px) {
+  .settings-shell { grid-template-columns: 1fr; }
+  .side-nav { display: none; }
+  .settings-shell .tabs { display: flex; flex-wrap: wrap; margin-bottom: 14px; }
+}
+.side-nav-group { margin-top: 14px; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-mute); padding: 0 10px 4px; }
+.side-nav-group:first-child { margin-top: 0; }
+.side-nav-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px;
+  font-size: 12.5px; color: var(--text-dim); cursor: pointer; border: none; background: transparent;
+  text-align: left; width: 100%; font-family: var(--ui);
+}
+.side-nav-item:hover { background: var(--panel-2); color: var(--text); }
+.side-nav-item.active { background: var(--panel-2); color: var(--text); font-weight: 600; box-shadow: inset 2px 0 0 var(--tab-active); }
+.side-nav-item:disabled { opacity: .45; cursor: default; }
+.side-nav-item.danger { color: var(--crit); }
+
+.settings-search { position: relative; margin-bottom: 14px; }
+.settings-search input[type="search"] {
+  width: 100%; background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); padding: 9px 12px; font-family: var(--ui); font-size: 13px;
+}
+.settings-search input[type="search"]:focus { border-color: var(--tab-active); outline: none; }
+.search-results {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 40;
+  background: var(--panel); border: 1px solid var(--border-strong); border-radius: 10px;
+  box-shadow: var(--shadow); max-height: 340px; overflow-y: auto;
+}
+.search-result { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; font-size: 12.5px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.search-result:last-child { border-bottom: none; }
+.search-result:hover, .search-result.active { background: var(--panel-2); }
+.search-result .path { color: var(--text-mute); font-size: 10.5px; font-family: var(--mono); }
+
+/* Danger Zone — collapsed by default, crit-bordered, fields visible but
+   disabled until explicitly unlocked (ConfirmButton's arm/disarm idiom,
+   reused rather than a second arming pattern). Transparency is the point:
+   the operator can always SEE every boot-critical value, just not edit it
+   without arming + step-up + a passing preflight. */
+.danger-zone { border: 1px solid var(--border); border-left: 3px solid var(--crit); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); padding: 16px 18px; margin-top: 16px; }
+.danger-zone .dz-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.danger-zone .dz-title { font-size: 13px; font-weight: 600; color: var(--crit); }
+.danger-zone .dz-blurb { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; line-height: 1.5; }
+.danger-zone fieldset { border: none; padding: 0; margin: 0; }
+.danger-zone fieldset:disabled { opacity: .6; }
+.preflight-check { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; font-size: 12px; border-bottom: 1px solid var(--border); }
+.preflight-check:last-child { border-bottom: none; }
+.preflight-check .lvl { flex: none; width: 16px; text-align: center; font-weight: 700; }
+.preflight-check.ok .lvl { color: var(--ok); }
+.preflight-check.warn .lvl { color: var(--warn); }
+.preflight-check.error .lvl { color: var(--crit); }
+.preflight-check .msg { color: var(--text-dim); }
+.preflight-check .field { color: var(--text-mute); font-family: var(--mono); font-size: 10.5px; }
+
+/* Restart-required banner (Phase 6) — General panel's daemon strip. Same
+   left-accent-border idiom as .danger-zone above, warn-tinted rather than
+   crit since nothing is armed/dangerous here, just informational: a
+   restart-mode field was saved and the daemon hasn't picked it up yet. */
+.restart-banner { border: 1px solid var(--border); border-left: 3px solid var(--warn); border-radius: var(--radius); background: var(--panel); padding: 12px 16px; margin-bottom: 14px; font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+.restart-banner b { color: var(--warn); }
+
+/* Deep-link scroll target flash — new global keyframe per the Sprint K
+   convention (:290-300 above): defined at global scope, each USAGE gated
+   under reduced-motion individually, never the keyframe itself nested
+   inside the media query. */
+@keyframes anchor-flash { 0% { background: color-mix(in srgb, var(--tab-active) 22%, transparent); } 100% { background: transparent; } }
+.anchor-flash { animation: anchor-flash 1.6s ease; border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) { .anchor-flash { animation: none; } }
+/* text-align:left reset (Sprint B, real bug found in browser verification):
+   fixed positioning takes a modal out of layout flow but NOT out of the CSS
+   inheritance chain — a modal rendered inline inside .mcard.portrait's
+   `text-align:center` (ModelCardView) inherited that centering into every
+   child text node (spec table values, key-feature list items…) despite
+   rendering as a full-viewport overlay. Reset at the backdrop root so no
+   modal, wherever it happens to be mounted in the tree, inherits ambient
+   alignment from its call site. */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; text-align: left; }
+.modal { background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 20px; width: 100%; max-width: 420px; box-shadow: var(--shadow); }
+.modal h3 { margin-bottom: 14px; }
+
+/* Onboarding tour (P4) — the copyable a0 base-URL row inside the stepped
+   card. Uses existing panel/border/mono vars so it tracks both themes. */
+.onboarding-endpoint { display: flex; align-items: center; gap: 8px; margin: 10px 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius, 6px); }
+.onboarding-endpoint code { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+
+/* Pre-release feedback round (2026-08-12) — glass treatment for genuine
+   panel/content surfaces (cards, bays, stat tiles, the memory-usage panel,
+   model cards, danger zone, restart banner, calendar cells, modals).
+   Deliberately excludes small interactive controls that also happen to use
+   --panel as their default background (.tabs pill strip, .icon-btn,
+   .cchip chips, .bcluster/.bcolumn avatar chips, .prox action buttons) —
+   those stay solid so tiny regions don't blur into illegibility and so
+   controls read as controls, not floating surfaces. Same specificity as
+   each rule above and declared later in the cascade, so only
+   background/backdrop-filter are overridden — every other property (border,
+   padding, shadow, radius) stays owned by the rule above. */
+.card, .bay, .budget, .mcard, .stat, .danger-zone, .restart-banner, .calday, .modal {
+  background: var(--panel-glass);
+  backdrop-filter: var(--panel-blur);
+  -webkit-backdrop-filter: var(--panel-blur);
+}
+/* Two of these surfaces really do nest in real pages (.card > .stat on the
+   Cost tab's "Measured electricity" grid, .card > .restart-banner in
+   Settings → General) — a nested one falls back to solid --panel instead of
+   re-blurring, so it reads as a distinct inset tile rather than doubling the
+   transparency/blur into mush. :is() covers every pairing generically so a
+   future nesting doesn't need a new rule. Border/shadow are left alone —
+   only background/backdrop-filter compound. */
+:is(.card, .bay, .budget, .mcard, .stat, .danger-zone, .restart-banner, .calday, .modal)
+  :is(.card, .bay, .budget, .mcard, .stat, .danger-zone, .restart-banner, .calday, .modal) {
+  background: var(--panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* Usability pass #3 (2026-07-30): the config card's expanded detail view
+   (full capability list, key features, profile figures) needs more room
+   than the 420px default form-confirm modals. */
+.modal.wide { max-width: 720px; max-height: 85vh; overflow-y: auto; }
+
+/* ── Model hero — the zoomed playing card (ModelHeroView.tsx) ─────────────
+   Tapping a model card zooms it into a large playing card that KEEPS THE
+   5:7 RATIO of the carousel face (playing-card redesign 2026-08-14). It
+   replaces the old detail-page hero with a compact card UI: the front
+   carries identity + specs + configs, and the card FLIPS (real rotateY,
+   preserve-3d) for the back — key features, notes, change history. The
+   FLIP mount animation (from the tapped card's rect) is JS-driven on
+   .mhero-scene; the mhero-in keyframes are the no-rect fallback. */
+.mhero { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px 8px; max-height: 100%; }
+.mhero-scene { perspective: 1800px; min-height: 0; animation: mhero-in .26s cubic-bezier(.2, .9, .3, 1.08); }
+@keyframes mhero-in { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: scale(1); } }
+.mhero-card {
+  position: relative;
+  width: min(92vw, 520px, calc((100vh - 170px) * 5 / 7));
+  aspect-ratio: 5 / 7;
+  transform-style: preserve-3d;
+  transition: transform .55s cubic-bezier(.35, .8, .25, 1);
+  cursor: pointer; /* tap the card to flip (operator feedback 2026-08-14) */
+}
+@supports (height: 100dvh) {
+  .mhero-card { width: min(92vw, 520px, calc((100dvh - 170px) * 5 / 7)); }
+}
+.mhero-card.flipped { transform: rotateY(180deg); }
+.mhero-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.mhero-face.back { transform: rotateY(180deg); }
+.mhero-toolbar { display: flex; gap: 6px; margin-bottom: 8px; width: 100%; justify-content: flex-end; }
+.mhero-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.mhero-flipbtn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 16px; border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-glass);
+  backdrop-filter: var(--panel-blur);
+  -webkit-backdrop-filter: var(--panel-blur);
+  color: var(--text-dim); font-size: 12px; font-family: var(--ui); cursor: pointer;
+  transition: color .2s ease, border-color .2s ease;
+}
+.mhero-flipbtn:hover { color: var(--text); border-color: color-mix(in srgb, var(--heat) 40%, var(--border)); }
+.mhero-flipbtn:focus-visible { outline: 2px solid var(--heat); outline-offset: 2px; }
+/* Floating bar buttons — fixed to the viewport corners (the backdrop is
+   portaled to <body>, and these sit OUTSIDE .mhero-scene so the scene's
+   perspective never becomes their containing block). */
+.mhero-close { position: fixed; top: 14px; right: 16px; z-index: 55; }
+.mhero-backbtn { position: fixed; top: 14px; left: 16px; z-index: 55; }
+/* Compact front-face content. */
+.mhero-maker { font-size: 12.5px; color: var(--text-mute); }
+.mhero-desc {
+  font-size: 12.5px; color: var(--text-dim); line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.mhero .spec-table { font-size: 11.5px; column-gap: 12px; row-gap: 4px; }
+.mhero .caps { margin: 0; }
+.mhero-configs { display: flex; flex-direction: column; gap: 5px; }
+.mhero-configs .qrow { padding: 5px 0; font-size: 12px; }
+.mhero-eyebrow-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* Back-face content scrolls inside the card body (.pcard.hero .pcard-body
+   owns the overflow). */
+.mhero-features { margin: 4px 0 0 16px; padding: 0; font-size: 12px; color: var(--text-dim); }
+.mhero-features li { margin-bottom: 2px; }
+
+.foot { margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--text-mute); font-size: 12px; display:flex; align-items: center; gap: 16px; flex-wrap:wrap; }
+.foot b { color: var(--text-dim); font-weight: 600; }
+.foot a { color: var(--text-mute); text-decoration: underline; text-underline-offset: 2px; }
+.foot a:hover, .foot a:focus-visible { color: var(--text-dim); }
+.foot a.active { color: var(--tab-active); font-weight: 600; text-decoration: none; }
+
+@media (max-width: 900px) {
+  .bays, .gallery, .sys { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* Scoped to the topbar nav: the unscoped rule leaked order:3 into every
+     .tabs — Sprint 13's real-390px check caught the Settings mobile section
+     pills rendering BELOW the content pane because of it. Wave 2 adds 7
+     pills (Help + Attributions promoted from footer links), so the row now
+     overflows at 390px — switch to horizontal scroll with a hidden
+     scrollbar rather than wrapping (which would change the topbar height).
+     Mobile F4: the hidden scrollbar made the overflow invisible — edge fade
+     masks advertise the cut-off pills and snap keeps swipes pill-aligned. */
+  .top .tabs { order: 3; width: 100%; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+    scroll-snap-type: x proximity; scroll-padding-left: 12px; }
+  .top .tabs .tab { scroll-snap-align: start; }
+  .top .tabs::-webkit-scrollbar { display: none; }
+  .form-grid { grid-template-columns: 1fr; }
+  /* usability pass #2: side-by-side rows stack on narrow screens */
+  .resources-row, .bays-row { flex-direction: column; }
+  .provider-col { flex: 1 1 auto; width: 100%; }
+  .cchip-resources { align-self: flex-start; }
+}
+@media (max-width: 560px) {
+  .bays, .gallery, .stats, .sys { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  /* Mobile F2 follow-up: the .cap row's fixed columns (74px label + 28px
+     pct + 84px benchmark name + gaps = 210px min-content) overflow the
+     ~150px phone card — drop the benchmark-name column inside cards (the
+     tooltip already carries it; detail modals keep it). */
+  .mcard .cap .bench { display: none; }
+}
+
+/* Mobile F3 — 44px touch-target floor, coarse pointers only. Real-size
+   bumps wherever the layout absorbs them; ::after hit expansion where the
+   glyph itself must stay small (dense inline rows — verify those with
+   elementFromPoint, not the rect census). min-width/min-height (not fixed
+   width/height) deliberately: they also clamp the inline-styled buttons
+   (Console.tsx provider ⏸ 20px, Bay.tsx eject ⏏ 24px) without !important
+   and without squashing the padded-text .icon-btn variants in the detail
+   views. */
+@media (pointer: coarse) {
+  .tab { padding: 14px 13px; min-height: 44px; box-sizing: border-box; }
+  .icon-btn { min-width: 44px; min-height: 44px; }
+  .btn { min-height: 44px; }
+  .bay .load-btn { min-height: 44px; padding: 10px 18px; }
+  /* The provider billing ↗ link is a bare inline anchor — grow its real
+     box (padding + min-height) so the rect census passes too. */
+  .cchip-provider a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; }
+  /* Copy glyphs sit inside name-text rows and must stay visually small —
+     expand the tap area past the border box instead. */
+  .copy-btn { position: relative; }
+  .copy-btn::after { content: ""; position: absolute; inset: -12px; }
+  .copy-btn.sm { width: 22px; height: 22px; }
+  .copy-btn.sm::after { inset: -11px; }
+  /* Settings toggle: 38×21 visual, tap area grown vertically (.sw is
+     already position:relative). */
+  .sw::after { content: ""; position: absolute; inset: -12px -6px; }
+}
+
+/* Mobile F5: installed-PWA safe areas. viewport-fit=cover lets the shell
+   run edge-to-edge; keep the sticky header out from under the notch/Dynamic
+   Island and the content clear of the home indicator. Browser (non-
+   standalone) launches get zero insets, so this is a no-op there. */
+@media (display-mode: standalone) {
+  .top { padding-top: calc(14px + env(safe-area-inset-top)); }
+  .wrap { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
+}
+
+/* Mobile F7/F8: dozens of simultaneous backdrop-blur layers are the classic
+   phone-GPU scroll-jank source — drop to solid panels on small screens and
+   for reduced-transparency users. Tighten the mono stat figures too (the
+   wide tabular spacing reads as gaps at phone size). */
+@media (max-width: 560px), (prefers-reduced-transparency: reduce) {
+  .card, .bay, .budget, .mcard, .stat, .danger-zone, .restart-banner, .calday, .modal {
+    background: var(--panel);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+@media (max-width: 560px) {
+  .stat .v { letter-spacing: -0.03em; }
+}
+
+/* Wave 3 / P2 (track W3-C) — smith action model + handoff
+   (ActionCard/HandoffPanel/RunbookCard/ActionsTray). Reuses existing
+   tokens (.card/.chip/.btn/.dot-busy/.cchip) everywhere it can; the rules
+   below cover only what those don't already provide. */
+
+/* .dot-busy (theme root) has no intrinsic size outside its usual .bay
+   context (.bay .statusdot supplies width/height/position there) — this
+   gives ActionCard's inline "executing" indicator its own small static dot
+   to animate, without depending on .bay's absolute positioning. */
+.action-busy-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+
+/* P7 (docs/v5-smith.md §4.6 amendment) — Copy-all header + per-step done
+   checkboxes wrap the pre-existing step markup below. */
+.runbook { display: flex; flex-direction: column; gap: 8px; }
+.runbook-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.runbook-list { list-style: none; margin: 0; padding-left: 0; display: flex; flex-direction: column; gap: 10px; }
+.runbook-step { display: flex; gap: 8px; align-items: flex-start; }
+.runbook-step-check { padding-top: 2px; flex: 0 0 auto; }
+.runbook-step-body { flex: 1 1 auto; min-width: 0; }
+.runbook-step.done .runbook-step-title { color: var(--text-mute); text-decoration: line-through; }
+.runbook-step-title { font-size: 12px; font-weight: 600; color: var(--text); }
+.runbook-step-why { font-size: 10.5px; color: var(--text-mute); font-style: italic; margin-top: 1px; }
+.runbook-step-cmd {
+  display: flex; align-items: center; gap: 6px; margin-top: 3px;
+  padding: 6px 8px; border-radius: 6px; background: var(--bg);
+  border: 1px solid var(--border); overflow-x: auto;
+}
+.runbook-step-cmd code { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); white-space: pre; }
+.runbook-step-verify { font-size: 10.5px; color: var(--text-mute); margin-top: 3px; }
+
+/* P3 — reasoning tier chat (AskSmith.tsx, Markdown.tsx). Reuses .card/.chip
+   /.btn/.tab/.empty-note/.error-note everywhere it can. */
+.smith-transcript { display: flex; flex-direction: column; gap: 10px; }
+.smith-msg { max-width: 88%; }
+.smith-msg-user { align-self: flex-end; }
+.smith-msg-user .smith-bubble {
+  background: var(--tab-active); color: #fff; border-radius: 12px 12px 2px 12px;
+  padding: 8px 12px; font-size: 12.5px; line-height: 1.55; white-space: pre-wrap;
+}
+.smith-msg-assistant { align-self: flex-start; }
+.smith-msg-assistant .smith-bubble {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px 12px 12px 2px;
+  padding: 8px 12px; font-size: 12.5px; line-height: 1.6; color: var(--text-dim);
+}
+.smith-msg-notice { align-self: center; font-size: 11px; color: var(--text-mute); text-align: center; }
+.smith-msg-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; font-size: 10px; color: var(--text-mute); }
+.smith-streaming-cursor {
+  display: inline-block; width: 6px; height: 12px; margin-left: 2px; vertical-align: text-bottom;
+  background: var(--text-mute); animation: smith-cursor-blink 1s step-end infinite;
+}
+@keyframes smith-cursor-blink { 50% { opacity: 0; } }
+
+/* P5 — web research sources (SourcesList.tsx). */
+.smith-sources { margin-top: 6px; font-size: 11px; }
+.smith-sources summary {
+  cursor: pointer; color: var(--text-mute); user-select: none; list-style: none;
+}
+.smith-sources summary::-webkit-details-marker { display: none; }
+.smith-sources summary::before { content: "▸ "; }
+.smith-sources[open] summary::before { content: "▾ "; }
+.smith-sources-list { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; padding-left: 12px; }
+.smith-source-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.smith-source-row a { color: var(--cool); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
+.smith-source-row a:hover { text-decoration: underline; }
+
+/* P7 — tool loop (ToolCallCard.tsx). .smith-toolcall reuses .smith-sources'
+   collapsible shape; .smith-tool-activity is the live "smith is checking
+   disk space…" chip row while a round is otherwise silent. */
+.smith-toolcall { margin-bottom: 2px; }
+.smith-tool-activity { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+
+.smith-markdown { display: flex; flex-direction: column; gap: 6px; }
+.smith-markdown p { margin: 0; }
+.smith-markdown h4, .smith-markdown h5, .smith-markdown h6 { margin: 4px 0 0 0; color: var(--text); }
+.smith-markdown ul, .smith-markdown ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+.smith-markdown code { font-family: var(--mono); font-size: 11px; background: var(--bg); border-radius: 4px; padding: 1px 4px; }
+.smith-markdown a { color: var(--cool); }
+.smith-code-block { position: relative; margin-top: 2px; }
+.smith-code-block pre {
+  margin: 0; padding: 8px 10px; border-radius: 6px; overflow-x: auto;
+  background: var(--bg); border: 1px solid var(--border);
+}
+.smith-code-block code { font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--text-dim); white-space: pre; }
+.smith-code-lang { font-family: var(--mono); font-size: 9.5px; color: var(--text-mute); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 2px; }
+.smith-code-block .copy-btn { position: absolute; top: 4px; right: 4px; }
+
+.smith-chat-input { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
+.smith-chat-input textarea {
+  flex: 1; resize: none; min-height: 38px; max-height: 160px; padding: 8px 10px;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font-family: var(--ui); font-size: 12.5px; line-height: 1.5;
+}
+.smith-conv-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
+.smith-conv-row {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px;
+  cursor: pointer; font-size: 11.5px; color: var(--text-dim);
+}
+.smith-conv-row:hover { background: var(--bg); }
+.smith-conv-row.active { background: var(--tab-active); color: #fff; }
+
+/* ── Unified Model Carousel (UnifiedModelCarousel.tsx) ─────────────────────
+   A single horizontal carousel of family playing cards riding an ARCH path
+   (parabola drop + tangent tilt per slide). Multi-model families stack as a
+   corner fan of their real member cards; tapping the centered stack fans
+   the members out (see .umc-fanout). Momentum physics: slides follow the
+   pointer 1:1, coast with exponential friction on release, then snap. */
+/* Viewport owns the gesture surface. user-select:none so mouse drags don't
+   select the card text instead of sliding (part of why the carousel "didn't
+   work on desktop"); touch-action pan-y keeps vertical page scroll. */
+/* Slide metrics live on .umc (not .umc-track) because the fan-out overlay
+   (.umc-fanout) sizes its deck + cards from them too. */
+.umc {
+  position: relative;
+  /* Operator feedback 2026-08-14: the initial family view is zoomed out
+     25% (350×0.75 = 262); fanning out to model cards zooms back in to the
+     full 350 (".umc.fanned" below). The track/slide/fan geometry all derive
+     from this var, so the zoom animates through the shared transition. */
+  --umc-slide-w: 262px;
+  --umc-slide-gap: 14px;
+  --umc-anim-dur: 0s;
+  --umc-anim-ease: ease;
+}
+.umc.fanned { --umc-slide-w: 300px; }
+.umc:focus-visible { outline: none; }
+/* Bottom padding reserves the arch's drop — cards slide DOWN the parabola
+   away from center, so the viewport must own the space below the apex. */
+.umc-viewport { overflow: hidden; padding: 14px 0 88px; touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: grab; }
+.umc-viewport:active { cursor: grabbing; }
+.umc-track {
+  display: flex;
+  gap: var(--umc-slide-gap);
+  will-change: transform;
+  /* Arch-path carousel (playing-card redesign 2026-08-14): the track does
+     the horizontal placement only (fractional slide f, set by the
+     component); each slide carries its own parabola drop + tangent tilt +
+     depth scale. Both animate through the shared --umc-anim-* vars: 0s
+     while dragging, fling/snap easing on commit (see setAnim/land in
+     UnifiedModelCarousel.tsx). */
+  transition: transform var(--umc-anim-dur) var(--umc-anim-ease);
+}
+.umc-slide {
+  flex: 0 0 var(--umc-slide-w);
+  cursor: pointer;
+  opacity: .45;
+  position: relative;
+  /* The slide itself stays UNTRANSFORMED: WebKit hit-testing proved
+     unreliable on the rotated/scaled slide box (dead click zones on side
+     cards, found in the 2026-08-14 live pass). The arch pose lives on the
+     inner .umc-arch wrapper instead, so the slide's own box — which owns
+     the click handlers — always hit-tests true. No will-change either:
+     promoting every slide to its own layer made WebKit composite the
+     body's fixed-attachment stripe background OVER the carousel. */
+  transition: opacity .25s ease;
+}
+.umc-slide.active { opacity: 1; }
+.umc-arch {
+  transition: transform var(--umc-anim-dur) var(--umc-anim-ease);
+}
+.umc-slide:focus-visible { outline: 2px solid var(--heat); outline-offset: 4px; border-radius: var(--radius); }
+.umc-slide:hover .pcard-face { border-color: color-mix(in srgb, var(--heat) 40%, var(--border)); }
+
+/* Corner-fan stack (playing-card redesign 2026-08-14): multi-model families
+   render their REAL member cards behind the family face, each rotated
+   about the bottom-left corner like a hand of cards. The fan sits tight
+   while off-center, opens when the stack reaches the carousel center
+   (.active), and eases a little wider on hover. Tapping the centered
+   stack then does the full fan-out (see .umc-fanout below). */
+.umc-stack { position: relative; }
+.umc-peek {
+  position: absolute; inset: 0;
+  transform-origin: 9% 96%;
+  transform:
+    rotate(calc(var(--peek-i) * var(--umc-peek-spread, 2.4deg)))
+    translate(calc(var(--peek-i) * 3px), calc(var(--peek-i) * 1.5px));
+  transition: transform .3s ease;
+  pointer-events: none;
+}
+.umc-slide.stacked { --umc-peek-spread: 2.4deg; }
+.umc-slide.stacked.active { --umc-peek-spread: 5.6deg; }
+.umc-slide.stacked.active:hover { --umc-peek-spread: 7.4deg; }
+.umc-stack-face { position: relative; z-index: 30; }
+
+/* The family face is a PlayingCard; the 5:7 contract (visual pass
+   2026-08-14) moves onto the chrome class. */
+.pcard.umc-card { aspect-ratio: 5 / 7; }
+.umc-card .pcard-body { justify-content: center; gap: 8px; padding-top: calc(27% + 44px); }
+.umc-genealogy {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  margin-bottom: 2px;
+}
+.umc-count { font-size: 13px; color: var(--text-dim); }
+.umc-members {
+  font-size: 11px; color: var(--text-mute); max-width: 92%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.umc-hint { font-size: 12px; color: var(--text-mute); margin-top: auto; font-style: italic; opacity: .7; }
+
+.umc-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-glass);
+  backdrop-filter: var(--panel-blur);
+  -webkit-backdrop-filter: var(--panel-blur);
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  box-shadow: var(--shadow);
+  transition: color .2s ease, background .2s ease;
+}
+.umc-arrow:hover:not(:disabled) { color: var(--text); background: var(--panel); }
+.umc-arrow:disabled { opacity: .3; cursor: default; }
+.umc-arrow:focus-visible { outline: 2px solid var(--heat); outline-offset: 2px; }
+.umc-arrow-left { left: -6px; }
+.umc-arrow-right { right: -6px; }
+
+.umc-dots { display: flex; justify-content: center; gap: 6px; margin-top: 14px; }
+.umc-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: none;
+  background: var(--border-strong);
+  cursor: pointer;
+  padding: 0;
+  transition: background .2s ease, width .2s ease;
+}
+.umc-dot.active { background: var(--tab-active); width: 18px; border-radius: 999px; }
+.umc-dot:focus-visible { outline: 2px solid var(--heat); outline-offset: 2px; }
+
+.umc-expanded { animation: fade .2s ease; }
+.umc-back {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-block;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  background: var(--panel);
+}
+.umc-back:hover { color: var(--text); }
+.umc-back:focus-visible { outline: 2px solid var(--heat); outline-offset: 2px; }
+
+/* Fan-out mode (playing-card redesign 2026-08-14): tapping the centered
+   family stack spreads its REAL model cards out from under the family card
+   along a long shallow arch — no grid, no sub-page. The family card stays
+   as the "deck" at the left; swiping cycles which member card is up;
+   tapping the up card zooms it into the hero. The overlay covers the
+   family carousel (which dims underneath). */
+.umc.fanned .umc-viewport { opacity: .22; transition: opacity .3s ease; }
+.umc-fanout {
+  position: absolute; inset: 0; z-index: 40;
+  user-select: none; -webkit-user-select: none;
+}
+.umc-fanout.exit { pointer-events: none; }
+.umc-fan-backbtn { position: absolute; top: -4px; left: 0; z-index: 500; }
+.umc-fan-stage { position: absolute; inset: 0; touch-action: pan-y; cursor: grab; }
+.umc-fan-stage:active { cursor: grabbing; }
+/* The family deck card — shrinks to background when fanned (operator QA sprint). */
+.umc-fan-deck {
+  position: absolute;
+  left: clamp(4px, 2%, 20px);
+  top: 50%;
+  width: calc(var(--umc-slide-w) * .45);
+  transform: rotate(-12deg) translateY(-50%) scale(0.85);
+  transform-origin: 30% 50%;
+  z-index: 50;
+  cursor: pointer;
+  opacity: .55;
+  transition: transform .3s ease, opacity .3s ease;
+}
+.umc-fan-deck:hover { opacity: .7; transform: rotate(-14deg) translateY(-50%) scale(0.88); }
+.umc-fan-deck .umc-hint { display: none; }
+/* Family deck loses gold border when fanned — it's not "selected" anymore. */
+.umc-fan-deck .pcard-frame {
+  border-color: var(--border-strong) !important;
+  box-shadow: none !important;
+}
+.umc-fan-deck .pcard-frame::after {
+  border-color: color-mix(in srgb, var(--border-strong) 40%, transparent) !important;
+}
+.umc-fan-card {
+  position: absolute;
+  top: 20px;
+  left: calc(50% - var(--umc-slide-w) * 0.575);
+  width: calc(var(--umc-slide-w) * 1.15);
+  cursor: pointer;
+  transition: opacity .25s ease;
+}
+.umc-fan-arch {
+  transition: transform var(--umc-anim-dur) var(--umc-anim-ease);
+}
+/* The "up" (front/selected) model card gets the golden glow. */
+.umc-fan-card.up .pcard-frame {
+  border-color: color-mix(in srgb, var(--gold) 70%, var(--border-strong));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--gold) 50%, transparent),
+    inset 0 0 10px color-mix(in srgb, var(--gold) 30%, transparent);
+}
+.umc-fan-card.up .pcard-frame::after {
+  border-color: color-mix(in srgb, var(--gold) 40%, transparent);
+}
+.umc-fanout.exit .umc-fan-card { opacity: .25; }
+/* Arrows/dots sit above the fanned cards — a wide fan's outer cards reach
+   the edges and would otherwise cover them (card z goes up to ~200). */
+.umc-fanout .umc-arrow { top: 46%; z-index: 400; }
+.umc-fanout .umc-dots { position: absolute; left: 0; right: 0; bottom: 4px; margin-top: 0; z-index: 400; }
+
+@media (max-width: 560px) {
+  .umc { --umc-slide-w: 210px; --umc-slide-gap: 12px; }
+  .umc.fanned { --umc-slide-w: 240px; }
+  .umc-viewport { padding: 10px 0 64px; }
+  .umc-arrow { width: 30px; height: 30px; font-size: 17px; }
+  .umc-slide.stacked { --umc-peek-spread: 2deg; }
+  .umc-slide.stacked.active { --umc-peek-spread: 4.4deg; }
+  .umc-slide.stacked.active:hover { --umc-peek-spread: 5.6deg; }
+  /* Tighter playing-card chrome on the narrow slide (logo/watermark are
+     %-sized, so they scale with the card automatically). */
+  .pcard-name { font-size: 13px; }
+  .pcard-body { padding: calc(27% + 30px) 18px 12px; gap: 5px; }
+  .pcard-logo { top: 3px; left: 3px; }
+  .pcard-mark { right: 6px; bottom: 6px; }
+  .umc-card .pcard-body { padding-top: calc(27% + 34px); }
+  .pcard.hero .pcard-name { font-size: 16px; }
+  .pcard.hero .pcard-body { padding: calc(27% + 40px) 22px 14px; }
+  .mhero { padding: 12px 6px; gap: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .umc-track, .umc-slide, .umc-arch, .umc-peek, .umc-fan-card, .umc-fan-arch, .umc-fan-deck, .umc.fanned .umc-viewport { transition: none; }
+  .mhero-scene { animation: none; }
+  .mhero-card { transition: none; }
+}
+
+/* ── Model card provider chips + benchmark chips (ModelCardView.tsx) ──────
+   Compact rows shown below the capability bars. Provider chips show which
+   external providers offer this model + a status dot (green=enabled,
+   gray=disabled). Benchmark chips show published metric scores. */
+.mproviders { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; width: 100%; }
+.mprov-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  width: 100%;
+}
+.mprov-chip.disabled { opacity: .5; }
+.mprov-chip .mprov-name { font-family: var(--ui); }
+.mprov-chip .mprov-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+.mprov-dot.on { background: var(--ok); box-shadow: 0 0 5px var(--ok); }
+.mprov-dot.off { background: var(--border-strong); }
+
+.mbench { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; width: 100%; }
+.mbench-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-mute);
+  letter-spacing: .02em;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* Smith animated hammer icon (AskSmith.tsx). Three states: working
+   (strike/bounce while smith is thinking), done (static), and waiting
+   (twirl when smith ends on a question and is awaiting user reply). */
+.smith-hammer { display: inline-block; vertical-align: middle; transform-origin: center; }
+.smith-hammer--working { animation: smith-hammer-strike 0.6s ease-in-out infinite; }
+.smith-hammer--done { animation: none; }
+.smith-hammer--waiting { animation: smith-hammer-twirl 1.5s linear infinite; }
+@keyframes smith-hammer-strike {
+  0%, 100% { transform: rotate(-15deg); }
+  50% { transform: rotate(15deg); }
+}
+@keyframes smith-hammer-twirl {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* S2-Web — fast-path answer rendering (EvidenceBlock, DigDeeperChip,
+   SelfContextChip missed-patterns). docs/v5-smith-experience.md §2.2. */
+/* Evidence: expandable {label, value} rows under a fast answer. The evidence
+   arrives as a separate smith_deterministic message (reasoning.go:871) with
+   empty content; .smith-msg-evidence drops the bubble + meta so it reads as a
+   continuation of the preceding answer. */
+.smith-msg-evidence { max-width: 88%; }
+.smith-msg-evidence .smith-bubble { display: none; }
+.smith-evidence { margin-top: 2px; font-size: 11px; }
+.smith-evidence summary {
+  cursor: pointer; color: var(--text-mute); user-select: none; list-style: none;
+  padding: 3px 0;
+}
+.smith-evidence summary::-webkit-details-marker { display: none; }
+.smith-evidence summary::before { content: "▸ "; }
+.smith-evidence[open] summary::before { content: "▾ "; }
+.smith-evidence-rows {
+  display: flex; flex-direction: column; gap: 3px; margin-top: 4px;
+  padding: 6px 8px; border-radius: 6px; background: var(--bg);
+  border: 1px solid var(--border);
+}
+.smith-evidence-row { display: flex; gap: 8px; align-items: baseline; }
+.smith-evidence-label { color: var(--text-mute); flex-shrink: 0; min-width: 80px; }
+.smith-evidence-value {
+  font-family: var(--mono); font-size: 10.5px; color: var(--text-dim);
+  word-break: break-word; flex: 1;
+}
+/* Dig deeper: the one-click escalation affordance below every fast answer
+   (§2.2: "escalation is always one click without ever being a concept"). */
+.smith-dig-deeper {
+  display: inline-block; margin-top: 6px; padding: 4px 12px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--cool) 40%, var(--border));
+  background: color-mix(in srgb, var(--cool) 10%, var(--panel));
+  color: var(--cool); font-family: var(--ui); font-size: 11px; cursor: pointer;
+  min-height: 28px; transition: background 0.15s, border-color 0.15s;
+}
+.smith-dig-deeper:hover {
+  background: color-mix(in srgb, var(--cool) 18%, var(--panel));
+  border-color: color-mix(in srgb, var(--cool) 60%, var(--border));
+}
+/* Missed patterns: operator-facing candidate list on the status surface
+   (§3.7). Collapsible, below the identity line. */
+.smith-missed-patterns { margin-top: 8px; font-size: 11px; }
+.smith-missed-patterns summary {
+  cursor: pointer; color: var(--text-mute); user-select: none; list-style: none;
+  padding: 2px 0;
+}
+.smith-missed-patterns summary::-webkit-details-marker { display: none; }
+.smith-missed-patterns summary::before { content: "▸ "; }
+.smith-missed-patterns[open] summary::before { content: "▾ "; }
+.smith-missed-list {
+  display: flex; flex-direction: column; gap: 4px; margin-top: 4px;
+  padding: 6px 8px; border-radius: 6px; background: var(--bg);
+  border: 1px solid var(--border); max-height: 240px; overflow-y: auto;
+}
+.smith-missed-row {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 3px 0; border-bottom: 1px solid var(--border);
+}
+.smith-missed-row:last-child { border-bottom: none; }
+.smith-missed-text { color: var(--text-dim); word-break: break-word; }
+.smith-missed-tools { font-family: var(--mono); font-size: 9.5px; color: var(--text-mute); }
+.smith-missed-at { font-size: 9.5px; color: var(--text-mute); }
+@media (max-width: 390px) {
+  .smith-dig-deeper { min-height: 44px; }
+  .smith-evidence-label { min-width: 64px; }
+}
+
+/* Config cards keep their own identity in the carousel (operator feedback
+   2026-08-14: "config cards are not model cards") — the original .mcard
+   layout, ridden square 1:1 instead of the model deck's 5:7. The square is
+   shorter than the content's natural height, so the middle (description,
+   benchmark bars) compresses — bars' tracks shrink first — while the
+   Load/mfoot row never does (operator feedback 2026-08-15: the Load
+   button must always be visible). */
+.mcard.config-card { aspect-ratio: 1 / 1; overflow: hidden; }
+.mcard.config-card .mdesc, .mcard.config-card .caps { min-height: 0; }
+.mcard.config-card .cap .track { min-height: 16px; }
+.mcard.config-card .mfoot { flex-shrink: 0; }

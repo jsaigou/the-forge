@@ -1,0 +1,14 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Schema v36 (smith P4 — knowledge base, docs/v5-smith.md §4.7).
+--
+-- smith_findings (migration 0033) never persisted the KBRefs a check's
+-- Finding carries — the column simply didn't exist, so every finding
+-- surfaced via GET /findings or an investigation's findings trail
+-- (findings.go's ListFindings, investigations.go's findingsForInvestigation)
+-- silently dropped kb_refs on the way into the store, even though the
+-- ephemeral sweep-response Finding (POST /checks/run) always had them. A
+-- Diagnostics finding card built against the persisted list — the only
+-- place findings are actually rendered today — would never have anything
+-- to show a KB chip for. Additive, no backfill needed: existing rows get
+-- the same "[]" a fresh Finding with no matched ref would produce.
+ALTER TABLE smith_findings ADD COLUMN kb_refs TEXT NOT NULL DEFAULT '[]';

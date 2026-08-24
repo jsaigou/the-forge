@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "id": "strix-halo-gfx1151",
+      "match": {
+        "cpu_regex": "(?i)Ryzen AI Max\\+? 39[05]",
+        "gpu_regex": "(?i)gfx1151"
+      }
+    }
+  ]
+}

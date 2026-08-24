@@ -1,0 +1,29 @@
+# ~/.config/systemd/user/forge-agent.service
+# Forge Node Agent — always-on lightweight control plane (no model, no GPU).
+# Enabled via: systemctl --user enable --now forge-agent.service
+# Requires:    loginctl enable-linger <user>  (so it runs without active login)
+#
+# Config:  /etc/forge-agent/agent.toml
+# State:   /var/lib/forge-agent/
+# Port:    127.0.0.1:9200 (tailscale serve → svc:ops-pairnode)
+
+[Unit]
+Description=Forge Node Agent
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/forge-agent
+ExecStart=/opt/forge-agent/venv/bin/python /opt/forge-agent/agent.py serve
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-agent
+TimeoutStopSec=10
+Environment="FORGE_AGENT_CONFIG=/etc/forge-agent/agent.toml"
+Environment="FORGE_AGENT_STATE_DIR=/var/lib/forge-agent"
+Environment="FORGE_AGENT_PORT=9200"
+
+[Install]
+WantedBy=default.target

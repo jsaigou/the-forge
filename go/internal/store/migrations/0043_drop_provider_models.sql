@@ -1,0 +1,16 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Schema v43 (pre-release feedback sprint Phase 7, 2026-08-13).
+--
+-- provider_models (0002_polish.sql, surrogate-keyed in 0042) is dead: 0 rows
+-- on the live deployment, and no production write path had ever existed for
+-- it anywhere in httpapi/store — only internal/store/providers_test.go
+-- inserted into it directly. GET /api/v1/providers' models[] field was
+-- always an empty array as a result, and ProviderUpdateRequest.models (the
+-- FE's phantom write field) was silently discarded server-side.
+--
+-- The real provider->model relationship this table was meant to capture
+-- already exists, populated, in `offerings` — internal/providers.Service now
+-- builds the provided-models list from there instead (see providers.go's
+-- offeringsByProvider). No data migration needed: there is nothing to carry
+-- forward.
+DROP TABLE provider_models;

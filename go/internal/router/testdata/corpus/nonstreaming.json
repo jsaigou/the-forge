@@ -1,0 +1,11 @@
+{
+  "model": "gemma4-26b-mtp",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "What is 2+2?"}
+  ],
+  "temperature": 0.7,
+  "top_p": 0.95,
+  "max_tokens": 100,
+  "stream": false
+}
