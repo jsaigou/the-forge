@@ -253,6 +253,37 @@ func TestLoginNextMustBeSameOriginPath(t *testing.T) {
 	}
 }
 
+// TestLoginPageEscapesNextParam guards a real reflected-XSS bug: GET
+// /login used to splice ?next= straight into the rendered form's `action=`
+// attribute with no escaping at all, so a crafted link could break out of
+// the attribute and inject arbitrary markup into the login page itself —
+// the single worst place for that, since it lets an attacker rewrite the
+// credential form a victim is about to submit to. Fixed via
+// sanitizeNextPath (same-origin-path rule, shared with the POST handler)
+// plus url.QueryEscape + html.EscapeString before interpolation.
+func TestLoginPageEscapesNextParam(t *testing.T) {
+	s, auth := newLoginTestServer(t)
+	h := s.Handler()
+	if err := auth.CreateUser(t.Context(), "testuser", "hunter2hunter2", authz.RoleAdmin); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	payload := `"><script>alert(1)</script>`
+	req := httptest.NewRequest("GET", "/login?next="+url.QueryEscape(payload), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /login: got %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "<script>alert(1)</script>") {
+		t.Fatalf("payload reflected unescaped into the login page: %s", body)
+	}
+	if strings.Contains(body, `action="/login?next="><script>`) {
+		t.Fatalf("payload broke out of the form action attribute: %s", body)
+	}
+}
+
 func TestPostLogout(t *testing.T) {
 	s, auth := newLoginTestServer(t)
 	h := s.Handler()

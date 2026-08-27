@@ -196,6 +196,14 @@ func (s *Server) createVoice(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "id, name and type required", http.StatusBadRequest)
 			return
 		}
+		// storeFile below writes id+".wav"/id+"_sample.wav" straight to
+		// disk, ahead of (and independent of) Registry.Put's own id check
+		// — reject a path-traversal-shaped id here, before any file touches
+		// disk, rather than relying on the registry layer alone.
+		if err := checkVoiceID(id); err != nil {
+			http.Error(w, "id must be lowercase alphanumeric with - or _, max 64 chars", http.StatusBadRequest)
+			return
+		}
 		entry = VoiceEntry{ID: id, Name: name, Type: vtype, Language: lang}
 		switch vtype {
 		case "design":
@@ -237,6 +245,10 @@ func (s *Server) createVoice(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.ID == "" || body.Name == "" || body.Type == "" {
 			http.Error(w, "id, name and type required", http.StatusBadRequest)
+			return
+		}
+		if err := checkVoiceID(strings.ToLower(body.ID)); err != nil {
+			http.Error(w, "id must be lowercase alphanumeric with - or _, max 64 chars", http.StatusBadRequest)
 			return
 		}
 		if body.Type != "design" {
