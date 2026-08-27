@@ -33,6 +33,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"html"
 	"net/url"
 	"strings"
 	"time"
@@ -190,25 +191,41 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
-	next := r.URL.Query().Get("next")
-	if next == "" {
-		next = "/"
-	}
+	next := sanitizeNextPath(r.URL.Query().Get("next"))
 	errNote := ""
 	if r.URL.Query().Get("error") != "" {
 		errNote = `<p class=err>Invalid username or password.</p>`
 	}
-	html := `<!doctype html><meta charset=utf-8>` +
+	// next is embedded into an HTML attribute inside a URL query value —
+	// sanitizeNextPath only constrains it to a same-site relative path, so
+	// it must still be query-escaped for that position and HTML-escaped
+	// for this one; a raw concatenation here was a reflected-XSS hole
+	// (the query-string value was written straight into the `action=`
+	// attribute with no escaping at all).
+	nextAttr := html.EscapeString(url.QueryEscape(next))
+	page := `<!doctype html><meta charset=utf-8>` +
 		`<meta name=viewport content="width=device-width, initial-scale=1">` +
 		`<meta name=theme-color content=#100e0c>` +
 		`<title>Forge — Login</title>` + loginPageStyle +
 		`<h1>The Forge</h1>` + errNote +
-		`<form method=post action="/login?next=` + next + `">` +
+		`<form method=post action="/login?next=` + nextAttr + `">` +
 		`<input name=username placeholder=username autofocus>` +
 		`<input name=password type=password placeholder=password>` +
 		`<button>Sign in</button></form>`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(html))
+	_, _ = w.Write([]byte(page))
+}
+
+// sanitizeNextPath constrains a caller-supplied "next" redirect target to a
+// same-site relative path: empty, a "//" (protocol-relative, i.e.
+// scheme-relative off-site) target, or anything not starting with "/"
+// collapses to "/". Shared by every handler that reads ?next= so the rule
+// can't drift between them.
+func sanitizeNextPath(next string) string {
+	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
+		return "/"
+	}
+	return next
 }
 
 // handleSetupPage renders the first-run wizard form (create the initial
@@ -296,10 +313,7 @@ func (s *Server) handlePostLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "login not available")
 		return
 	}
-	next := r.URL.Query().Get("next")
-	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
-		next = "/"
-	}
+	next := sanitizeNextPath(r.URL.Query().Get("next"))
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/login?next="+url.QueryEscape(next)+"&error=1", http.StatusSeeOther)
 		return

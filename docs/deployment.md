@@ -134,3 +134,18 @@ If running on an SELinux-enforcing host:
 Pre-flight can be run standalone: `installer/preflight.sh [--json]`. Asset manifest:
 `installer/assets.manifest.json`; provisioner usage and the whole flow are documented in
 `installer/README.md`.
+
+## Network exposure
+
+The dashboard (`Server.Listen`) defaults to `127.0.0.1:5000` - loopback only. The `a0` router
+(`Server.RouterListen`) defaults to `:8085` with **no host specified, i.e. all interfaces** - by
+design, since it's meant to be reached by other devices on your tailnet. Its auth model assumes
+that reachability boundary: requests sourced from a private tailnet address range skip the
+bearer-key check entirely (see [docs/llm-router.md](llm-router.md)'s "Tailnet-Conditional Auth").
+
+That's safe on a host that's only reachable over Tailscale. It is **not** safe to expose directly
+to the public internet (a cloud VPS with a public IP, a port-forward, etc.) without first putting
+a real perimeter in front of it - a firewall restricting :8085 to your tailnet's address range,
+or a reverse proxy that terminates TLS and only forwards traffic you trust. If you're not
+deploying on a Tailscale-connected host, treat every `a0` request as requiring its bearer key and
+firewall the port accordingly.

@@ -2,10 +2,56 @@ package tts
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+// TestRegistryRejectsPathTraversalIDs guards a real vulnerability: every
+// method here used to join id straight into a filename (id+".wav",
+// id+"_sample.wav") with no validation, so an id like
+// "../../../../tmp/evil" could read, write, or delete files outside
+// AudioDir — reachable even for an id that was never legitimately created
+// via Put, since GetSample/SetSample/Delete never checked registry
+// membership either.
+func TestRegistryRejectsPathTraversalIDs(t *testing.T) {
+	dir, _ := os.MkdirTemp("", "reg-traversal-")
+	defer os.RemoveAll(dir)
+	reg := NewRegistry(dir)
+
+	outside := filepath.Join(filepath.Dir(dir), "escaped_sample.wav")
+	defer os.Remove(outside)
+	traversalID := "../" + filepath.Base(filepath.Dir(dir)) + "/escaped"
+
+	if err := reg.SetSample(traversalID, []byte("payload")); !errors.Is(err, ErrInvalidVoiceID) {
+		t.Fatalf("SetSample(%q) = %v, want ErrInvalidVoiceID", traversalID, err)
+	}
+	if _, err := os.Stat(outside); err == nil {
+		t.Fatal("SetSample wrote outside AudioDir despite rejection")
+	}
+
+	if _, err := reg.GetSample(traversalID); !errors.Is(err, ErrInvalidVoiceID) {
+		t.Fatalf("GetSample(%q) = %v, want ErrInvalidVoiceID", traversalID, err)
+	}
+
+	if err := reg.Delete(traversalID); !errors.Is(err, ErrInvalidVoiceID) {
+		t.Fatalf("Delete(%q) = %v, want ErrInvalidVoiceID", traversalID, err)
+	}
+
+	if err := reg.Put(VoiceEntry{ID: traversalID, Name: "x", Type: "design"}); !errors.Is(err, ErrInvalidVoiceID) {
+		t.Fatalf("Put(id=%q) = %v, want ErrInvalidVoiceID", traversalID, err)
+	}
+
+	// A normal id must still work end to end.
+	if err := reg.SetSample("legit-voice_1", []byte("wav-bytes")); err != nil {
+		t.Fatalf("SetSample(legit id) unexpectedly failed: %v", err)
+	}
+	got, err := reg.GetSample("legit-voice_1")
+	if err != nil || string(got) != "wav-bytes" {
+		t.Fatalf("GetSample(legit id) = %q, %v", got, err)
+	}
+}
 
 func TestRegistryRoundTrip(t *testing.T) {
 	dir, _ := os.MkdirTemp("", "reg-")
