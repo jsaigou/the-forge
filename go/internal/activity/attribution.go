@@ -85,12 +85,12 @@ func (r *Registry) Label(slot string, newerThan time.Duration) string {
 //     this function should paper over.
 //   - keyName: the operator-chosen bearer-key name. When the app name is
 //     also the key name's leading segment ("opencode-examplehost" + UA OpenCode),
-//     the remainder is treated as the host: "ExampleHost (OpenCode)". Otherwise
+//     the remainder is treated as the host: "Examplehost (OpenCode)". Otherwise
 //     a distinct app name is parenthesized after the raw key name.
 //
 // Examples (all derived, nothing env-specific):
 //
-//	ua "OpenCode/1.2.3",  key "opencode-examplehost" -> ExampleHost (OpenCode)
+//	ua "OpenCode/1.2.3",  key "opencode-examplehost" -> Examplehost (OpenCode)
 //	ua "LibreChat/2.0",   key "librechat"       -> LibreChat
 //	ua "myagent/0.9",     key "testuser-laptop"      -> testuser-laptop (myagent)
 //	ua "",                key "opencode-core"   -> opencode-core

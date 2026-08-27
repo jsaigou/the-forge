@@ -75,7 +75,7 @@ type statusResponse struct {
 	RestartRequired *restartRequiredInfo `json:"restart_required,omitempty"`
 	// SlotConsumers is additive (per-slot consumer attribution): slot id →
 	// the human-facing label of whoever most recently generated against it
-	// ("ExampleHost (OpenCode)", "SMITH", a tailnet IP), within the freshness
+	// ("Examplehost (OpenCode)", "SMITH", a tailnet IP), within the freshness
 	// window (activity.ConsumerFreshness). omitempty — absent when nothing
 	// is consuming.
 	SlotConsumers map[string]string `json:"slot_consumers,omitempty"`
