@@ -49,17 +49,21 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/activity"
 	"github.com/jsaigou/the-forge/internal/authz"
 	"github.com/jsaigou/the-forge/internal/bus"
 	"github.com/jsaigou/the-forge/internal/collector"
+	"github.com/jsaigou/the-forge/internal/compressorctl"
 	"github.com/jsaigou/the-forge/internal/config"
 	"github.com/jsaigou/the-forge/internal/engine"
 	"github.com/jsaigou/the-forge/internal/fx"
-	"github.com/jsaigou/the-forge/internal/compressorctl"
+	"github.com/jsaigou/the-forge/internal/hf"
+	"github.com/jsaigou/the-forge/internal/hfdownload"
 	"github.com/jsaigou/the-forge/internal/maintenance"
 	"github.com/jsaigou/the-forge/internal/profile"
 	"github.com/jsaigou/the-forge/internal/providers"
@@ -67,6 +71,7 @@ import (
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/smith"
 	"github.com/jsaigou/the-forge/internal/store"
+	"github.com/jsaigou/the-forge/internal/ttsctl"
 )
 
 // Deps are the frozen-interface dependencies (Contract 2). Phase 9 swaps
@@ -86,6 +91,11 @@ type Deps struct {
 	Config    func() *config.Config
 	Hostname  string
 	Version   string
+
+	// Activity is the per-slot consumer attribution registry (shared with
+	// the router + smith — one instance wired in cmd/forge). nil = status
+	// carries no slot_consumers.
+	Activity *activity.Registry
 
 	// AuthSetup is the account-creation/session surface for the
 	// server-rendered POST /login and POST /setup handlers. nil (Phase 4
@@ -160,6 +170,14 @@ type Deps struct {
 	// still pointed at it — provisionerFor's dual-template dispatch is gone
 	// along with it.
 	CompressorProvisioner *compressorctl.Provisioner
+
+	// TTSProvisioner drives the forge-tts voice/speech engine lifecycle
+	// (Tier 1 Sprint 2, Voice & Speech settings, 2026-08-27): env-file write
+	// + systemd start/stop/restart, same shape as CompressorProvisioner but
+	// against one fixed (non-templated) unit. nil = PUT /api/v1/voice/settings
+	// still persists the setting but skips applying it live (the Phase 4
+	// stub environment and most tests).
+	TTSProvisioner *ttsctl.Provisioner
 
 	// Providers is the per-provider clients + read-side assembly surface
 	// (Sprint 0 §0.3, BE-3). nil = not yet wired; handleProvidersList
@@ -281,6 +299,17 @@ type Deps struct {
 	// returns 503 (Phase 4 stub environment, and every unit test — none of
 	// them should ever actually restart a process).
 	SystemRestart func(ctx context.Context) error
+
+	// HFDownload is the HF model-acquisition engine (search/preflight/
+	// download/registration — go/internal/hfdownload). nil = hf/* routes
+	// return 503 (Phase 4 stub environment, and most unit tests).
+	HFDownload *hfdownload.Service
+
+	// HFClient is the HF Hub API client backing GET /api/v1/hf/search and
+	// /tree (read-only lookups that don't belong to any one download job).
+	// nil = those two routes return 503; HFDownload's own Preflight/
+	// StartJob/ProposeJob paths use HFDownload.HF internally regardless.
+	HFClient *hf.Client
 }
 
 // Server is the dashboard HTTP server. The zero value is not usable —
@@ -507,6 +536,7 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/smith/actions/{id}/reject", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithActionReject)))
 	mux.Handle("POST /api/v1/smith/actions/{id}/handoff", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithActionHandoff)))
 	mux.Handle("POST /api/v1/smith/actions/{id}/recheck", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithActionRecheck)))
+	mux.Handle("POST /api/v1/smith/actions/{id}/check-now", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithActionCheckNow)))
 	// Procedure runs (autonomous-remediation Sprint 2 — go/internal/smith's
 	// procedure.go): read-side is role-only like the action detail route it
 	// mirrors; checkpoint-approve carries the same step-up as approve (it's
@@ -574,6 +604,12 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/smith/chat", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithChat)))
 	mux.Handle("GET /api/v1/smith/settings", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithSettingsGet)))
 	mux.Handle("PUT /api/v1/smith/settings", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithSettingsPut)))
+
+	// Voice & Speech settings (Tier 1 Sprint 2, 2026-08-27).
+	mux.Handle("GET /api/v1/voice/settings", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleVoiceSettingsGet)))
+	mux.Handle("PUT /api/v1/voice/settings", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleVoiceSettingsPut)))
+	// List all saved voices by engine (Sprint 1 UI papercuts, 2026-08-27).
+	mux.Handle("GET /api/v1/voice/list", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleVoiceList)))
 	mux.Handle("POST /api/v1/smith/investigations/{id}/analyze", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithInvestigationAnalyze)))
 	// Smith P4 — knowledge base (docs/v5-smith.md §4.7/§5): the embedded doc
 	// corpus + live-DB evidence search, one KBRef's chunk, and the parsed
@@ -688,8 +724,11 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/auth/identity-links/{provider}/{principal}", s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourceAreaSettingsSecurity)(http.HandlerFunc(s.handleIdentityLinkDelete))))
 
 	mux.Handle("GET /api/v1/keys", s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourceAreaSettingsSecurity)(http.HandlerFunc(s.handleKeysList))))
-	mux.Handle("POST /api/v1/keys", s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourceAreaSettingsSecurity)(http.HandlerFunc(s.handleKeyCreate))))
-	mux.Handle("DELETE /api/v1/keys/{keyid}", s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourceAreaSettingsSecurity)(http.HandlerFunc(s.handleKeyRevoke))))
+	// POST: gating is inside handleKeyCreate itself (#37 self-rotation
+	// carve-out needs the decoded body). DELETE: requireStrictAssurance, no
+	// bearer exception at all — see both functions' doc comments.
+	mux.Handle("POST /api/v1/keys", s.requireRole(authz.RoleAdmin)(http.HandlerFunc(s.handleKeyCreate)))
+	mux.Handle("DELETE /api/v1/keys/{keyid}", s.requireRole(authz.RoleAdmin)(s.requireStrictAssurance(authz.ResourceAreaSettingsSecurity)(http.HandlerFunc(s.handleKeyRevoke))))
 
 	// Sprint C — audit_log's first read surface (see audit_handlers.go).
 	// Gated the same as the catalog mutation routes it's mostly read
@@ -748,6 +787,13 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/service-mode/{name}/stop", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleServiceMode)))
 	mux.Handle("POST /api/v1/tts/start", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleTTS)))
 	mux.Handle("POST /api/v1/tts/stop", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleTTS)))
+	// STT/Embedding/Aligner start/stop (Tier 1 Sprint 2, Voice & Speech settings).
+	mux.Handle("POST /api/v1/stt/start", s.requireRole(authz.RoleOperator)(s.handleFixedInfraService("stt", "forge-stt")))
+	mux.Handle("POST /api/v1/stt/stop", s.requireRole(authz.RoleOperator)(s.handleFixedInfraService("stt", "forge-stt")))
+	mux.Handle("POST /api/v1/embedding/start", s.requireRole(authz.RoleOperator)(s.handleFixedInfraService("embedding", "forge-embedding")))
+	mux.Handle("POST /api/v1/embedding/stop", s.requireRole(authz.RoleOperator)(s.handleFixedInfraService("embedding", "forge-embedding")))
+	mux.Handle("POST /api/v1/aligner/start", s.requireRole(authz.RoleOperator)(s.handleFixedInfraService("aligner", "forge-aligner")))
+	mux.Handle("POST /api/v1/aligner/stop", s.requireRole(authz.RoleOperator)(s.handleFixedInfraService("aligner", "forge-aligner")))
 
 	// Modes CRUD (Contract 1 §5). C1-Q3 resolved as WON'T-DO: modes live in
 	// the read-only, human-owned config file (design decision 1) and the PWA
@@ -891,6 +937,37 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 		s.requireRole(authz.RoleAdmin)(
 			s.requireAssurance(authz.ResourceActionModelProfile)(
 				http.HandlerFunc(s.handleProfileDelete))))
+
+	// HF model acquisition (hf_handlers.go). Search/tree/preflight/reads
+	// are operator role, no step-up (read-only, same posture as
+	// POST /smith/sourcing/evaluate). Every route that starts, pauses,
+	// resumes, cancels, or approves a job is operator + step-up
+	// (ResourceActionModelDownload — network-tier, matching load/unload's
+	// own risk level rather than profiling's destructive one).
+	mux.HandleFunc("GET /api/v1/hf/search", s.handleHFSearch)
+	mux.HandleFunc("GET /api/v1/hf/tree", s.handleHFTree)
+	mux.HandleFunc("POST /api/v1/hf/preflight", s.handleHFPreflight)
+	mux.HandleFunc("GET /api/v1/hf/downloads", s.handleHFDownloadsList)
+	mux.HandleFunc("GET /api/v1/hf/downloads/{id}", s.handleHFDownloadGet)
+	mux.Handle("POST /api/v1/hf/downloads",
+		s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourceActionModelDownload)(http.HandlerFunc(s.handleHFDownloadStart))))
+	mux.Handle("POST /api/v1/hf/downloads/{id}/approve",
+		s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourceActionModelDownload)(http.HandlerFunc(s.handleHFDownloadApprove))))
+	mux.Handle("POST /api/v1/hf/downloads/{id}/pause",
+		s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourceActionModelDownload)(http.HandlerFunc(s.handleHFDownloadPause))))
+	mux.Handle("POST /api/v1/hf/downloads/{id}/resume",
+		s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourceActionModelDownload)(http.HandlerFunc(s.handleHFDownloadResume))))
+	mux.Handle("POST /api/v1/hf/downloads/{id}/cancel",
+		s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourceActionModelDownload)(http.HandlerFunc(s.handleHFDownloadCancel))))
+	mux.Handle("DELETE /api/v1/hf/downloads/{id}",
+		s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourceActionModelDownload)(http.HandlerFunc(s.handleHFDownloadDelete))))
+
+	// HF token — a secret, so the write side matches provider-key gating
+	// exactly (admin + step-up); the read side is masked, never the value.
+	mux.Handle("GET /api/v1/hf/token",
+		s.requireRole(authz.RoleAdmin)(http.HandlerFunc(s.handleHFTokenGet)))
+	mux.Handle("PUT /api/v1/hf/token",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourceAreaSettingsProviderK)(http.HandlerFunc(s.handleHFTokenPut))))
 }
 
 // ── Middleware ───────────────────────────────────────────────────────────────
@@ -928,7 +1005,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "Authentication required")
 			return
 		case bearerToken(r) != "":
-			ident, err = s.deps.Auth.VerifyBearer(bearerToken(r), authz.KindForge)
+			ident, err = s.deps.Auth.VerifyBearerFrom(r.Context(), effectiveClientIP(r), bearerToken(r), authz.KindForge)
 		case sessionCookie(r) != "":
 			ident, sess, err = s.resolveSession(r)
 		default:
@@ -1169,10 +1246,20 @@ func (s *Server) csrfOK(r *http.Request) bool {
 // requireAssurance wraps a handler with an assurance-level check (§3.5).
 // Must run after withAuth (the Identity must already be in the request
 // context). Bearer-key identities (KeyID != "") skip the policy matrix
-// (§5: "Bearer-key API paths are unchanged and skip this"). Session
-// identities are checked against the policy for the given resource key.
-// On shortfall, returns 403 { "error": "step_up_required", "required":
+// (§5: "Bearer-key API paths are unchanged and skip this") — a0/MCP
+// consumers authenticate this way and can't perform WebAuthn/TOTP step-up.
+// Session identities are checked against the policy for the given resource
+// key. On shortfall, returns 403 { "error": "step_up_required", "required":
 // "<factor>", "resource": "<key>" }.
+//
+// Issue #37 carve-out: POST/DELETE /api/v1/keys do NOT use this middleware
+// — they need finer-grained bearer handling than a blanket bypass-or-block
+// (a self-rotating bearer key is safe, minting/revoking anything else is
+// not), so their gating lives in handleKeyCreate itself and in
+// requireStrictAssurance respectively, both built on evaluateAssurance
+// below. Every other resource (including GET /api/v1/keys, identity-links,
+// auth/policy, auth/config) keeps the original blanket bearer bypass —
+// #37 only ever named POST/DELETE /api/v1/keys specifically.
 func (s *Server) requireAssurance(resourceKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1181,30 +1268,16 @@ func (s *Server) requireAssurance(resourceKey string) func(http.Handler) http.Ha
 				writeError(w, http.StatusUnauthorized, "Authentication required")
 				return
 			}
-			// Bearer-key paths skip the policy matrix (§5).
 			if ident.KeyID != "" {
 				next.ServeHTTP(w, r)
 				return
 			}
-			// No policy store wired — pass through (Phase 4 stub).
-			if s.deps.PolicyStore == nil {
-				next.ServeHTTP(w, r)
-				return
-			}
-			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-			defer cancel()
-			policy, err := s.deps.PolicyStore.Load(ctx)
+			allowed, decision, err := s.evaluateAssurance(r.Context(), ident, resourceKey)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "policy load failed")
 				return
 			}
-			ttl := s.deps.StepUpTTL
-			if ttl == 0 {
-				ttl = authz.DefaultStepUpTTL
-			}
-			eval := authz.NewPolicyEvaluator(policy, ttl, time.Now)
-			decision := eval.Evaluate(resourceKey, ident.Assurance, ident.AssuranceAt)
-			if decision.Allowed {
+			if allowed {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -1215,6 +1288,63 @@ func (s *Server) requireAssurance(resourceKey string) func(http.Handler) http.Ha
 			})
 		})
 	}
+}
+
+// requireStrictAssurance is requireAssurance without the bearer-identity
+// bypass — every identity, bearer or session, is evaluated against the
+// policy. Used only for DELETE /api/v1/keys (#37): unlike POST's
+// self-rotation carve-out (handleKeyCreate), revocation gets no bearer
+// exception at all. A bearer identity carries no session assurance, so it
+// always fails evaluateAssurance for a password-or-above resource — the
+// intended effect.
+func (s *Server) requireStrictAssurance(resourceKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ident, ok := r.Context().Value(identityKey).(authz.Identity)
+			if !ok {
+				writeError(w, http.StatusUnauthorized, "Authentication required")
+				return
+			}
+			allowed, decision, err := s.evaluateAssurance(r.Context(), ident, resourceKey)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "policy load failed")
+				return
+			}
+			if allowed {
+				next.ServeHTTP(w, r)
+				return
+			}
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error":    "step_up_required",
+				"required": string(decision.Required),
+				"resource": decision.Resource,
+			})
+		})
+	}
+}
+
+// evaluateAssurance runs the Sprint 0-AUTH policy check for ident against
+// resourceKey, shared by requireAssurance, requireStrictAssurance, and
+// handleKeyCreate's own inline check (#37) so all three agree on exactly
+// one evaluation path. Returns allowed=true with no policy store wired
+// (Phase 4 stub, matches every other assurance gate's fallback).
+func (s *Server) evaluateAssurance(ctx context.Context, ident authz.Identity, resourceKey string) (bool, authz.Decision, error) {
+	if s.deps.PolicyStore == nil {
+		return true, authz.Decision{Allowed: true, Resource: resourceKey}, nil
+	}
+	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	policy, err := s.deps.PolicyStore.Load(cctx)
+	if err != nil {
+		return false, authz.Decision{}, err
+	}
+	ttl := s.deps.StepUpTTL
+	if ttl == 0 {
+		ttl = authz.DefaultStepUpTTL
+	}
+	eval := authz.NewPolicyEvaluator(policy, ttl, time.Now)
+	decision := eval.Evaluate(resourceKey, ident.Assurance, ident.AssuranceAt)
+	return decision.Allowed, decision, nil
 }
 
 // withSecurityHeaders sets the V4 response headers (forge/app.py
@@ -1240,6 +1370,26 @@ func (s *Server) withSecurityHeaders(next http.Handler) http.Handler {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+// effectiveClientIP resolves the request's client address for bearer-key
+// rate limiting and host binding (#34), honoring the same tailscale-serve
+// dual-path semantics the a0 router's own auth check already uses
+// (authz.EffectiveRemoteAddr): X-Forwarded-For is trusted only when the
+// immediate peer is loopback (the `tailscale serve` HTTPS path terminates
+// on loopback). Without this, every request proxied in from a real tailnet
+// client — including the documented remote-admin-over-tailnet CLI/TUI flow
+// — would collapse to "127.0.0.1", making both per-IP rate limiting and
+// IP-bound keys meaningless behind that proxy. Falls back to the bare
+// clientIP(r) string when it doesn't parse as an IP (e.g. some test
+// RemoteAddr values).
+func effectiveClientIP(r *http.Request) string {
+	host := clientIP(r)
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return host
+	}
+	return authz.EffectiveRemoteAddr(addr, r.Header.Get("X-Forwarded-For")).String()
+}
 
 // bearerToken extracts a Bearer token from the Authorization header.
 func bearerToken(r *http.Request) string {

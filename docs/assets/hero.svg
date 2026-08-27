@@ -1,20 +1,55 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120" role="img" aria-label="The Forge banner">
-  <!-- Deterministic geometric forge/anvil motif. Dark-theme friendly:
-       charcoal ground, ember accent, cool steel strokes. No external assets. -->
-  <rect width="320" height="120" fill="#101318"/>
-  <g fill="none" stroke="#f59e0b" stroke-width="4">
-    <path d="M40 92 L70 52 H120 L150 92 Z" fill="#1c232e"/>
-    <rect x="85" y="92" width="20" height="8" stroke-width="3"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 340" role="img" aria-label="The Forge: a self-hosted, multi-model LLM inference daemon">
+  <title>The Forge</title>
+  <desc>One Go binary that schedules and routes local LLMs across a GPU's memory budget, serving a router, ops dashboard and MCP control surface.</desc>
+
+  <defs>
+    <linearGradient id="ember" x1="0" y1="0" x2="1" y2="0.4">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#fde68a"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0.75" y="0.75" width="1198.5" height="338.5" rx="16" fill="#101318" stroke="#232b38" stroke-width="1.5"/>
+
+  <!-- eyebrow -->
+  <text x="56" y="70" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" letter-spacing="2" fill="#f59e0b">SELF-HOSTED · MULTI-MODEL LLM INFERENCE</text>
+
+  <!-- title -->
+  <text x="54" y="164" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="92" font-weight="700" fill="#f4f1ea">The Forge</text>
+
+  <!-- tagline -->
+  <text x="56" y="208" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" fill="#c7cdd6">One Go binary that schedules and routes local LLMs</text>
+  <text x="56" y="238" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" fill="#c7cdd6">across your GPU's memory budget.</text>
+
+  <line x1="56" y1="268" x2="600" y2="268" stroke="#232b38" stroke-width="1.5"/>
+
+  <!-- metadata row -->
+  <text x="56" y="300" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" fill="#7f8794">:8085 router  ·  :5000 dashboard  ·  :8095 mcp</text>
+
+  <!-- motif: anvil, glowing workpiece, hammer mid-swing, sparks -->
+  <g>
+    <!-- anvil body -->
+    <path d="M780 260 L818 202 H902 L940 260 Z" fill="#1c232e" stroke="#7b8794" stroke-width="3"/>
+    <path d="M780 236 Q748 230 722 226" stroke="#7b8794" stroke-width="11" fill="none" stroke-linecap="round"/>
+    <rect x="843" y="260" width="34" height="16" fill="#1c232e" stroke="#7b8794" stroke-width="2.5"/>
+    <rect x="828" y="276" width="64" height="10" rx="2" fill="#1c232e" stroke="#7b8794" stroke-width="2.5"/>
+
+    <!-- glowing workpiece on the anvil face -->
+    <rect x="838" y="190" width="74" height="14" rx="4" fill="url(#ember)"/>
+
+    <!-- hammer, mid-swing -->
+    <g stroke="#7b8794" stroke-width="4" stroke-linecap="round">
+      <line x1="1006" y1="88" x2="932" y2="168"/>
+    </g>
+    <rect x="900" y="150" width="50" height="24" rx="4" fill="#2a323f" stroke="#7b8794" stroke-width="3" transform="rotate(-38 925 162)"/>
+
+    <!-- sparks -->
+    <circle cx="902" cy="172" r="4" fill="#f59e0b"/>
+    <circle cx="928" cy="152" r="3" fill="#fbbf24"/>
+    <circle cx="862" cy="150" r="2.5" fill="#fbbf24" opacity="0.85"/>
+    <circle cx="960" cy="196" r="2.5" fill="#f59e0b" opacity="0.8"/>
+    <line x1="900" y1="182" x2="918" y2="150" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/>
+    <line x1="882" y1="184" x2="864" y2="144" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" opacity="0.85"/>
+    <line x1="920" y1="188" x2="948" y2="168" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" opacity="0.8"/>
   </g>
-  <!-- sparks -->
-  <circle cx="160" cy="30" r="3" fill="#f59e0b" opacity="0.9"/>
-  <circle cx="176" cy="22" r="2" fill="#fbbf24" opacity="0.7"/>
-  <circle cx="148" cy="20" r="2" fill="#fbbf24" opacity="0.6"/>
-  <!-- workpiece on second bench -->
-  <g stroke="#7b8794" stroke-width="3" fill="none">
-    <path d="M190 92 L210 64 H270 L290 92Z"/>
-    <line x1="210" y1="64" x2="240" y2="36"/>
-    <line x1="270" y1="64" x2="240" y2="36"/>
-  </g>
-  <circle cx="240" cy="30" r="8" fill="#f59e0b"/>
 </svg>

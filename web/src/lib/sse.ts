@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { qk } from "./queries";
-import type { ProfileDoneEvent, ProfileFailedEvent, ProfileProgressEvent, SmithActionUpdateEvent, SmithMessageDoneEvent, SmithProcedureStepEvent, SmithTierChangedEvent, SmithToolActivityEvent, SmithTokenEvent, Status } from "./types";
+import type { HFDownloadDeletedEvent, HFDownloadDoneEvent, HFDownloadFailedEvent, HFDownloadProgressEvent, HFDownloadStateChangedEvent, ProfileDoneEvent, ProfileFailedEvent, ProfileProgressEvent, SmithActionUpdateEvent, SmithMessageDoneEvent, SmithProcedureStepEvent, SmithStatusEvent, SmithTierChangedEvent, SmithToolActivityEvent, SmithTokenEvent, Status } from "./types";
 
 // Single app-wide EventSource against the existing SSE bus (foundry/app.py
 // _push_event). status_update carries the full status payload already, so we
@@ -163,11 +163,24 @@ export function useLiveEvents(): void {
         // authoritative regardless
       }
     });
+    // S4 phase 2 — the backend already composed a human sentence about turn
+    // progress (e.g. "loading brain model — first load typically takes
+    // 20-90s"); this event previously reached the browser with no listener
+    // at all. Same client-only cache-slot pattern as smith:token above.
+    source.addEventListener("smith:status", (ev) => {
+      try {
+        const { message_id, status } = JSON.parse((ev as MessageEvent).data) as SmithStatusEvent;
+        qc.setQueryData<string>(qk.smith.turnStatus(message_id), status);
+      } catch {
+        // malformed payload — cosmetic, the turn proceeds regardless
+      }
+    });
     source.addEventListener("smith:message_done", (ev) => {
       try {
         const { conversation_id, message_id } = JSON.parse((ev as MessageEvent).data) as SmithMessageDoneEvent;
         qc.removeQueries({ queryKey: qk.smith.streaming(message_id) });
         qc.removeQueries({ queryKey: qk.smith.toolActivity(message_id) });
+        qc.removeQueries({ queryKey: qk.smith.turnStatus(message_id) });
         qc.invalidateQueries({ queryKey: qk.smith.conversation(conversation_id) });
       } catch {
         // malformed payload — the conversation just won't refresh until the
@@ -228,6 +241,54 @@ export function useLiveEvents(): void {
       } catch { /* malformed — ignore */ }
       qc.invalidateQueries({ queryKey: qk.profiles });
       qc.invalidateQueries({ queryKey: qk.status });
+    });
+
+    // HF model acquisition (Contract 1 amendment, go/internal/hfdownload/
+    // events.go). download:progress is high-frequency and decoration-only
+    // (see useHFDownloadProgress's doc comment) — write straight into the
+    // per-job client-only slot, no invalidation (that would defeat the
+    // point of a smooth byte-level counter by forcing a network refetch on
+    // every ~1s sample). The other three are real state transitions, so
+    // they invalidate the poll instead of trying to merge — same
+    // Pattern B this file uses everywhere else — so a job flipping to
+    // done/failed/paused/etc. is reflected without waiting a full 3s.
+    source.addEventListener("download:progress", (ev) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data) as HFDownloadProgressEvent;
+        qc.setQueryData(qk.hfDownloadProgress(data.job_id), data);
+      } catch { /* malformed — ignore */ }
+    });
+    source.addEventListener("download:state_changed", (ev) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data) as HFDownloadStateChangedEvent;
+        qc.invalidateQueries({ queryKey: qk.hfDownload(data.job_id) });
+      } catch { /* malformed — ignore */ }
+      qc.invalidateQueries({ queryKey: qk.hfDownloads });
+    });
+    source.addEventListener("download:done", (ev) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data) as HFDownloadDoneEvent;
+        qc.invalidateQueries({ queryKey: qk.hfDownload(data.job_id) });
+      } catch { /* malformed — ignore */ }
+      qc.invalidateQueries({ queryKey: qk.hfDownloads });
+      // A newly-registered model needs to show up in the catalog surfaces.
+      qc.invalidateQueries({ queryKey: ["catalog"] });
+      qc.invalidateQueries({ queryKey: qk.modelCards("7d") });
+      qc.invalidateQueries({ queryKey: qk.configCards("7d") });
+    });
+    source.addEventListener("download:failed", (ev) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data) as HFDownloadFailedEvent;
+        qc.invalidateQueries({ queryKey: qk.hfDownload(data.job_id) });
+      } catch { /* malformed — ignore */ }
+      qc.invalidateQueries({ queryKey: qk.hfDownloads });
+    });
+    source.addEventListener("download:deleted", (ev) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data) as HFDownloadDeletedEvent;
+        qc.removeQueries({ queryKey: qk.hfDownload(data.job_id) });
+      } catch { /* malformed — ignore */ }
+      qc.invalidateQueries({ queryKey: qk.hfDownloads });
     });
 
     return () => source.close();

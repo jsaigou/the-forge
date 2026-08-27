@@ -42,6 +42,9 @@ export interface SettingRecord {
   options?: { value: string; label: string }[];
   danger?: boolean;
   requiresRole?: "admin";
+  /** input:"text"/"addr"/"path"/"cidr" only — shown when the stored value is
+      empty, to distinguish "genuinely unset" from "looks broken/blank". */
+  placeholder?: string;
 }
 
 // ── General ──────────────────────────────────────────────────────────────
@@ -194,6 +197,18 @@ export const ROUTING_FIELDS: SettingRecord[] = [
     label: "Embedding URL",
     help: "Absolute http(s) URL for the embeddings backend a0 proxies to.",
     keywords: ["embedding", "url"],
+    storeKey: "infra.router",
+    apply: "restart",
+    input: "addr",
+  },
+  {
+    id: "routing.tts_url",
+    kind: "field",
+    section: "routing",
+    card: "config",
+    label: "TTS URL",
+    help: "Absolute http(s) URL for the forge-tts backend a0 proxies /v1/audio/speech and /v1/voices to (Tier 1 Sprint 3).",
+    keywords: ["tts", "voice", "speech", "url"],
     storeKey: "infra.router",
     apply: "restart",
     input: "addr",
@@ -352,6 +367,18 @@ export const SMITH_FIELDS: SettingRecord[] = [
     anchor: "smith-handoff-offerings",
   },
   {
+    id: "smith.brain_chain",
+    kind: "landmark",
+    section: "smith",
+    card: "reasoning",
+    label: "smith brain fallback chain",
+    help: "Ordered local configs smith tries when it needs to escalate to a brain — a loaded, idle member answers with zero load wait, otherwise smith falls down the chain toward smith.model.",
+    keywords: ["smith", "brain", "chain", "fallback", "reasoning", "residency"],
+    storeKey: "smith.brain_chain",
+    apply: "live",
+    anchor: "smith-brain-chain",
+  },
+  {
     id: "smith.schedule.quick",
     kind: "field",
     section: "smith",
@@ -440,6 +467,66 @@ export const SMITH_FIELDS: SettingRecord[] = [
     step: 1,
   },
   {
+    id: "smith.build_refresh_watchlist",
+    kind: "landmark",
+    section: "smith",
+    card: "watchlist",
+    label: "build-refresh watchlist",
+    help: "Keywords smith matches against fetched upstream commit subjects when a tracked build has drifted — a hit is surfaced regardless of the drift threshold.",
+    keywords: ["smith", "build", "refresh", "watchlist", "upstream", "keyword", "cve"],
+    storeKey: "smith.build_refresh.watchlist",
+    apply: "live",
+    anchor: "smith-build-refresh-watchlist",
+  },
+  {
+    id: "smith.thresholds.device_lost_window_minutes",
+    kind: "field",
+    section: "smith",
+    card: "thresholds",
+    label: "Device-lost detection window",
+    help: "How far back smith looks for a GPU device-lost event before treating it as resolved.",
+    keywords: ["smith", "device", "lost", "gpu", "threshold"],
+    storeKey: "smith.thresholds",
+    apply: "live",
+    input: "number",
+    unit: "min",
+    min: 1,
+    max: 1440,
+    step: 1,
+  },
+  {
+    id: "smith.thresholds.build_refresh_behind_n",
+    kind: "field",
+    section: "smith",
+    card: "thresholds",
+    label: "Build-refresh drift threshold",
+    help: "How many commits a tracked build must drift behind upstream before smith proposes a rebuild. Below-threshold drift still shows as an info finding, it just doesn't propose a rebuild.",
+    keywords: ["smith", "build", "refresh", "drift", "threshold", "upstream"],
+    storeKey: "smith.thresholds",
+    apply: "live",
+    input: "number",
+    unit: "commits",
+    min: 1,
+    max: 100000,
+    step: 1,
+  },
+  {
+    id: "smith.thresholds.compressor_failopen_warn_pct",
+    kind: "field",
+    section: "smith",
+    card: "thresholds",
+    label: "Compressor fail-open warn %",
+    help: "Fail-open rate threshold (%) — smith proposes raising the compressor fail-open budget when the 1-hour rolling rate exceeds this.",
+    keywords: ["smith", "compressor", "fail", "open", "budget", "threshold"],
+    storeKey: "smith.thresholds",
+    apply: "live",
+    input: "number",
+    unit: "%",
+    min: 1,
+    max: 100,
+    step: 1,
+  },
+  {
     id: "smith.web.enabled",
     kind: "field",
     section: "smith",
@@ -488,6 +575,78 @@ export const SMITH_FIELDS: SettingRecord[] = [
     input: "text",
   },
 ];
+
+// ── Voice & Speech ───────────────────────────────────────────────────────
+// Tier 1 Sprint 2 (2026-08-27): tts.engines, GET/PUT /api/v1/voice/settings.
+// Four engines (kokoro fast-tier + the three Qwen sub-variants), each with
+// the same four leaf fields — generated rather than hand-repeated 16 times,
+// same "apply: immediate" as compressor.local_enabled just above: the
+// daemon applies a save right away via ttsctl.Provisioner (restarts
+// forge-tts, never the forge daemon itself — no operator restart needed).
+const VOICE_ENGINES: { key: string; label: string }[] = [
+  { key: "kokoro", label: "Kokoro (fast tier)" },
+  { key: "customvoice", label: "Custom voice" },
+  { key: "voicedesign", label: "Voice design" },
+  { key: "base", label: "Base / clone" },
+];
+
+export const VOICE_FIELDS: SettingRecord[] = VOICE_ENGINES.flatMap(({ key, label }) => [
+  {
+    id: `voice.${key}.enabled`,
+    kind: "field" as const,
+    section: "voice" as const,
+    card: key,
+    label: `${label}: enabled`,
+    help: `Whether the ${label} engine participates at all. Disabled refuses every request for it outright instead of silently falling back.`,
+    keywords: ["voice", "speech", "tts", key, "enabled"],
+    storeKey: `tts.engines.${key}.enabled`,
+    apply: "immediate" as const,
+    input: "toggle" as const,
+  },
+  {
+    id: `voice.${key}.mode`,
+    kind: "field" as const,
+    section: "voice" as const,
+    card: key,
+    label: `${label}: mode`,
+    help: "Resident keeps the engine's systemd unit running continuously (fast, standing GPU memory). Available serves requests without a standing process (the existing CLI-reload-per-call fallback — kokoro has no such fallback tier, so available behaves the same as resident for it). Disabled refuses the engine outright.",
+    keywords: ["voice", "speech", "tts", key, "mode", "resident", "available", "disabled"],
+    storeKey: `tts.engines.${key}.mode`,
+    apply: "immediate" as const,
+    input: "select" as const,
+    options: [
+      { value: "resident", label: "Resident" },
+      { value: "available", label: "Available" },
+      { value: "disabled", label: "Disabled" },
+    ],
+  },
+  {
+    id: `voice.${key}.unit`,
+    kind: "field" as const,
+    section: "voice" as const,
+    card: key,
+    label: `${label}: systemd unit`,
+    help: "The systemd unit this engine's resident process runs as (e.g. forge-tts-custom, kokoro). Empty means the daemon doesn't manage a process for it — resident mode then has nothing to start, same effect as available.",
+    keywords: ["voice", "speech", "tts", key, "unit", "systemd"],
+    storeKey: `tts.engines.${key}.unit`,
+    apply: "immediate" as const,
+    input: "text" as const,
+    placeholder: "no dedicated service",
+  },
+  {
+    id: `voice.${key}.url`,
+    kind: "field" as const,
+    section: "voice" as const,
+    card: key,
+    label: `${label}: backend URL`,
+    help: "Where forge-tts reaches this engine's resident backend (e.g. http://127.0.0.1:8091). Empty means not configured — falls back to the CLI path for the three Qwen sub-variants, or is simply unreachable for kokoro.",
+    keywords: ["voice", "speech", "tts", key, "url"],
+    storeKey: `tts.engines.${key}.url`,
+    apply: "immediate" as const,
+    input: "addr" as const,
+    placeholder: "not configured",
+  },
+]);
 
 // ── Scheduling ───────────────────────────────────────────────────────────
 // The live scheduler.config card is the shared <SchedulerTunables> component
@@ -640,6 +799,20 @@ export const DANGER_FIELDS: SettingRecord[] = [
     storeKey: "infra.server",
     apply: "restart",
     input: "text",
+    danger: true,
+    requiresRole: "admin",
+  },
+  {
+    id: "danger.cookie_secure",
+    kind: "field",
+    section: "danger",
+    card: "system",
+    label: "Secure cookies",
+    help: "Secure attribute on the session + WebAuthn challenge cookies. Leave on unless this process is reached only over plain HTTP behind its own TLS-terminating reverse proxy on the same host (the tailscale-serve-only deployment model) — with it off, a session cookie can be replayed over any plaintext connection an attacker gets the browser to make. Unlike every other field in this section, this one takes effect immediately on save, no restart needed.",
+    keywords: ["cookie", "secure", "https", "tls", "session"],
+    storeKey: "infra.server",
+    apply: "immediate",
+    input: "toggle",
     danger: true,
     requiresRole: "admin",
   },
@@ -1097,6 +1270,7 @@ export const SETTINGS_INDEX: SettingRecord[] = SETTINGS_SECTIONS.flatMap((s) =>
     ...ROUTING_FIELDS,
     ...MONITORING_FIELDS,
     ...SMITH_FIELDS,
+    ...VOICE_FIELDS,
     ...SCHEDULING_FIELDS,
     ...DANGER_FIELDS,
     ...SECURITY_DANGER_FIELDS,

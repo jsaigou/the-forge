@@ -30,6 +30,13 @@ import type {
   ConfigCard,
   FavoritesResponse,
   CompressorConfig,
+  HFDownload,
+  HFDownloadStartBody,
+  HFPreflightFile,
+  HFPreflightReport,
+  HFSearchResponse,
+  HFTokenResponse,
+  HFTreeResponse,
   IdentityLink,
   IdentityLinkCreateRequest,
   IdentityLinksResponse,
@@ -108,6 +115,9 @@ import type {
   UsageEvent,
   UsageHeatmapResponse,
   UsageResponse,
+  VoiceListResponse,
+  VoiceSettings,
+  VoiceSettingsUpdate,
   WebAuthnCredentialsResponse,
   WebAuthnFinishAssertRequest,
   WebAuthnFinishAssertResponse,
@@ -260,6 +270,11 @@ export const api = {
   updateMetricsSettings: (patch: MetricsSettingsUpdate) => put<MetricsSettings>("/api/v1/metrics/settings", patch),
   uiSettings: () => get<UISettings>("/api/v1/ui/settings"),
   updateUiSettings: (patch: UISettingsUpdate) => put<UISettings>("/api/v1/ui/settings", patch),
+  voiceSettings: () => get<VoiceSettings>("/api/v1/voice/settings"),
+  updateVoiceSettings: (patch: VoiceSettingsUpdate) => put<VoiceSettings>("/api/v1/voice/settings", patch),
+  voiceList: () => get<VoiceListResponse>("/api/v1/voice/list"),
+  startInfraService: (name: "stt" | "embedding" | "aligner" | "tts") => post<void>(`/api/v1/${name}/start`, {}),
+  stopInfraService: (name: "stt" | "embedding" | "aligner" | "tts") => post<void>(`/api/v1/${name}/stop`, {}),
   dashboardLayout: () => get<DashboardLayout>("/api/v1/dashboard/layout"),
   updateDashboardLayout: (layout: DashboardLayout) => put<DashboardLayout>("/api/v1/dashboard/layout", layout),
   // Admin-only on the backend — callers must gate the query on canAdmin
@@ -418,6 +433,14 @@ export const api = {
   // check(s); a clean re-check for an investigation-attached runbook flows
   // into the resolution loop.
   smithActionRecheck: (id: number) => post<{ action: SmithAction }>(`/api/v1/smith/actions/${id}/recheck`, {}),
+  // S7-followup smith UX sprint — "check now" for a PENDING runbook, the
+  // replacement for the removed self-attestation "done — I ran it myself"
+  // button: smith re-verifies the underlying condition itself. A clean
+  // result closes the proposal (action comes back superseded); a
+  // still-failing one is NOT an error — the action is left pending and
+  // `still_failing` names the check(s) that are still failing.
+  smithActionCheckNow: (id: number) =>
+    post<{ action: SmithAction; still_failing?: string[] }>(`/api/v1/smith/actions/${id}/check-now`, {}),
   smithActionHandoff: (id: number, resolution: "runbook" | "acknowledge" | "remote" | "cancel") =>
     post<{ action: SmithAction }>(`/api/v1/smith/actions/${id}/handoff`, { resolution }),
 
@@ -626,6 +649,27 @@ export const api = {
   createCatalogService: (s: Partial<CatalogService>) => post<CatalogService>("/api/v1/catalog/services", s),
   updateCatalogService: (id: number, s: Partial<CatalogService>) => put<CatalogService>(`/api/v1/catalog/services/${id}`, s),
   deleteCatalogService: (id: number) => del<{ ok: boolean }>(`/api/v1/catalog/services/${id}`),
+
+  // HF model acquisition (go/internal/hfdownload) — search, recursive
+  // tree/rank, pre-flight, and the download job queue.
+  hfSearch: (q: string, limit?: number) =>
+    get<HFSearchResponse>(`/api/v1/hf/search?q=${encodeURIComponent(q)}${limit ? `&limit=${limit}` : ""}`),
+  hfTree: (repo: string, revision?: string, budgetBytes?: number) =>
+    get<HFTreeResponse>(
+      `/api/v1/hf/tree?repo=${encodeURIComponent(repo)}${revision ? `&revision=${encodeURIComponent(revision)}` : ""}${budgetBytes ? `&budget_bytes=${budgetBytes}` : ""}`,
+    ),
+  hfPreflight: (repo: string, files: HFPreflightFile[], destDir?: string) =>
+    post<HFPreflightReport>("/api/v1/hf/preflight", { repo, files, dest_dir: destDir }),
+  hfDownloads: () => get<{ downloads: HFDownload[] }>("/api/v1/hf/downloads"),
+  hfDownload: (id: number) => get<HFDownload>(`/api/v1/hf/downloads/${id}`),
+  hfDownloadStart: (body: HFDownloadStartBody) => post<HFDownload>("/api/v1/hf/downloads", body),
+  hfDownloadApprove: (id: number) => post<{ success: boolean }>(`/api/v1/hf/downloads/${id}/approve`),
+  hfDownloadPause: (id: number) => post<{ success: boolean; was_running: boolean }>(`/api/v1/hf/downloads/${id}/pause`),
+  hfDownloadResume: (id: number) => post<{ success: boolean }>(`/api/v1/hf/downloads/${id}/resume`),
+  hfDownloadCancel: (id: number) => post<{ success: boolean }>(`/api/v1/hf/downloads/${id}/cancel`),
+  hfDownloadDelete: (id: number) => del<{ success: boolean }>(`/api/v1/hf/downloads/${id}`),
+  hfTokenGet: () => get<HFTokenResponse>("/api/v1/hf/token"),
+  hfTokenPut: (token: string) => put<HFTokenResponse>("/api/v1/hf/token", { token }),
 };
 
 export { ApiError };

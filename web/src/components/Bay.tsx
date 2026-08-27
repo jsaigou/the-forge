@@ -129,7 +129,7 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
         <div style={{ margin: "auto 0" }}>
           <div style={{ fontSize: 13 }}>Bay free</div>
           {canOperate && (
-            <button className="load-btn" onClick={onLoadClick}>
+            <button className="load-btn" data-tour-id="bay-load" onClick={onLoadClick}>
               + Load model
             </button>
           )}
@@ -142,6 +142,10 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
   // reconnect source of truth (statusResponse.slot_activity), kept fresh
   // between polls by the low-latency slot:activity SSE merge (lib/sse.ts).
   const active = status.slot_activity[slotKey] ?? false;
+  // Sprint S-B/S-C: who is consuming this slot right now (e.g.
+  // "ExampleHost (OpenCode)") — empty when idle or unknown. Backend populates
+  // from a0's live request attribution; SMITH is rendered bold-caps.
+  const consumer = status.slot_consumers?.[slotKey] ?? "";
 
   // Sprint K: profiling warning stripe. The backend's `profiling` field
   // only carries {running, mode} — it doesn't say which slots a run will
@@ -169,41 +173,54 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
 
   return (
     <div className={`bay ${profilingHold ? "profiling-hold" : ""}`.trim()}>
-      {active ? <SquareSnake title="actively generating" /> : <span className="statusdot dot-ok" />}
-      <span className="slotid">{slotLabel}</span>
-      {/* Operator feedback 2026-08-25: the bay's headline is the loaded CONFIG
-          name (status.slots value — what you load/unload), not the underlying
-          model_name; config name sits ABOVE the icon, left-justified. */}
-      <div className="mhead" style={{ flexDirection: "column", alignItems: "stretch", gap: 3 }}>
-        <div className="model" style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          {/* Mobile F8: single-line ellipsis instead of wrapping long names. */}
-          <span className="mn" title={mode ?? undefined}>
-            {mode}
-          </span>
-          <CopyButton text={mode ?? ""} title="Copy config name" sm />
-          {canOperate && (
-            <button
-              className="icon-btn action"
-              style={{ marginLeft: "auto", width: 24, height: 24, fontSize: 11 }}
-              title="Unload"
-              disabled={unload.isPending}
-              onClick={() => unload.mutate(slotKey)}
-            >
-              ⏏
-            </button>
-          )}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          {card ? <Icon slug={card.logo} slugDark={card.logo_dark} name={card.model_name} sm /> : <span className="logo sm">{mode.charAt(0).toUpperCase()}</span>}
-          <div className="maker">
-            {makerSlug && <Icon slug={makerSlug} name={card?.creator ?? ""} sm />}
-            {card?.model_name || card?.creator || modeInfo?.family || "—"}
-          </div>
-        </div>
+      {/* Operator feedback 2026-08-25 (slots pass): the green corner light
+          didn't earn its keep — the eject button takes its corner (absolute
+          top-right). Slot name renders 50% larger with the model + maker
+          icons inline at matching height; config name sits below the name
+          row; busy/consumer line sits below that (consumer left, activity
+          right). */}
+      {canOperate && (
+        <button
+          className="icon-btn action bay-eject"
+          style={{ position: "absolute", top: 10, right: 10, width: 24, height: 24, fontSize: 11 }}
+          title="Unload"
+          disabled={unload.isPending}
+          onClick={() => unload.mutate(slotKey)}
+        >
+          ⏏
+        </button>
+      )}
+      <div className="slot-head" style={{ display: "flex", alignItems: "center", gap: 7, paddingRight: 30 }}>
+        <span className="slotid">{slotLabel}</span>
+        {card ? <Icon slug={card.logo} slugDark={card.logo_dark} name={card.model_name} sm /> : <span className="logo sm">{mode.charAt(0).toUpperCase()}</span>}
+        {makerSlug && <Icon slug={makerSlug} name={card?.creator ?? ""} sm />}
       </div>
-      <div className="state" style={{ color: "var(--ok)" }}>
-        ● loaded · {active ? "active" : `idle ${formatIdle(idleDisplayS)}`}{" "}
-        <span className={`chip ${modeInfo?.backend === "rocm" ? "rocm" : "vulkan"}`}>{modeInfo?.backend ?? "vulkan"}</span>
+      {/* The bay's headline is the loaded CONFIG name (status.slots value —
+          what you load/unload), not the underlying model_name.
+          Mobile F8: single-line ellipsis instead of wrapping long names. */}
+      <div className="model" style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+        <span className="mn" title={mode ?? undefined}>
+          {mode}
+        </span>
+        <CopyButton text={mode ?? ""} title="Copy config name" sm />
+      </div>
+      <div className="state" style={{ color: "var(--ok)", display: "flex", alignItems: "center", gap: 8 }}>
+        {active && consumer && consumer === "SMITH" ? (
+          <span style={{ fontWeight: 700, letterSpacing: ".08em" }}>SMITH</span>
+        ) : active && consumer ? (
+          <span>{consumer}</span>
+        ) : null}
+        <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          {active ? (
+            <>
+              <SquareSnake title="actively generating" />
+              <span>active</span>
+            </>
+          ) : (
+            <span>● loaded · idle {formatIdle(idleDisplayS)}</span>
+          )}
+          <span className={`chip ${modeInfo?.backend === "rocm" ? "rocm" : "vulkan"}`}>{modeInfo?.backend ?? "vulkan"}</span>
+        </span>
       </div>
       <div className="readout">
         <div className="ro">

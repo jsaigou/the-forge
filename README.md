@@ -1,12 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/hero.svg" width="480" alt="The Forge banner" />
-
-# The Forge
-
-**A self-hosted local-inference stack: one Go binary that routes, schedules
-and operates LLMs on your own GPU — with an OpenAI-compatible API, an ops
-dashboard and an agent control surface.**
+<img src="docs/assets/hero.svg" width="100%" alt="The Forge: a self-hosted, multi-model LLM inference daemon. One Go binary that schedules and routes local LLMs across your GPU's memory budget." />
 
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 ![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)
@@ -17,39 +11,22 @@ dashboard and an agent control surface.**
 
 ---
 
-## What it is
+## How it works
 
-The Forge turns a single Linux machine with a big unified-memory GPU into a
-multi-model inference appliance:
+<img src="docs/assets/architecture.svg" width="100%" alt="Architecture: OpenAI SDKs, agents and MCP clients call the forge daemon's router, dashboard and MCP surfaces, which share one scheduler over a SQLite catalog store and load models onto llama.cpp slots a1 through a4." />
 
-- **`forge` daemon** — a single Go binary serving three surfaces on canonical
-  ports: the ops dashboard (`:5000`), an OpenAI-compatible router (`:8085`)
-  and an MCP control surface (`:8095`) for agents.
-- **On-demand model scheduling** — request a model that isn't loaded and the
-  scheduler loads it into one of four llama.cpp slots, evicting by fit when
-  memory runs out. Clients never manage slots.
+The Forge is one Go binary, not a pile of services to keep in sync:
+
+- **On-demand scheduling** — a request for a model that isn't loaded triggers a
+  load into one of four llama.cpp slots; the scheduler evicts by memory fit
+  when it doesn't have room, so clients never manage slots by hand.
 - **Store-backed catalog** — models, configs, variants, benchmarks and
-  offerings live in SQLite, editable live over the dashboard/API. No config
-  files to drift.
-- **Ops dashboard** — slot/bay state, GPU memory budget, actual-vs-configured
-  context size, hang alerts, auth policy and API keys.
-- **Agent control plane** — MCP tools for pre-warming models, fit checks and
-  time-boxed reservations, plus per-key agent identity.
-
-## Architecture
-
-```
-                ┌────────────────────────── forge daemon ──────────────────────────┐
- clients        │                                                                  │
- ────────►      │  :8085 router (OpenAI-compatible)   :5000 ops dashboard          │
- OpenAI SDKs    │           │                                │                     │
- agents ─────►  │  scheduler (load / evict / reserve)   catalog store (SQLite)     │
-                │           │                                                      │
- MCP ─────────► │  :8095 MCP control surface                                auth    │
-                └───────────┼──────────────────────────────────────────┬───────────┘
-                            ▼                                          ▼
-                 llama.cpp slots (a1..a4)                      systemd units, metrics
-```
+  offerings live in SQLite, editable live over the dashboard or API. No config
+  files to hand-edit and redeploy for.
+- **Three surfaces, one process** — an OpenAI-compatible router (`:8085`), an
+  ops dashboard (`:5000`) for slot/GPU/auth state, and an MCP control surface
+  (`:8095`) so agents can pre-warm models, check fit, or hold a time-boxed
+  reservation.
 
 ## Quick start
 
@@ -82,11 +59,10 @@ Then point any OpenAI-compatible client at `http://localhost:8085/v1`.
 
 | Doc | Contents |
 |---|---|
-| [docs/design.md](docs/design.md) | system design overview |
 | [docs/scheduler.md](docs/scheduler.md) | slot scheduling, reservations, MCP role |
 | [docs/llm-router.md](docs/llm-router.md) | router design and failover |
 | [docs/deployment.md](docs/deployment.md) | install, units, operations |
-| [docs/modes.md](docs/modes.md) | model roster and capabilities |
+| [docs/modes.md](docs/modes.md) | model configuration concepts |
 | [docs/adding-a-model.md](docs/adding-a-model.md) | cataloging a new model |
 | [docs/pitfalls.md](docs/pitfalls.md) | operational sharp edges |
 | [docs/adr/](docs/adr/) | architecture decision records |

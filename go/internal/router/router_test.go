@@ -57,7 +57,7 @@ func (s *stubAuth) VerifySession(string) (authz.Identity, error) {
 	return s.identity, nil
 }
 
-func (s *stubAuth) VerifyBearer(token string, _ authz.KeyKind) (authz.Identity, error) {
+func (s *stubAuth) VerifyBearerFrom(_ context.Context, _, token string, _ authz.KeyKind) (authz.Identity, error) {
 	if token == s.validToken {
 		return s.identity, nil
 	}

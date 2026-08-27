@@ -128,6 +128,11 @@ func (s *Smith) ensureBrainLoaded(ctx context.Context) BrainResolution {
 		Loaded:      true,
 		Slot:        ticket.TargetSlot,
 	})
+	// Consumer attribution: smith's brain now (re)holds this slot — mark it
+	// so the dashboard shows SMITH even before the next reasoning turn runs.
+	if ticket.TargetSlot != "" {
+		s.markSlotActivity(ticket.TargetSlot)
+	}
 	return fresh
 }
 

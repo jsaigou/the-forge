@@ -42,11 +42,27 @@ import (
 const EventProcedureStep = "smith:procedure_step"
 
 // procRunStatus values — smith_procedure_runs.status (migration 0056).
+//
+// procRunStatusFailed vs. procRunStatusPreconditionFailed (added 2026-08-27,
+// idea borrowed from reviewing amd/skills' rocm-doctor CLI, which returns a
+// distinct exit code for "not applicable on this host" vs. "attempted and
+// failed" vs. "user declined" rather than collapsing all three into one
+// non-zero status): a precondition check failing crit means the procedure
+// never started — nothing was attempted, nothing broke, the host just isn't
+// in the state this procedure expects. That is a fundamentally different
+// signal from a step executing and erroring partway through, and conflating
+// them under one "failed" status made every run-history/scorecard reader
+// (ListProcedureRuns, ProcedureScorecard, Diagnostics' timeline) unable to
+// tell "this never should have run" apart from "this broke while running" —
+// the former needs no investigation, the latter always does.
+// procRunStatusAborted (a human declined at a checkpoint) was already a
+// correctly distinct third state; this only adds the missing fourth.
 const (
 	procRunStatusRunning            = "running"
 	procRunStatusAwaitingCheckpoint = "awaiting_checkpoint"
 	procRunStatusCompleted          = "completed"
 	procRunStatusFailed             = "failed"
+	procRunStatusPreconditionFailed = "precondition_failed"
 	procRunStatusAborted            = "aborted"
 	procedureMaintenanceSlack       = 5 * time.Minute // padding over Impact.EstDuration when requesting a window
 	procedureDefaultStepTimeout     = 30 * time.Second
@@ -108,6 +124,12 @@ func (s *Smith) dispatchProcedure(ctx context.Context, a *Action) (string, error
 	proc, ok := procedures.Get(pd.ProcedureID)
 	if !ok {
 		return pd.ProcedureID, fmt.Errorf("smith: %w: %q", ErrProcedureNotFound, pd.ProcedureID)
+	}
+	// Defense-in-depth (see ErrProcedureNotAutonomyEligible's doc comment):
+	// re-check the allowlist here, at the actual execution boundary, not
+	// just in maybeAutoRunProcedure's decision to call Procedurize.
+	if a.CreatedBy == autonomyActor && !autonomyEligible[proc.ID] {
+		return proc.ID, fmt.Errorf("smith: %w: %q", ErrProcedureNotAutonomyEligible, proc.ID)
 	}
 	run, err := s.getOrCreateProcedureRun(ctx, a.ID, proc.ID)
 	if err != nil {
@@ -234,7 +256,7 @@ func (s *Smith) runProcedureSteps(ctx context.Context, run *ProcedureRun, proc p
 		for _, pcID := range proc.Preconditions {
 			pf := s.runChecksBare(ctx, []string{pcID})
 			if len(pf) == 1 && pf[0].Severity == SeverityCrit {
-				return s.failProcedureRun(ctx, run, fmt.Errorf("smith: procedure %s: precondition %s is crit: %s", proc.ID, pcID, pf[0].Summary))
+				return s.failProcedureRunPrecondition(ctx, run, fmt.Errorf("smith: procedure %s: precondition %s is crit: %s", proc.ID, pcID, pf[0].Summary))
 			}
 		}
 	}
@@ -481,16 +503,6 @@ func (s *Smith) runNativeOp(ctx context.Context, op string, params map[string]st
 	case "build_record_upstream_sha":
 		return s.opBuildRecordUpstreamSha(ctx, params)
 
-	// fetch_model's ops (P3smith, fetch_model_ops.go).
-	case "fetch_download":
-		return s.opFetchDownload(ctx, params)
-	case "fetch_verify":
-		return s.opFetchVerify(ctx, params)
-	case "fetch_finalize":
-		return s.opFetchFinalize(ctx, params)
-	case "fetch_catalog_link":
-		return s.opFetchCatalogLink(ctx, params)
-
 	default:
 		return procedures.StepResult{}, fmt.Errorf("smith: unknown native op %q", op)
 	}
@@ -533,6 +545,24 @@ func (s *Smith) failProcedureRun(ctx context.Context, run *ProcedureRun, err err
 		s.logf("procedure run %d: persist failure: %v", run.ID, persistErr)
 	}
 	s.publishProcedureStep(run, "failed")
+	return err
+}
+
+// failProcedureRunPrecondition marks run precondition_failed — the run never
+// started, so there is never a held maintenance window to exit (preconditions
+// are checked before step 0's own maintenance.Enter, run.LeaseID == "" here
+// unconditionally). Otherwise identical to failProcedureRun; kept as a
+// separate function rather than a shared helper with a status parameter so
+// the maintenance-exit skip is visible at the call site, not hidden behind a
+// branch a future reader could miss.
+func (s *Smith) failProcedureRunPrecondition(ctx context.Context, run *ProcedureRun, err error) error {
+	run.Status = procRunStatusPreconditionFailed
+	now := s.d.Now().Unix()
+	run.FinishedAt = &now
+	if persistErr := s.persistProcedureRun(ctx, run); persistErr != nil {
+		s.logf("procedure run %d: persist precondition failure: %v", run.ID, persistErr)
+	}
+	s.publishProcedureStep(run, "precondition_failed")
 	return err
 }
 
@@ -797,6 +827,13 @@ type ProcedureScorecard struct {
 	RunStatus    string `json:"run_status"`
 	ActionStatus string `json:"action_status"`
 	Completed    bool   `json:"completed"`
+	// PreconditionFailed is true when the run never executed a single step —
+	// its preconditions weren't met, so this is "not applicable to this
+	// host," not a genuine attempt-and-failure. Exposed as its own bool
+	// (rather than making every caller string-compare RunStatus) so a
+	// scorecard reader can tell "nothing to investigate here" apart from a
+	// real mid-run failure at a glance.
+	PreconditionFailed bool `json:"precondition_failed"`
 	// UnattendedCompletion is true only when the run finished completed
 	// AND never paused at a declared judgment checkpoint (Step.Checkpoint)
 	// — a run that paused for a failure (OnFail: checkpoint) but was then
@@ -845,13 +882,14 @@ func (s *Smith) ProcedureScorecard(ctx context.Context, actionID int64) (*Proced
 	proc, procKnown := procedures.Get(run.ProcedureID)
 
 	sc := &ProcedureScorecard{
-		ActionID:         actionID,
-		ProcedureID:      run.ProcedureID,
-		RunStatus:        run.Status,
-		ActionStatus:     a.Status,
-		Completed:        run.Status == procRunStatusCompleted,
-		StepsCompleted:   len(run.Steps),
-		PostVerifyPassed: a.Status == StatusDone,
+		ActionID:           actionID,
+		ProcedureID:        run.ProcedureID,
+		RunStatus:          run.Status,
+		ActionStatus:       a.Status,
+		Completed:          run.Status == procRunStatusCompleted,
+		PreconditionFailed: run.Status == procRunStatusPreconditionFailed,
+		StepsCompleted:     len(run.Steps),
+		PostVerifyPassed:   a.Status == StatusDone,
 	}
 	if procKnown {
 		sc.StepsTotal = len(proc.Steps)

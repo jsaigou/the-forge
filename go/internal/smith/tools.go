@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/hf"
+	"github.com/jsaigou/the-forge/internal/hfdownload"
 	"github.com/jsaigou/the-forge/internal/smith/web"
 	"github.com/jsaigou/the-forge/internal/store"
 )
@@ -22,17 +24,26 @@ import (
 // (checks.go). A tool has no handle on s.d.Store, proposeFrom, executeAction,
 // or the settings writer; adding a mutating capability requires widening
 // ToolEnv, an obvious reviewable diff, not a hidden method call inside a
-// closure. TestToolEnv_ShapeFrozen (tools_test.go) locks the field set, and
-// TestTools_NoWriteAgainstRealStore proves it empirically against a real DB.
+// closure. TestToolEnv_ShapeFrozen (tools_test.go) locks the field set.
+//
+// HF model-acquisition track: download_start is a DELIBERATE, disclosed
+// exception to that guarantee (operator decision — see hfDownloadTool's
+// doc comment) — it is the only tool in this registry that writes
+// anything. What it writes is narrow enough to keep the underlying
+// guarantee intact in spirit: a pending_approval row that causes zero
+// bytes to move and zero catalog rows to change until a human approves it
+// through the ordinary UI, exactly mirroring proposeFrom's existing
+// propose→approve posture for every other smith action. Every other tool
+// in this file remains strictly read-only.
 //
 // Deliberately excluded from v1, with reasons: self_context (already in
 // every system prompt via buildContext — a tool would just be duplicate
 // tokens); run_sweep (persists findings + calls proposeFrom, i.e. creates
 // smith_actions rows — an LLM-drivable write); and, a real deviation from
-// §4.3's "it can only emit proposal drafts" — any propose_draft tool, since
-// that is also a write to smith_actions. Proposals keep coming from
-// proposeFrom off deterministic findings only; this is recorded as a
-// deferral in docs/v5-smith.md.
+// §4.3's "it can only emit proposal drafts" — any OTHER propose_draft
+// tool, since that is also a write to smith_actions. Proposals keep coming
+// from proposeFrom off deterministic findings only, download_start
+// excepted; this is recorded as a deferral in docs/v5-smith.md.
 
 // defaultToolTimeout bounds a tool call with no more specific Timeout.
 const defaultToolTimeout = 20 * time.Second
@@ -57,6 +68,30 @@ type webReader interface {
 	Fetch(ctx context.Context, url string) (*web.Document, error)
 }
 
+// hfReader is the narrow read-only view of *hf.Client handed to hf_search —
+// Card (used only by the download engine's own asset enrichment) stays out.
+type hfReader interface {
+	Search(ctx context.Context, q hf.Query) ([]hf.Model, error)
+	Tree(ctx context.Context, repo, revision string) ([]hf.File, error)
+}
+
+// hfDownloadTool is the view of *hfdownload.Service handed to tools —
+// EVERY method here is intentional, including ProposeJob, which is the
+// one deliberate exception to this file's "never write" guarantee
+// (tools.go's own header). ProposeJob only ever inserts a row in state
+// pending_approval; nothing downloads until a human approves it through
+// the ordinary UI (POST /api/v1/hf/downloads/{id}/approve), so the brain
+// still cannot cause a real write — only a proposal, same posture
+// proposeFrom already has for every other smith action. Pause/Cancel/
+// StartJob/ApproveJob (the routes that actually start bytes moving or
+// touch an existing approved job) are deliberately NOT here.
+type hfDownloadTool interface {
+	Preflight(ctx context.Context, repo string, files []hfdownload.PreflightFile, destDir string) (hfdownload.PreflightReport, error)
+	List(ctx context.Context) ([]store.ModelDownloadRow, error)
+	Get(ctx context.Context, jobID int64) (store.ModelDownloadRow, error)
+	ProposeJob(ctx context.Context, req hfdownload.CreateJobRequest) (int64, error)
+}
+
 // ToolEnv carries everything a tool's Run may read. Built once per turn by
 // Smith.toolEnv. Every field is nil-tolerant, matching CheckEnv/house
 // convention — a tool with a nil dep returns a clean sentinel error, never
@@ -65,14 +100,17 @@ type ToolEnv struct {
 	RunSelected  func(ctx context.Context, checkIDs []string) ([]Finding, error)
 	KBSearch     func(ctx context.Context, q string, limit int) ([]KBResult, error)
 	ListFindings func(ctx context.Context, since time.Time, sev string, limit int) ([]StoredFinding, error)
-	Catalog      catalogReader // nil-tolerant
-	Web          webReader     // nil-tolerant
+	Catalog      catalogReader   // nil-tolerant
+	Web          webReader       // nil-tolerant
+	HF           hfReader        // nil-tolerant
+	HFDownload   hfDownloadTool  // nil-tolerant; see hfDownloadTool's doc comment re: ProposeJob
 	Now          func() time.Time
 }
 
-// toolEnv builds the per-turn tool environment. Catalog/Web are nil exactly
-// when Deps.Catalog/Deps.Web are nil — no synthetic non-nil wrapper that
-// would hide the "unwired" case from a tool's own nil check.
+// toolEnv builds the per-turn tool environment. Catalog/Web/HF/HFDownload
+// are nil exactly when the matching Deps field is nil — no synthetic
+// non-nil wrapper that would hide the "unwired" case from a tool's own nil
+// check.
 func (s *Smith) toolEnv(_ context.Context) *ToolEnv {
 	env := &ToolEnv{
 		RunSelected: func(ctx context.Context, checkIDs []string) ([]Finding, error) {
@@ -91,6 +129,12 @@ func (s *Smith) toolEnv(_ context.Context) *ToolEnv {
 	}
 	if s.d.Web != nil {
 		env.Web = s.d.Web
+	}
+	if s.d.HF != nil {
+		env.HF = s.d.HF
+	}
+	if s.d.HFDownload != nil {
+		env.HFDownload = s.d.HFDownload
 	}
 	return env
 }
@@ -224,6 +268,49 @@ var toolRegistry = []Tool{
 		}, "url"),
 		Network: true,
 		Run:     webFetchTool,
+	},
+	{
+		ID:          "hf_search",
+		Description: "Search HuggingFace for GGUF model repos by name/keyword. Read-only.",
+		Params: objectSchema(map[string]any{
+			"query": strProp("search text, e.g. a model family or org/name fragment"),
+			"limit": intProp("max results, default 20, capped at 50"),
+		}, "query"),
+		Network: true,
+		Run:     hfSearchTool,
+	},
+	{
+		ID:          "hf_preflight",
+		Description: "Fetch a HuggingFace repo's real (recursive) file tree, rank its GGUF files against this host's memory budget, and run pre-flight checks (disk headroom, backend requirement, existing-file conflicts) for the recommended file. Read-only — nothing is downloaded.",
+		Params: objectSchema(map[string]any{
+			"repo":         strProp("HF repo id, e.g. org/name"),
+			"revision":     strProp("git revision, default main"),
+			"budget_bytes": intProp("memory budget to rank against; omit to use this host's live GTT total"),
+		}, "repo"),
+		Network: true,
+		Timeout: runCheckToolTimeout, // two real HF API calls, same generous budget run_check gets
+		Run:     hfPreflightTool,
+	},
+	{
+		ID:          "download_status",
+		Description: "List HF model-download jobs (any state), or look up one job by id.",
+		Params: objectSchema(map[string]any{
+			"job_id": intProp("look up one job; omit to list every job"),
+		}),
+		Run: downloadStatusTool,
+	},
+	{
+		ID: "download_start",
+		Description: "Propose downloading a HuggingFace model file into the models directory. This does NOT start a download — it creates a job awaiting operator approval, exactly like every other smith proposal. The operator sees it and approves or ignores it through the ordinary UI.",
+		Params: objectSchema(map[string]any{
+			"repo":        strProp("HF repo id, e.g. org/name"),
+			"revision":    strProp("git revision, default main"),
+			"filename":    strProp("the file path within the repo tree to download, e.g. model-Q4_K_M.gguf"),
+			"size_bytes":  intProp("the file's size in bytes, from a prior hf_preflight/hf_search call"),
+			"dest_dir":    strProp("destination subdirectory under the models dir; omit for the default"),
+			"config_name": strProp("repoint this EXISTING config's weight artifact instead of registering a new model; omit to auto-register a new one"),
+		}, "repo", "filename", "size_bytes"),
+		Run: downloadStartTool,
 	},
 }
 
@@ -530,5 +617,143 @@ func webFetchTool(ctx context.Context, env *ToolEnv, args json.RawMessage) (any,
 	return webToolResult{
 		Payload: map[string]any{"title": doc.Title, "url": doc.URL, "text": text, "truncated": doc.Truncated || len(doc.Text) > webDocContextChars},
 		Sources: []MessageSource{source},
+	}, nil
+}
+
+// ── HF model acquisition ──────────────────────────────────────────────────
+
+func hfSearchTool(ctx context.Context, env *ToolEnv, args json.RawMessage) (any, error) {
+	if env.HF == nil {
+		return map[string]any{"unavailable": "hf client not wired"}, nil
+	}
+	var a struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return nil, fmt.Errorf("hf_search: invalid arguments: %w", err)
+	}
+	if strings.TrimSpace(a.Query) == "" {
+		return nil, fmt.Errorf("hf_search: query must not be empty")
+	}
+	results, err := env.HF.Search(ctx, hf.Query{Text: a.Query, Limit: a.Limit})
+	if err != nil {
+		return nil, fmt.Errorf("hf_search: %w", err)
+	}
+	type hit struct {
+		ID        string `json:"id"`
+		Author    string `json:"author"`
+		Downloads int64  `json:"downloads"`
+		Gated     bool   `json:"gated"`
+	}
+	out := make([]hit, len(results))
+	for i, m := range results {
+		out[i] = hit{ID: m.ID, Author: m.Author, Downloads: m.Downloads, Gated: m.Gated}
+	}
+	return map[string]any{"results": out}, nil
+}
+
+func hfPreflightTool(ctx context.Context, env *ToolEnv, args json.RawMessage) (any, error) {
+	if env.HF == nil || env.HFDownload == nil {
+		return map[string]any{"unavailable": "hf client or download engine not wired"}, nil
+	}
+	var a struct {
+		Repo        string `json:"repo"`
+		Revision    string `json:"revision"`
+		BudgetBytes int64  `json:"budget_bytes"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return nil, fmt.Errorf("hf_preflight: invalid arguments: %w", err)
+	}
+	repo := strings.TrimSpace(a.Repo)
+	if repo == "" {
+		return nil, fmt.Errorf("hf_preflight: repo must not be empty")
+	}
+	files, err := env.HF.Tree(ctx, repo, a.Revision)
+	if err != nil {
+		return nil, fmt.Errorf("hf_preflight: %w", err)
+	}
+	candidates, rec := hf.RankCandidates(files, a.BudgetBytes)
+	if rec == nil {
+		return map[string]any{"repo": repo, "candidates": candidates, "recommended": nil,
+			"note": "no candidate both fits the budget and was found — no pre-flight report to show"}, nil
+	}
+	report, err := env.HFDownload.Preflight(ctx, repo, []hfdownload.PreflightFile{{Filename: rec.Filename, SizeBytes: rec.SizeBytes}}, "")
+	if err != nil {
+		return nil, fmt.Errorf("hf_preflight: %w", err)
+	}
+	return map[string]any{"repo": repo, "candidates": candidates, "recommended": rec, "preflight": report}, nil
+}
+
+func downloadStatusTool(ctx context.Context, env *ToolEnv, args json.RawMessage) (any, error) {
+	if env.HFDownload == nil {
+		return map[string]any{"unavailable": "download engine not wired"}, nil
+	}
+	var a struct {
+		JobID int64 `json:"job_id"`
+	}
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &a); err != nil {
+			return nil, fmt.Errorf("download_status: invalid arguments: %w", err)
+		}
+	}
+	if a.JobID > 0 {
+		job, err := env.HFDownload.Get(ctx, a.JobID)
+		if err != nil {
+			return nil, fmt.Errorf("download_status: job %d: %w", a.JobID, err)
+		}
+		return map[string]any{"job": downloadJobSummary(job)}, nil
+	}
+	jobs, err := env.HFDownload.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("download_status: %w", err)
+	}
+	out := make([]any, len(jobs))
+	for i, j := range jobs {
+		out[i] = downloadJobSummary(j)
+	}
+	return map[string]any{"jobs": out}, nil
+}
+
+func downloadJobSummary(j store.ModelDownloadRow) map[string]any {
+	return map[string]any{
+		"id": j.ID, "repo": j.Repo, "state": j.State,
+		"bytes_done": j.BytesDone, "bytes_total": j.BytesTotal, "error": j.Error,
+	}
+}
+
+// downloadStartTool is tools.go's one deliberate exception to the
+// never-write guarantee — see hfDownloadTool's doc comment. It only ever
+// calls ProposeJob, which inserts a pending_approval row; nothing
+// downloads until an operator approves it.
+func downloadStartTool(ctx context.Context, env *ToolEnv, args json.RawMessage) (any, error) {
+	if env.HFDownload == nil {
+		return map[string]any{"unavailable": "download engine not wired"}, nil
+	}
+	var a struct {
+		Repo       string `json:"repo"`
+		Revision   string `json:"revision"`
+		Filename   string `json:"filename"`
+		SizeBytes  int64  `json:"size_bytes"`
+		DestDir    string `json:"dest_dir"`
+		ConfigName string `json:"config_name"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return nil, fmt.Errorf("download_start: invalid arguments: %w", err)
+	}
+	if strings.TrimSpace(a.Repo) == "" || strings.TrimSpace(a.Filename) == "" || a.SizeBytes <= 0 {
+		return nil, fmt.Errorf("download_start: repo, filename, and a positive size_bytes are required")
+	}
+	id, err := env.HFDownload.ProposeJob(ctx, hfdownload.CreateJobRequest{
+		Repo: a.Repo, Revision: a.Revision, DestDir: a.DestDir, ConfigName: a.ConfigName,
+		Files:      []hfdownload.PreflightFile{{Filename: a.Filename, SizeBytes: a.SizeBytes}},
+		ProposedBy: "smith",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("download_start: %w", err)
+	}
+	return map[string]any{
+		"job_id": id, "status": "proposed",
+		"note": "created in pending_approval — nothing downloads until an operator approves this job",
 	}, nil
 }

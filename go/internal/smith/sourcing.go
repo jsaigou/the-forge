@@ -16,10 +16,15 @@ package smith
 // carries the real download command so the operator finishes the job by
 // hand (docs/adding-a-model.md), same as the rest of P6's non-executable
 // guidance paths. execute.go's dispatchCatalogChange and this file's
-// applyCatalogChange are the real write path for catalog rows: P3smith
-// minimally implemented applyCatalogChange for artifact rows (fetch_model's
-// final step writes through it); Model/Variant/Offering sequencing remains
-// the follow-up sprint's work.
+// applyCatalogChange are the real write path for catalog rows — P3smith
+// minimally implemented applyCatalogChange for artifact rows (the old
+// fetch_model procedure's final step wrote through it, before the HF
+// model-acquisition track replaced fetch_model with internal/hfdownload's
+// own registrar, which now does the full Model/Variant/Artifact/Config
+// sequencing this comment used to flag as follow-up work — see
+// internal/hfdownload/registrar.go). applyCatalogChange itself is
+// unchanged and still artifact-only; KindCatalogChange actions are its
+// only remaining caller.
 
 import (
 	"context"
@@ -42,16 +47,14 @@ var ErrCatalogChangeUnwired = errors.New("smith: catalog not wired")
 // store.Catalog.
 //
 // P3smith status — MINIMALLY implemented, deliberately narrow: Op
-// create|update on Table "artifact" only, which is all fetch_model's final
-// step needs. Every other table ("model"|"variant"|"offering") still
-// returns "not implemented" exactly as this function always has — wiring
-// those needs sourcing.go's cross-row sequencing (a Model must exist
-// before Variant/Artifact rows can reference it; see the package doc's
-// sequencing note) and stays with that follow-up sprint. The dispatch SEAM
-// itself is real and unchanged: KindCatalogChange actions flow through
-// execute.go's dispatchCatalogChange into THIS function, and fetch_model's
-// opFetchCatalogLink invokes it as a library call behind the same seam, so
-// whatever validation lands here later covers both callers.
+// create|update on Table "artifact" only. Every other table
+// ("model"|"variant"|"offering") still returns "not implemented" exactly
+// as this function always has — the HF model-acquisition track's full
+// Model/Variant/Artifact/Config sequencing this comment used to flag as
+// follow-up work now exists, but as its own atomic store method
+// (store.Catalog.RegisterDownloadedModel) rather than through this seam;
+// see internal/hfdownload/registrar.go. KindCatalogChange actions are this
+// function's only remaining caller (execute.go's dispatchCatalogChange).
 func (s *Smith) applyCatalogChange(ctx context.Context, d catalogChangeDetail) error {
 	if s.d.Catalog == nil {
 		return ErrCatalogChangeUnwired

@@ -115,10 +115,27 @@ export function ServiceChip({ s, addon = false }: { s: InfraService; addon?: boo
           passthrough
         </span>
       )}
+      {/* Operator feedback 2026-08-25: match ProviderCreditTile's layout —
+          controls right-justified (flex spacer before them), plus an ↗ link
+          opening the service UI in a new window. ComfyUI serves :3001; the
+          host comes from the dashboard URL so it works over tailnet or
+          localhost alike. */}
+      {toggleable && s.port != null && (
+        <a
+          href={`http://${window.location.hostname}:${s.port}`}
+          target="_blank"
+          rel="noreferrer"
+          title={`Open ${s.name} in a new window`}
+          style={{ marginLeft: "auto", color: "var(--text-mute)", fontSize: 11, flex: "0 0 auto", textDecoration: "none" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          ↗
+        </a>
+      )}
       {toggleable && canOperate && (
         <button
           className="icon-btn action"
-          style={{ width: 20, height: 20, fontSize: 10, flex: "0 0 auto" }}
+          style={{ width: 20, height: 20, fontSize: 10, flex: "0 0 auto", ...(s.port == null ? { marginLeft: "auto" } : {}) }}
           title={s.active ? "Stop" : "Start"}
           disabled={busy}
           onClick={() => {

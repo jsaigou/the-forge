@@ -101,6 +101,23 @@ func derefBool(p *bool, fallback bool) bool {
 	return *p
 }
 
+// cookieSecure resolves config.Server.CookieSecure (issue #27, sprint 4)
+// for the Secure attribute on every cookie this server sets (the session
+// cookie, the WebAuthn challenge cookie). Read fresh per call — s.deps.Config
+// is the live cfgHolder snapshot, so a settings save takes effect on the
+// next cookie set with no daemon restart needed. Defaults true (fail safe)
+// when Config isn't wired at all, same posture as an absent stored setting.
+func (s *Server) cookieSecure() bool {
+	if s.deps.Config == nil {
+		return true
+	}
+	cfg := s.deps.Config()
+	if cfg == nil {
+		return true
+	}
+	return derefBool(cfg.Server.CookieSecure, true)
+}
+
 // derefInt returns *p, or fallback when nil.
 func derefInt(p *int, fallback int) int {
 	if p == nil {

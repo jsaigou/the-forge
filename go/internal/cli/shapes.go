@@ -229,27 +229,36 @@ type KeysResponse struct {
 	Keys []APIKey `json:"keys"`
 }
 
-// APIKey is one minted dashboard key (secret never returned).
+// APIKey is one minted dashboard key (secret never returned). Field names
+// were found out of lockstep with the real server shape (KeyID tagged
+// "key_id" against the server's "keyid") while wiring #34/#36 — the TUI's
+// Keys-page revoke action always sent an empty keyid as a result; fixed
+// alongside the new bound_ip/expires_at fields.
 type APIKey struct {
-	KeyID     string   `json:"key_id"`
+	KeyID     string   `json:"keyid"`
 	Kind      string   `json:"kind"`
 	Name      string   `json:"name"`
 	Role      string   `json:"role,omitempty"`
+	BoundIP   string   `json:"bound_ip,omitempty"`
 	CreatedAt float64  `json:"created_at,omitempty"`
-	LastUsed  *float64 `json:"last_used,omitempty"`
+	LastUsed  *float64 `json:"last_used_at,omitempty"`
+	ExpiresAt *float64 `json:"expires_at,omitempty"`
 }
 
 // KeyCreateRequest is POST /api/v1/keys.
 type KeyCreateRequest struct {
-	Kind string `json:"kind"`
-	Name string `json:"name"`
-	Role string `json:"role,omitempty"`
+	Kind            string `json:"kind"`
+	Name            string `json:"name"`
+	Role            string `json:"role,omitempty"`
+	BindToRequester bool   `json:"bind_to_requester,omitempty"`
+	TTLSeconds      int64  `json:"ttl_seconds,omitempty"`
 }
 
-// KeyCreateResponse returns the plaintext secret exactly once.
+// KeyCreateResponse returns the plaintext secret exactly once. Mirrors the
+// server's real nested shape (token + key, not a top-level key_id).
 type KeyCreateResponse struct {
-	KeyID string `json:"key_id"`
 	Token string `json:"token"`
+	Key   APIKey `json:"key"`
 }
 
 // SmithChatRequest is POST /api/v1/smith/chat.

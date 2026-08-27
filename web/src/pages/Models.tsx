@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AddModelPanel } from "../components/hf/AddModelPanel";
 import { RemoteOfferings } from "../components/RemoteOfferings";
 import { UnifiedModelCarousel } from "../components/UnifiedModelCarousel";
 import { useModelCards, useStatus } from "../lib/queries";
@@ -25,7 +26,7 @@ import { useModelCards, useStatus } from "../lib/queries";
 export function Models() {
   const status = useStatus();
   const modelCards = useModelCards("7d");
-  const [modelsTab, setModelsTab] = useState<"cards" | "offerings">("cards");
+  const [modelsTab, setModelsTab] = useState<"cards" | "offerings" | "add">("cards");
 
   const hasCards = (modelCards.data?.cards.length ?? 0) > 0;
 
@@ -46,9 +47,19 @@ export function Models() {
         >
           Offerings
         </button>
+        <button
+          type="button"
+          className={`tab${modelsTab === "add" ? " active" : ""}`}
+          data-tour-id="models-add-tab"
+          onClick={() => setModelsTab("add")}
+        >
+          Add Model
+        </button>
       </div>
 
-      {modelsTab === "cards" ? (
+      {modelsTab === "add" ? (
+        <AddModelPanel />
+      ) : modelsTab === "cards" ? (
         modelCards.data && status.data ? (
           hasCards ? (
             <UnifiedModelCarousel

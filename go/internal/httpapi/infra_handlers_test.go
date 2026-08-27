@@ -36,6 +36,12 @@ func TestMonitorAndSystemDefaultsMatchConfigPackage(t *testing.T) {
 			real.Server, systemDefaultListen, systemDefaultRouterListen, systemDefaultMCPListen,
 			systemDefaultDBPath, systemDefaultTTSUnit)
 	}
+	// CookieSecure (issue #27, sprint 4): config.go's applyDefaults resolves
+	// a nil *bool to true; resolvedSystemSettings's literal-default-then-
+	// overlay in this package must agree.
+	if derefBool(real.Server.CookieSecure, false) != true {
+		t.Errorf("config.Server.CookieSecure default = %v, want true", real.Server.CookieSecure)
+	}
 }
 
 // TestRouterConfigDefaultsMatchRouterPackage pins infra_handlers.go's
@@ -109,6 +115,21 @@ func TestRouterConfigGetPut(t *testing.T) {
 	w = do(t, s, authedRequest("PUT", "/api/v1/router/config", strings.NewReader(`{"embedding_url":"not-a-url"}`)))
 	if w.Code != 422 {
 		t.Fatalf("bad embedding_url = %d, want 422", w.Code)
+	}
+
+	// tts_url (Tier 1 Sprint 3, a0 TTS passthrough) follows the identical rule.
+	w = do(t, s, authedRequest("PUT", "/api/v1/router/config", strings.NewReader(`{"tts_url":"not-a-url"}`)))
+	if w.Code != 422 {
+		t.Fatalf("bad tts_url = %d, want 422", w.Code)
+	}
+	w = do(t, s, authedRequest("PUT", "/api/v1/router/config", strings.NewReader(`{"tts_url":"http://127.0.0.1:8082/v1"}`)))
+	if w.Code != 200 {
+		t.Fatalf("valid tts_url = %d, want 200; body=%s", w.Code, w.Body)
+	}
+	var ttsResp routerConfigResponse
+	decodeJSON(t, w.Body, &ttsResp)
+	if ttsResp.TTSURL != "http://127.0.0.1:8082/v1" {
+		t.Errorf("TTSURL = %q, want http://127.0.0.1:8082/v1", ttsResp.TTSURL)
 	}
 
 	// Reject an out-of-range value.

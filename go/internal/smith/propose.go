@@ -19,6 +19,35 @@ import (
 // open at once — a flapping check must not generate unbounded rows.
 const maxAutoOpenProposals = 20
 
+// WhyCantRun classifies why a runbook-kind proposal can't be auto-executed
+// by smith (Tier 1 Sprint 4) — a stable code for ActionCard.tsx to render
+// consistently instead of a proposer's own free-text prose, mirroring
+// sched.RefusalReason's treatment. Written into a runbook proposal's
+// detail["why_cant_run"] (detail is a plain map[string]any per-proposer, not
+// a shared struct — see ActionDraft.Detail) alongside the existing
+// per-step Why fields, which explain individual steps, not the overall
+// runbook's non-automatability. Not exhaustive of every possible future
+// reason — build_refresh itself moved from a runbook (this list) to a real
+// Procedure (Sprint 6 capstone) once someone built the automation, so a
+// runbook's reason here describes "why not today," not "why never."
+type WhyCantRun string
+
+const (
+	// WhyCantRunRequiresReboot: the runbook's steps include rebooting the
+	// host, which would take down every currently-loaded slot and
+	// service — smith will never trigger this on its own.
+	WhyCantRunRequiresReboot WhyCantRun = "requires_reboot"
+	// WhyCantRunPolicyDefersToHuman: a deliberate guardrail, not a
+	// capability gap — smith reports the finding but leaves a judgment
+	// call (e.g. which slot to evict) to the scheduler's own policy or
+	// the operator.
+	WhyCantRunPolicyDefersToHuman WhyCantRun = "policy_defers_to_human"
+	// WhyCantRunRisksLiveWorkload: the action could disrupt something a
+	// live slot or service is actively using (e.g. rebuilding a binary a
+	// running llama-server process has mapped into memory).
+	WhyCantRunRisksLiveWorkload WhyCantRun = "risks_live_workload"
+)
+
 // proposer maps one check's finding to zero or more proposed actions. Checks
 // stay pure Finding-returning functions (checks.go's registry is untouched);
 // this is a strictly read-only second pass over a completed sweep's
@@ -26,12 +55,16 @@ const maxAutoOpenProposals = 20
 type proposer func(env *CheckEnv, f Finding, br BrainResolution) []ActionDraft
 
 // proposers maps check ID → proposer (docs/v5-smith.md §4.6's table).
-// load_config/settings_change are deliberately absent — nothing in the
-// check catalog knows what a mode *ought* to be, and inventing that
-// heuristic is exactly what "propose, never do" is meant to avoid.
+// load_config is deliberately absent — nothing in the check catalog knows
+// what a mode *ought* to be, and inventing that heuristic is exactly what
+// "propose, never do" is meant to avoid. settings_change entries are
+// deliberately rare — only for deterministic, operator-framed decisions
+// where the threshold and proposed value are both known; the first such
+// entry is compressor_failopen (Sprint D, budget increase).
 var proposers = map[string]proposer{
 	"always_on_ports":         proposeRestartDownService,
 	"compressor_reachability": proposeRestartCompressorProxy,
+	"compressor_failopen":     proposeFailOpenBudgetIncrease,
 	"slot_agreement":          proposeReconcileOrphanSlot,
 	"kernel_params":           proposeKernelParamsRunbook,
 	"gtt_ceiling":             proposeFreeMemoryRunbook,
@@ -161,6 +194,62 @@ func proposeRestartCompressorProxy(env *CheckEnv, f Finding, _ BrainResolution) 
 	return out
 }
 
+// proposeFailOpenBudgetIncrease proposes raising the compressor fail-open
+// budget when the fail-open rate exceeds the threshold (Sprint D). The
+// budget is a deterministic, operator-framed decision: current + 1000ms,
+// capped at 10000ms. Creates a KindSettingsChange proposal requiring
+// operator approval — not auto-executed, not on the autonomy list.
+//
+// DedupeKey is on the setting itself (not the proposed value) — found live
+// 2026-08-27: without one, createOrReuseProposal (propose.go) always
+// inserts fresh since an empty DedupeKey skips the reuse lookup entirely,
+// so every sweep that re-observed the same warn finding (the setting change
+// is never auto-applied, so the underlying rate never moves until an
+// operator approves) stacked up a brand-new pending proposal instead of
+// reusing the one already waiting for review.
+func proposeFailOpenBudgetIncrease(env *CheckEnv, f Finding, _ BrainResolution) []ActionDraft {
+	if f.Severity != SeverityWarn {
+		return nil
+	}
+	const (
+		stepMS  = 1000
+		ceiling = 10000
+	)
+
+	raw, err := env.Store.Settings().Get(context.Background(), SettingFailOpenBudgetMS)
+	current := 2000 // forge-compress default
+	if err == nil {
+		_ = json.Unmarshal(raw, &current)
+	}
+
+	if current >= ceiling {
+		return nil // already at ceiling
+	}
+
+	proposed := current + stepMS
+	if proposed > ceiling {
+		proposed = ceiling
+	}
+
+	val, _ := json.Marshal(proposed)
+	detail, _ := json.Marshal(settingsChangeDetail{
+		Key:   SettingFailOpenBudgetMS,
+		Value: val,
+		Reason: fmt.Sprintf(
+			"%s — the compressor is falling open (skipping compression and passing the request through uncompressed) because it's hitting the wall-clock budget before it finishes. Raising the budget gives it more time to complete instead of bailing out.",
+			f.Summary,
+		),
+	})
+
+	return []ActionDraft{{
+		Kind:      KindSettingsChange,
+		Title:     fmt.Sprintf("Raise compressor fail-open budget from %dms to %dms", current, proposed),
+		Detail:    detail,
+		Risk:      RiskLow,
+		DedupeKey: KindSettingsChange + ":" + SettingFailOpenBudgetMS,
+	}}
+}
+
 // proposeReconcileOrphanSlot turns slot_agreement's mismatch list into
 // unload_slot proposals, ORPHAN DIRECTION ONLY: the scheduler thinks a slot
 // is empty but the unit still reports a loaded mode — a stray process smith
@@ -209,7 +298,7 @@ func proposeReconcileOrphanSlot(env *CheckEnv, f Finding, br BrainResolution) []
 // proposeKernelParamsRunbook turns kernel_params' missing-param list into a
 // single informational runbook action (never something smith executes — the
 // fix needs a bootloader edit + reboot).
-func proposeKernelParamsRunbook(_ *CheckEnv, f Finding, _ BrainResolution) []ActionDraft {
+func proposeKernelParamsRunbook(env *CheckEnv, f Finding, _ BrainResolution) []ActionDraft {
 	if f.Severity != SeverityWarn {
 		return nil
 	}
@@ -233,8 +322,12 @@ func proposeKernelParamsRunbook(_ *CheckEnv, f Finding, _ BrainResolution) []Act
 			VerifyCommand: "cat /proc/cmdline",
 		},
 	}
-	detail, err := json.Marshal(map[string]any{"check_id": f.CheckID, "missing": missing, "steps": steps})
+	detail, err := json.Marshal(map[string]any{
+		"check_id": f.CheckID, "missing": missing, "steps": steps,
+		"why_cant_run": WhyCantRunRequiresReboot,
+	})
 	if err != nil {
+		env.logf("proposeKernelParamsRunbook: marshal detail: %v", err)
 		return nil
 	}
 	return []ActionDraft{{
@@ -288,8 +381,10 @@ func proposeFreeMemoryRunbook(env *CheckEnv, f Finding, _ BrainResolution) []Act
 	}
 	detail, err := json.Marshal(map[string]any{
 		"check_id": f.CheckID, "occupancy": occupancy, "steps": steps, "gtt_pct": f.Evidence["gtt_pct"],
+		"why_cant_run": WhyCantRunPolicyDefersToHuman,
 	})
 	if err != nil {
+		env.logf("proposeFreeMemoryRunbook: marshal detail: %v", err)
 		return nil
 	}
 	return []ActionDraft{{
@@ -409,6 +504,7 @@ func proposeRebuildRunbook(env *CheckEnv, f Finding, _ BrainResolution) []Action
 		detail, err := json.Marshal(map[string]any{
 			"check_id": f.CheckID, "name": b.Name, "path": b.Path, "source_ref": b.SourceRef,
 			"installed_version": b.InstalledVersion, "source_version": b.SourceVersion, "steps": steps,
+			"why_cant_run": WhyCantRunRisksLiveWorkload,
 		})
 		if err != nil {
 			continue
@@ -460,10 +556,12 @@ func rebuildBlastRadius(env *CheckEnv, sourceRef string) []blastRadiusBuild {
 	defer cancel()
 	allBuilds, err := env.Catalog.ListBuilds(ctx)
 	if err != nil {
+		env.logf("rebuildBlastRadius: list builds: %v", err)
 		return nil
 	}
 	allConfigs, err := env.Catalog.ListConfigs(ctx)
 	if err != nil {
+		env.logf("rebuildBlastRadius: list configs: %v", err)
 		return nil
 	}
 	var out []blastRadiusBuild
@@ -509,7 +607,7 @@ func blastRadiusSummary(blast []blastRadiusBuild) string {
 // construction (comfyui.BuildMap never returns Candidates alongside a
 // refusal) — so this function doesn't need its own guardrail-(a) check,
 // the map builder already enforces it upstream.
-func proposeComfyUIDelete(_ *CheckEnv, f Finding, _ BrainResolution) []ActionDraft {
+func proposeComfyUIDelete(env *CheckEnv, f Finding, _ BrainResolution) []ActionDraft {
 	if f.Severity != SeverityInfo {
 		return nil
 	}
@@ -517,18 +615,38 @@ func proposeComfyUIDelete(_ *CheckEnv, f Finding, _ BrainResolution) []ActionDra
 	if len(candidates) == 0 {
 		return nil
 	}
+	// smith.comfyui.keep_files (S7-followup smith UX sprint): an operator
+	// who already said "keep this" gets nothing re-proposed for it, ever —
+	// no memory of a rejection used to exist, so the same files came back
+	// every sweep.
+	keep := make(map[string]bool, len(env.ComfyUIKeepFiles))
+	for _, p := range env.ComfyUIKeepFiles {
+		keep[p] = true
+	}
 	var total int64
 	files := make([]deleteFileEntry, 0, len(candidates))
 	for _, c := range candidates {
+		if keep[c.FullPath] {
+			continue
+		}
 		files = append(files, deleteFileEntry{Path: c.FullPath, FolderType: c.FolderType, SizeBytes: c.SizeBytes})
 		total += c.SizeBytes
 	}
+	if len(files) == 0 {
+		return nil
+	}
 	detail, err := json.Marshal(deleteFilesDetail{Files: files, TotalBytes: total, Guidance: comfyUIKeepGuidance})
 	if err != nil {
+		env.logf("proposeComfyUIDelete: marshal detail: %v", err)
 		return nil
 	}
 	return []ActionDraft{{
-		Kind:      KindDeleteFiles,
+		Kind: KindDeleteFiles,
+		// Deleting is the high-risk step, not the files' presence — the
+		// title says "delete", and ActionCard's risk chip is worded to make
+		// that unambiguous too (S7-followup smith UX sprint: the bare "high
+		// risk" chip next to this title used to read as if keeping the
+		// files were the risky choice).
 		Title:     fmt.Sprintf("Delete %d unreferenced ComfyUI model file(s) (%.1f GB)", len(files), float64(total)/(1<<30)),
 		Risk:      RiskHigh,
 		Detail:    detail,

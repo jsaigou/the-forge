@@ -65,6 +65,7 @@ func TestScrubSecretPatterns(t *testing.T) {
 	}{
 		{"router key", "loaded token sk-router-abc123-def456ghijklmnop into memory", "loaded token [redacted] into memory"},
 		{"bearer header", "Authorization: Bearer abcDEF123456789012345", "Authorization: [redacted]"},
+		{"hf token", "request failed with hf_AbCdEfGhIjKlMnOpQrStUvWx in the URL", "request failed with [redacted] in the URL"},
 		{"clean text", "a0 unreachable on port 8085: connection refused", "a0 unreachable on port 8085: connection refused"},
 	}
 	for _, tc := range cases {

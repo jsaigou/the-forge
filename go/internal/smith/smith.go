@@ -19,19 +19,22 @@
 package smith
 
 import (
-	"fmt"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/activity"
 	"github.com/jsaigou/the-forge/internal/bus"
 	"github.com/jsaigou/the-forge/internal/collector"
 	"github.com/jsaigou/the-forge/internal/config"
 	"github.com/jsaigou/the-forge/internal/engine"
+	"github.com/jsaigou/the-forge/internal/hf"
+	"github.com/jsaigou/the-forge/internal/hfdownload"
 	"github.com/jsaigou/the-forge/internal/maintenance"
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/smith/comfyui"
@@ -140,6 +143,14 @@ const (
 	SettingComfyUIUnit         = "smith.comfyui.unit"
 	SettingComfyUIModelRoots   = "smith.comfyui.model_roots"
 	SettingComfyUIWorkflowDirs = "smith.comfyui.workflow_dirs"
+	// SettingComfyUIKeepFiles is the operator-maintained exclusion list
+	// (JSON array of full paths) proposeComfyUIDelete filters candidates
+	// against before building a delete_files proposal — a direct "don't
+	// propose deleting this" that doesn't require gaming ComfyUI's own
+	// workflow system the way comfyUIKeepGuidance's advice does (S7-followup
+	// smith UX sprint, 2026-08-26: comfyui_prune used to re-propose the same
+	// rejected files every sweep with no memory of the rejection).
+	SettingComfyUIKeepFiles = "smith.comfyui.keep_files"
 
 	SettingBinariesEnabled = "smith.binaries.enabled"
 	SettingBinariesTracked = "smith.binaries.tracked"
@@ -161,6 +172,28 @@ const (
 	// data; the procedure's fail-closed cross-checks apply to whatever
 	// the setting says).
 	SettingBuildRefreshForks = "smith.build_refresh.forks"
+
+	// SettingBuildRefreshWatchlist is the operator-editable keyword list
+	// ("smith.build_refresh.watchlist", JSON array of strings) that
+	// binary_versions matches against fetched upstream commit subjects
+	// (Deps.GitBehindLog) — surfaces a drifted build that mentions e.g.
+	// "CVE" or "breaking" regardless of whether the raw commit count has
+	// crossed BuildRefreshBehindN. Visibility only: a watchlist hit adds a
+	// distinct evidence/summary line, it does NOT by itself widen
+	// proposeRebuildRunbook's threshold gate (free-form investigation-
+	// matching that would auto-propose was already rejected in favor of
+	// this narrower, explicit, operator-maintained list — see
+	// docs/v5-ops-sprints-2026-08-21.md's cross-sprint notes). Empty/absent
+	// → no matching happens, same as before this setting existed. Smith
+	// itself may append to this list (auto-populated from failed model-add
+	// compatibility failures, per the original design) — see
+	// allowedSmithSettingsKeys in execute.go.
+	SettingBuildRefreshWatchlist = "smith.build_refresh.watchlist"
+
+	// SettingFailOpenBudgetMS (Sprint D) is the per-proxy fail-open budget
+	// override (JSON integer, milliseconds). Written by smith's
+	// settings_change apply path; read by compressorctl's writeEnv.
+	SettingFailOpenBudgetMS = "smith.failopen_budget_ms"
 )
 
 // Brain resolution enum (docs/v5-smith.md §4.1).
@@ -209,6 +242,36 @@ func (s Severity) Rank() int {
 	}
 }
 
+// Confidence expresses how complete the evidence behind a Finding is (Tier 1
+// Sprint 4) — derived from what the check actually managed to read, never a
+// model's self-assessment (there is no LLM in the deterministic check path
+// at all). High: every probe the check wanted succeeded. Medium/Low mean a
+// probe was unavailable, degraded, or fell back to a weaker source, and
+// ConfidenceNote names which one. A check that never sets it defaults to
+// High via normalize() — every check written before this sprint always read
+// what it needed or errored out entirely (SeverityCrit via runOne's panic
+// recovery), so "unset" and "fully confident" describe the same prior
+// behavior.
+type Confidence string
+
+const (
+	ConfidenceHigh   Confidence = "high"
+	ConfidenceMedium Confidence = "medium"
+	ConfidenceLow    Confidence = "low"
+)
+
+// Rank orders confidence for display/sorting (higher = more confident).
+func (c Confidence) Rank() int {
+	switch c {
+	case ConfidenceHigh:
+		return 2
+	case ConfidenceMedium:
+		return 1
+	default: // ConfidenceLow, or unset
+		return 0
+	}
+}
+
 // Finding is one check's outcome (docs/v5-smith.md §4.2). Evidence carries
 // structured data for the UI's expandable detail and (from a later phase)
 // for Tier 2 context assembly. ProposalIDs is populated by proposeFrom
@@ -227,6 +290,11 @@ type Finding struct {
 	Evidence    map[string]any `json:"evidence"`
 	ProposalIDs []int64        `json:"proposal_ids"`
 	KBRefs      []string       `json:"kb_refs"`
+	// Confidence/ConfidenceNote (Tier 1 Sprint 4) — see Confidence's doc
+	// comment. Confidence defaults to High in normalize() when a check
+	// leaves it unset.
+	Confidence     Confidence `json:"confidence"`
+	ConfidenceNote string     `json:"confidence_note,omitempty"`
 }
 
 // normalize returns the finding with non-nil slice/map fields so its JSON is
@@ -241,6 +309,9 @@ func (f Finding) normalize() Finding {
 	}
 	if f.KBRefs == nil {
 		f.KBRefs = []string{}
+	}
+	if f.Confidence == "" {
+		f.Confidence = ConfidenceHigh
 	}
 	return f
 }
@@ -262,6 +333,10 @@ type StoredFinding struct {
 	CreatedAt       time.Time `json:"created_at"`
 	KBRefs          []string  `json:"kb_refs"`
 	RepeatCount     int       `json:"repeat_count"` // >1 when dedup collapsed repeat crits (migration 0045)
+	// Confidence/ConfidenceNote (migration <next>, Tier 1 Sprint 4) mirror
+	// Finding's fields of the same name.
+	Confidence     Confidence `json:"confidence"`
+	ConfidenceNote string     `json:"confidence_note,omitempty"`
 }
 
 // BrainResolution is where smith's own inference would run (docs/v5-smith.md
@@ -393,6 +468,12 @@ type Thresholds struct {
 	// stays VISIBLE as an info finding — it just doesn't propose a rebuild.
 	// Default 500 per operator instruction.
 	BuildRefreshBehindN int `json:"build_refresh_behind_n"`
+
+	// CompressorFailOpenWarnPct (Sprint D) is the fail-open rate threshold
+	// (%) above which smith warns and proposes raising the fail-open budget.
+	// Fail-open rate = fail_open_total / (requests + timeout + canceled)
+	// over a 1-hour rolling window. Default 10%.
+	CompressorFailOpenWarnPct float64 `json:"compressor_failopen_warn_pct"`
 }
 
 // DefaultThresholds is used when smith.thresholds is unset or unreadable.
@@ -400,7 +481,8 @@ func DefaultThresholds() Thresholds {
 	return Thresholds{
 		GTTWarnPct: 85, GTTCritPct: 95, DiskWarnPct: 85, DiskCritPct: 95, DeviceLostWindowMinutes: 15,
 		CompressorRSSWindowHours: 6, CompressorRSSGrowthWarnPct: 40, CompressorRestartsWarnPerHour: 3,
-		BuildRefreshBehindN: 500,
+		BuildRefreshBehindN:         500,
+		CompressorFailOpenWarnPct: 10,
 	}
 }
 
@@ -551,6 +633,21 @@ type Deps struct {
 	// P3 chat generation before it was found live.
 	Web web.Service
 
+	// HF is the HF Hub API client (go/internal/hf) backing the hf_search
+	// and hf_preflight-adjacent tree lookups tools.go exposes read-only.
+	// nil ⇒ hf_search/hf_preflight report themselves unavailable rather
+	// than failing the turn, the same degrade posture as Web above.
+	HF *hf.Client
+
+	// HFDownload is the model-acquisition engine (go/internal/hfdownload)
+	// backing download_status (read) and download_start (the one
+	// deliberate exception to tools.go's "never write" guarantee —
+	// download_start only ever creates a pending_approval row; nothing
+	// downloads until an operator approves it through the ordinary UI,
+	// same posture as every other smith-proposed action). nil ⇒ both
+	// tools report themselves unavailable.
+	HFDownload *hfdownload.Service
+
 	// TailscalePeers reports the tailnet peer list (P6 FR8 —
 	// tailscale_peers check; production: (*collector.TailscaleLocalAPI).Peers
 	// adapted to this signature). nil ⇒ the check skips itself, zero
@@ -576,6 +673,16 @@ type Deps struct {
 	// which only measures against the local checkout). nil ⇒ upstream drift
 	// is not measured; the check reports source-vs-installed only.
 	GitAhead func(ctx context.Context, root, ref string) (int, error)
+
+	// GitBehindLog fetches up to maxN commit SUBJECT lines for the same
+	// HEAD..ref range GitAhead counts ("git log --format=%s -n <maxN>
+	// HEAD..<ref>", read-only, no shell, bounded timeout) — feeds
+	// binary_versions' watchlist match (S6 phase 2, feedback F1's
+	// commit-subject-fetching half). nil ⇒ upstream drift is measured
+	// (GitAhead) but subjects are never fetched, so the watchlist
+	// contributes nothing — same "bonus signal, never a failure" posture
+	// as GitAhead/GitLsRemote.
+	GitBehindLog func(ctx context.Context, root, ref string, maxN int) ([]string, error)
 
 	// GitLsRemote resolves a remote git URL's HEAD commit ("git ls-remote
 	// <url> HEAD", read-only, no shell, caller-bounded timeout) — the
@@ -620,6 +727,24 @@ type Deps struct {
 	// than running without the quiet-host guarantee it declared it needs;
 	// procedures with NeedsMaintenance=false never touch this field at all.
 	Maintenance *maintenance.Gate
+
+	// Activity is the per-slot consumer attribution registry (shared with
+	// the router + httpapi — one instance wired in cmd/forge). Reasoning
+	// turns and brain-residency loads Mark their slot as "SMITH" so the
+	// dashboard's status.slot_consumers shows who is generating. nil → no
+	// attribution.
+	Activity *activity.Registry
+
+	// CompressorProvisioner (Sprint D) writes a proxy's env file and
+	// restarts its systemd unit — the apply path for settings that forge-
+	// compress reads at startup (currently only FailOpenBudgetMS). nil ⇒
+	// KindSettingsChange proposals for those keys still write the settings
+	// store but skip the restart; the change takes effect on the next
+	// manual or reboot-driven restart. Narrow interface rather than the
+	// full *compressorctl.Provisioner — smith only needs Reconcile.
+	CompressorProvisioner interface {
+		Reconcile(ctx context.Context, row store.ProxyRow) error
+	}
 
 	// CmdlinePath overrides the kernel boot-params file (default
 	// /proc/cmdline). Tests point it at a fixture.
@@ -1109,6 +1234,20 @@ func (s *Smith) ComfyUIModelRoots(ctx context.Context) []string {
 	return s.settingStringList(ctx, SettingComfyUIModelRoots)
 }
 
+// ComfyUIKeepFiles reads smith.comfyui.keep_files — full paths
+// proposeComfyUIDelete excludes from any future delete proposal. Empty,
+// never nil, when unset.
+func (s *Smith) ComfyUIKeepFiles(ctx context.Context) []string {
+	return s.settingStringList(ctx, SettingComfyUIKeepFiles)
+}
+
+// BuildRefreshWatchlist reads smith.build_refresh.watchlist — keywords
+// binary_versions matches (case-insensitive substring) against fetched
+// upstream commit subjects. Empty, never nil, when unset.
+func (s *Smith) BuildRefreshWatchlist(ctx context.Context) []string {
+	return s.settingStringList(ctx, SettingBuildRefreshWatchlist)
+}
+
 // BrainChain reads smith.brain_chain — the ordered list of acceptable
 // local brain configs. Nil (never an empty non-nil slice distinction
 // matters to callers) when unset or malformed: a malformed value fails
@@ -1214,12 +1353,13 @@ func (s *Smith) Thresholds(ctx context.Context) Thresholds {
 		return out
 	}
 	var v struct {
-		GTTWarnPct              *float64 `json:"gtt_warn_pct"`
-		GTTCritPct              *float64 `json:"gtt_crit_pct"`
-		DiskWarnPct             *float64 `json:"disk_warn_pct"`
-		DiskCritPct             *float64 `json:"disk_crit_pct"`
-		DeviceLostWindowMinutes *int     `json:"device_lost_window_minutes"`
-		BuildRefreshBehindN     *int     `json:"build_refresh_behind_n"`
+		GTTWarnPct                *float64 `json:"gtt_warn_pct"`
+		GTTCritPct                *float64 `json:"gtt_crit_pct"`
+		DiskWarnPct               *float64 `json:"disk_warn_pct"`
+		DiskCritPct               *float64 `json:"disk_crit_pct"`
+		DeviceLostWindowMinutes   *int     `json:"device_lost_window_minutes"`
+		BuildRefreshBehindN       *int     `json:"build_refresh_behind_n"`
+		CompressorFailOpenWarnPct *float64 `json:"compressor_failopen_warn_pct"`
 	}
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return out
@@ -1239,6 +1379,7 @@ func (s *Smith) Thresholds(ctx context.Context) Thresholds {
 	if v.BuildRefreshBehindN != nil && *v.BuildRefreshBehindN > 0 {
 		out.BuildRefreshBehindN = *v.BuildRefreshBehindN
 	}
+	applyPct(&out.CompressorFailOpenWarnPct, v.CompressorFailOpenWarnPct)
 	return out
 }
 

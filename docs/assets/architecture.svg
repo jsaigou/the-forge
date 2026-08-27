@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 460" role="img" aria-label="The Forge architecture: clients reach one Go daemon that routes, schedules and stores state">
+  <title>The Forge architecture</title>
+  <desc>OpenAI SDKs, agents and MCP clients call one forge daemon. Its router, ops dashboard and MCP surface share a scheduler, which loads models onto llama.cpp slots a1 through a4 and reads a SQLite catalog store; systemd units and auth sit alongside.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#7b8794"/>
+    </marker>
+  </defs>
+
+  <rect x="0.75" y="0.75" width="1198.5" height="458.5" rx="16" fill="#101318" stroke="#232b38" stroke-width="1.5"/>
+
+  <!-- column 1: clients -->
+  <text x="48" y="46" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" letter-spacing="1.5" fill="#7f8794">CLIENTS</text>
+  <rect x="40" y="70" width="180" height="52" rx="8" fill="#1c232e" stroke="#7b8794" stroke-width="2"/>
+  <text x="130" y="102" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" fill="#e8e6e1">OpenAI SDKs</text>
+  <rect x="40" y="140" width="180" height="52" rx="8" fill="#1c232e" stroke="#7b8794" stroke-width="2"/>
+  <text x="130" y="172" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" fill="#e8e6e1">Agents</text>
+  <rect x="40" y="210" width="180" height="52" rx="8" fill="#1c232e" stroke="#7b8794" stroke-width="2"/>
+  <text x="130" y="242" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" fill="#e8e6e1">MCP clients</text>
+
+  <!-- connectors: clients -> daemon surfaces -->
+  <path d="M220 96 H300" stroke="#7b8794" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M220 166 H300" stroke="#7b8794" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M220 236 H300" stroke="#7b8794" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+
+  <!-- column 2: forge daemon outer frame -->
+  <rect x="300" y="60" width="620" height="360" rx="12" fill="none" stroke="#f59e0b" stroke-width="2"/>
+  <text x="322" y="46" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" letter-spacing="1.5" fill="#f59e0b">FORGE DAEMON (ONE GO BINARY)</text>
+
+  <!-- three surfaces -->
+  <rect x="324" y="84" width="180" height="52" rx="8" fill="#1c232e" stroke="#e8e6e1" stroke-width="2"/>
+  <text x="414" y="116" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" fill="#e8e6e1">router :8085</text>
+
+  <rect x="524" y="84" width="180" height="52" rx="8" fill="#1c232e" stroke="#e8e6e1" stroke-width="2"/>
+  <text x="614" y="116" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" fill="#e8e6e1">dashboard :5000</text>
+
+  <rect x="724" y="84" width="176" height="52" rx="8" fill="#1c232e" stroke="#e8e6e1" stroke-width="2"/>
+  <text x="812" y="116" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" fill="#e8e6e1">mcp :8095</text>
+
+  <!-- surfaces -> scheduler -->
+  <path d="M414 136 V174" stroke="#7b8794" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M614 136 V174" stroke="#7b8794" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M812 136 V174" stroke="#7b8794" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+
+  <!-- scheduler -->
+  <rect x="380" y="182" width="440" height="60" rx="8" fill="#1c232e" stroke="#fbbf24" stroke-width="2.5"/>
+  <text x="600" y="218" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="22" font-weight="600" fill="#fde68a">scheduler — load / evict / reserve</text>
+
+  <!-- scheduler -> catalog + auth -->
+  <path d="M420 242 V276" stroke="#7b8794" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M780 242 V276" stroke="#7b8794" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+
+  <rect x="324" y="284" width="220" height="56" rx="8" fill="#1c232e" stroke="#7b8794" stroke-width="2"/>
+  <text x="434" y="317" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" fill="#e8e6e1">catalog store (SQLite)</text>
+
+  <rect x="676" y="284" width="224" height="56" rx="8" fill="#1c232e" stroke="#7b8794" stroke-width="2"/>
+  <text x="788" y="317" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" fill="#e8e6e1">auth: keys, TOTP</text>
+
+  <!-- column 3: llama.cpp slots -->
+  <text x="986" y="46" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" letter-spacing="1.5" fill="#7f8794">RUNTIME</text>
+  <g>
+    <rect x="970" y="70" width="80" height="52" rx="8" fill="#1c232e" stroke="#7b8794" stroke-width="2"/>
+    <text x="1010" y="102" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" fill="#e8e6e1">a1</text>
+    <rect x="1066" y="70" width="80" height="52" rx="8" fill="#1c232e" stroke="#7b8794" stroke-width="2"/>
+    <text x="1106" y="102" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" fill="#e8e6e1">a2</text>
+    <rect x="970" y="132" width="80" height="52" rx="8" fill="#1c232e" stroke="#7b8794" stroke-width="2"/>
+    <text x="1010" y="164" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" fill="#e8e6e1">a3</text>
+    <rect x="1066" y="132" width="80" height="52" rx="8" fill="#1c232e" stroke="#7b8794" stroke-width="2"/>
+    <text x="1106" y="164" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" fill="#e8e6e1">a4</text>
+  </g>
+  <text x="1108" y="204" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" fill="#7f8794">llama.cpp slots</text>
+
+  <!-- scheduler -> slots -->
+  <path d="M820 212 H938 V127 H970" stroke="#7b8794" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+
+  <rect x="970" y="284" width="176" height="56" rx="8" fill="#1c232e" stroke="#7b8794" stroke-width="2"/>
+  <text x="1058" y="308" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" fill="#e8e6e1">systemd units</text>
+  <text x="1058" y="330" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" fill="#e8e6e1">&amp; metrics</text>
+
+  <!-- mcp -> systemd/metrics -->
+  <path d="M812 136 V150 H952 V310 H970" stroke="#7b8794" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+
+  <!-- bottom caption -->
+  <text x="48" y="440" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#7f8794">on-demand load → fit check → evict by budget → serve</text>
+</svg>

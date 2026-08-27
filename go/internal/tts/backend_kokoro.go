@@ -36,6 +36,9 @@ func IsKokoroVoice(id string) bool {
 // kokoroLangFromVoice maps a Kokoro voice id to a human language label for the
 // voice listing. The leading letter encodes the language.
 func kokoroLangFromVoice(id string) string {
+	if id == "" {
+		return "Unknown"
+	}
 	langs := map[string]string{
 		"a": "English (US)", "b": "English (UK)", "e": "Spanish",
 		"f": "French", "h": "Hindi", "i": "Italian",

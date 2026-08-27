@@ -18,9 +18,16 @@ import { StepUpModal } from "../StepUpModal";
 interface DowntimeModalProps {
   actionId: number;
   onClose: () => void;
+  // extraWarning — an action-kind-specific disclosure this modal has no
+  // other way to know about (e.g. delete_files' file-level irreversibility
+  // notice). Approve now routes every procedurizable action through this
+  // modal instead of a bare one-click button, so a kind that used to carry
+  // its own separate warning (ConfirmButton's `warning` prop) needs it
+  // preserved here instead of silently dropped.
+  extraWarning?: string;
 }
 
-export function DowntimeModal({ actionId, onClose }: DowntimeModalProps) {
+export function DowntimeModal({ actionId, onClose, extraWarning }: DowntimeModalProps) {
   const preview = useSmithActionProcedurePreview(actionId);
   const procedurize = useSmithActionProcedurize(actionId);
   const gate = useStepUpGate();
@@ -43,7 +50,11 @@ export function DowntimeModal({ actionId, onClose }: DowntimeModalProps) {
   return (
     <div className="modal-backdrop" onClick={(e) => { e.stopPropagation(); if (!busy) onClose(); }}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Let smith fix it</h3>
+        <h3>Approve</h3>
+
+        {extraWarning && (
+          <div className="error-note" style={{ marginBottom: 14 }}>{extraWarning}</div>
+        )}
 
         {preview.isLoading && (
           <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 14 }}>Loading…</div>

@@ -1,15 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiErrorMessage } from "../../lib/api";
-import { formatRelativeTime } from "../../lib/format";
 import {
-  useAcknowledgeAllNotifications,
-  useAcknowledgeNotification,
-  useDismissNotification,
-  useNotifications,
-  useSmithActions,
   useSmithBlockedWork,
-  useSmithChecks,
-  useSmithChecksRun,
   useSmithFindings,
   useSmithFindingsPurge,
   useSmithInvestigation,
@@ -25,19 +17,16 @@ import {
 } from "../../lib/queries";
 import { useSession } from "../../lib/session";
 import type {
-  NotificationItem,
   SmithBlockedItem,
-  SmithCheckMeta,
   SmithFinding,
   SmithProcedureRunSummary,
   SmithProcedureStepOutcome,
   SmithStoredFinding,
 } from "../../lib/types";
-import { ActionCard } from "../smith/ActionCard";
 import { ActionsTray } from "../smith/ActionsTray";
 import { AskSmithButton } from "../smith/AskSmithButton";
 import { Markdown } from "../smith/Markdown";
-import { SelfContextChip } from "../smith/SelfContextChip";
+import { MissedPatterns } from "../smith/SelfContextChip";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -52,15 +41,6 @@ const SEV_COLOR: Record<string, string> = {
   crit: "var(--crit)",
 };
 
-// Collector alert codes → short labels (folded in from NotificationsPanel.tsx).
-const CODE_LABEL: Record<string, string> = {
-  INFERENCE_HANG: "HANG",
-  GTT_HIGH: "GTT",
-  UNIT_OOM: "OOM",
-  UNIT_CRASH: "CRASH",
-  UNIT_RESTARTED: "RESTART",
-};
-
 function sevChip(sev: string) {
   const c = SEV_COLOR[sev] ?? "var(--text-mute)";
   return (
@@ -69,6 +49,24 @@ function sevChip(sev: string) {
       style={{ color: c, borderColor: `color-mix(in srgb, ${c} 40%, var(--border))` }}
     >
       {sev}
+    </span>
+  );
+}
+
+// confChip renders a finding's confidence (Tier 1 Sprint 4): only when
+// degraded from the default "high", matching the advisory-tone/hazard-badge
+// precedent elsewhere in this codebase: a normal, fully-measured finding
+// shouldn't carry a badge every row just to say "nothing was missing".
+function confChip(confidence: string | undefined, note: string | undefined) {
+  if (!confidence || confidence === "high") return null;
+  const c = confidence === "medium" ? "var(--warn)" : "var(--crit)";
+  return (
+    <span
+      className="chip"
+      style={{ color: c, borderColor: `color-mix(in srgb, ${c} 40%, var(--border))` }}
+      title={note || `${confidence} confidence: some evidence was unavailable`}
+    >
+      {confidence} confidence
     </span>
   );
 }
@@ -162,9 +160,9 @@ function EvidenceRow({ evidence }: { evidence: string | Record<string, unknown> 
   );
 }
 
-// ── KB ref chip (expandable, P4 — docs/v5-smith.md §4.7) ────────────────────
+// ── KB ref chip (expandable, P4, docs/v5-smith.md §4.7) ────────────────────
 // Lazily resolves one Finding.kb_refs entry to its chunk on first expand
-// (useSmithKBRef's `enabled: !!ref` gate) — a finding with no expanded
+// (useSmithKBRef's `enabled: !!ref` gate); a finding with no expanded
 // chips never fetches anything.
 
 function KBRefChip({ refId }: { refId: string }) {
@@ -210,9 +208,9 @@ function KBRefChip({ refId }: { refId: string }) {
 }
 
 // ── Finding card (shared by findings view and investigation detail) ─────────
-// Accepts either a SmithFinding (from sweep responses — evidence is a JSON
+// Accepts either a SmithFinding (from sweep responses; evidence is a JSON
 // object, no sweep_kind/created_at) or a SmithStoredFinding (from the
-// findings list / investigation detail — evidence is raw JSON text, has
+// findings list / investigation detail; evidence is raw JSON text, has
 // sweep_kind + created_at). The `stored` flag gates the extra metadata.
 
 type FindingLike = SmithFinding | SmithStoredFinding;
@@ -226,12 +224,13 @@ function FindingCard({ f, stored }: { f: FindingLike; stored?: boolean }) {
   const createdAt = stored && hasSweepKind(f) ? f.created_at : undefined;
   const repeatCount = stored && hasSweepKind(f) ? f.repeat_count : 0;
   // Sprint S3-Web (§2.3, R5): the "Ask smith" affordance lands on warn/crit
-  // rows only — ok/info rows aren't problems to ask about.
+  // rows only; ok/info rows aren't problems to ask about.
   const askable = f.severity === "warn" || f.severity === "crit";
   return (
     <div className="card" style={{ padding: "10px 14px", marginBottom: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         {sevChip(f.severity)}
+        {confChip(f.confidence, f.confidence_note)}
         {repeatCount > 1 && <span className="chip" style={{ fontSize: 10 }}>×{repeatCount}</span>}
         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{f.check_id}</span>
         {sweepKind && <span className="chip">{sweepKind}</span>}
@@ -263,7 +262,7 @@ function FindingCard({ f, stored }: { f: FindingLike; stored?: boolean }) {
 // ── Manual purge controls ───────────────────────────────────────────────────
 // Operator-only: delete standalone findings by age (or all). Investigation-
 // attached findings are never purged (server-side guard). Each action
-// confirms before mutating — there is no undo.
+// confirms before mutating; there is no undo.
 
 function FindingsPurgeButtons() {
   const { canOperate } = useSession();
@@ -294,9 +293,9 @@ function FindingsPurgeButtons() {
   );
 }
 
-// ── Sweep result banner ─────────────────────────────────────────────────────
+// ── Sweep result banner (also used by AskSmith.tsx's SweepControls) ────────
 
-function SweepResult({ count, worst }: { count: number; worst: string }) {
+export function SweepResult({ count, worst }: { count: number; worst: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
       <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{count} findings</span>
@@ -306,182 +305,9 @@ function SweepResult({ count, worst }: { count: number; worst: string }) {
   );
 }
 
-// ── Pending actions (standalone, i.e. not scoped to any investigation) ──────
-// Renders nothing when there's nothing pending — the common case shouldn't
-// add a permanent empty card above the fold. useSmithActions(status) with
-// no investigationId argument (unlike the investigation-detail usage below)
-// returns every pending action regardless of which investigation, if any,
-// it belongs to.
-//
-// Split into two groups, not one undifferentiated list: `runbook` never
-// executes (ApproveAction short-circuits it server-side) and is always
-// purely a suggestion, while every other kind is a real operation waiting
-// on a real approve/reject decision. Presenting both under one "pending
-// action" umbrella made an FYI (a stale-binary rebuild suggestion) read as
-// "something needs fixing" — real operator feedback, 2026-08-12.
-
-function PendingActionsCard() {
-  const actions = useSmithActions("pending");
-  if (actions.isLoading || actions.isError) return null;
-  const list = actions.data?.actions ?? [];
-  if (list.length === 0) return null;
-  const needsApproval = list.filter((a) => a.kind !== "runbook");
-  const suggestions = list.filter((a) => a.kind === "runbook");
-  return (
-    <>
-      {needsApproval.length > 0 && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <h3>Needs your approval ({needsApproval.length})</h3>
-          {needsApproval.map((a) => (
-            <ActionCard key={a.id} action={a} />
-          ))}
-        </div>
-      )}
-      {suggestions.length > 0 && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <h3>Suggestions ({suggestions.length})</h3>
-          <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
-            Informational only — nothing here means anything is broken.
-          </div>
-          {suggestions.map((a) => (
-            <ActionCard key={a.id} action={a} />
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
-
-// ── Sweep controls (quick/deep/custom) ──────────────────────────────────────
-
-function SweepControls() {
-  const checks = useSmithChecks();
-  const checksRun = useSmithChecksRun();
-  const [showPicker, setShowPicker] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [result, setResult] = useState<{ count: number; worst: string } | null>(null);
-
-  function run(scope: string) {
-    setResult(null);
-    checksRun.mutate(
-      { scope },
-      {
-        onSuccess: (r) => setResult({ count: r.count, worst: r.worst }),
-        onError: () => setResult(null),
-      },
-    );
-  }
-
-  function runCustom() {
-    setShowPicker(false);
-    setResult(null);
-    const ids = Array.from(selected);
-    if (ids.length === 0) return;
-    checksRun.mutate(
-      { checkIds: ids },
-      {
-        onSuccess: (r) => setResult({ count: r.count, worst: r.worst }),
-        onError: () => setResult(null),
-      },
-    );
-  }
-
-  const grouped = useMemo(() => {
-    const m = new Map<string, SmithCheckMeta[]>();
-    for (const c of checks.data?.checks ?? []) {
-      if (!m.has(c.category)) m.set(c.category, []);
-      m.get(c.category)!.push(c);
-    }
-    return m;
-  }, [checks.data]);
-
-  return (
-    <div className="card" style={{ marginBottom: 12 }}>
-      <h3>Sweep controls</h3>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <button
-          className={`tab ${checksRun.isPending && !showPicker ? "active" : ""}`}
-          onClick={() => run("quick")}
-          disabled={checksRun.isPending}
-        >
-          Quick sweep
-        </button>
-        <button
-          className="tab"
-          onClick={() => run("deep")}
-          disabled={checksRun.isPending}
-        >
-          Deep sweep
-        </button>
-        <button
-          className={`tab ${showPicker ? "active" : ""}`}
-          onClick={() => setShowPicker(!showPicker)}
-          disabled={checksRun.isPending}
-        >
-          Custom…
-        </button>
-      </div>
-
-      {checksRun.isError && (
-        <div className="error-note" style={{ marginTop: 6 }}>
-          {apiErrorMessage(checksRun.error)}
-        </div>
-      )}
-
-      {result && <SweepResult count={result.count} worst={result.worst} />}
-
-      {showPicker && (
-        <div style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
-          {checks.isLoading ? (
-            <div className="empty-note">Loading check catalog…</div>
-          ) : (
-            <>
-              {Array.from(grouped.entries()).map(([cat, items]) => (
-                <div key={cat} style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 11, color: "var(--text-mute)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
-                    {cat}
-                  </div>
-                  {items.map((c) => (
-                    <label
-                      key={c.id}
-                      style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 12, fontSize: 12, color: "var(--text-dim)", cursor: "pointer" }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selected.has(c.id)}
-                        onChange={() => {
-                          const next = new Set(selected);
-                          if (next.has(c.id)) next.delete(c.id);
-                          else next.add(c.id);
-                          setSelected(next);
-                        }}
-                        style={{ cursor: "pointer" }}
-                      />
-                      {c.name}
-                      {c.fast && <span className="chip" style={{ fontSize: 9, padding: "0 4px" }}>fast</span>}
-                    </label>
-                  ))}
-                </div>
-              ))}
-              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                <button
-                  className="tab active"
-                  onClick={runCustom}
-                  disabled={checksRun.isPending || selected.size === 0}
-                >
-                  Run {selected.size} check{selected.size === 1 ? "" : "s"}
-                </button>
-                <button className="tab" onClick={() => { setSelected(new Set()); setShowPicker(false); }}>
-                  Cancel
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+// Sweep controls (Quick sweep / Deep sweep / Custom picker) moved to
+// AskSmith.tsx, 2026-08-27, merged into the chat card alongside the
+// quick-question suggestion chips instead of its own Diagnostics card.
 
 // ── Investigations: list + detail + manual open ────────────────────────────
 
@@ -613,7 +439,7 @@ function InvestigationDetail({
         )}
       </div>
 
-      {/* Actions — Wave 3 / P2 (track W3-C): proposals raised against this
+      {/* Actions (Wave 3 / P2, track W3-C): proposals raised against this
           investigation (auto-proposed from its findings, or manually
           created), with approve/reject/handoff. Additive alongside the
           findings trail above, not a replacement for it. */}
@@ -622,7 +448,7 @@ function InvestigationDetail({
         <ActionsTray investigationId={inv.id} />
       </div>
 
-      {/* Tier 2 commentary (P3) — reuses the investigation's linked
+      {/* Tier 2 commentary (P3): reuses the investigation's linked
           conversation (created on first use, smith_investigations.
            conversation_id) and jumps to Ask the smith with it open, mirroring
            the existing #help/smith/inv/{id} deep-link convention. */}
@@ -673,9 +499,9 @@ function InvestigationDetail({
   );
 }
 
-// ── Procedure runs (autonomous-remediation Sprint 4 — the supervision &
+// ── Procedure runs (autonomous-remediation Sprint 4, the supervision &
 // evaluation harness, docs/v5-smith.md §13) ──────────────────────────────
-// A browsable history of every "let smith fix it" procedure run — the run
+// A browsable history of every "let smith fix it" procedure run: the run
 // timeline (steps, checkpoints, verify results) plus a per-run scorecard
 // (unattended completion, checkpoints reached, post-verify, downtime
 // estimate vs. actual). This is the evidence the Sprint 6 build-refresh
@@ -685,6 +511,7 @@ function procRunStatusColor(status: string): string {
   switch (status) {
     case "completed": return "var(--ok)";
     case "failed": return "var(--crit)";
+    case "precondition_failed": return "var(--reserved)";
     case "aborted": return "var(--text-mute)";
     case "awaiting_checkpoint": return "var(--warn)";
     default: return "var(--cool)"; // running
@@ -721,7 +548,7 @@ function ProcedureStepRow({ step }: { step: SmithProcedureStepOutcome }) {
   );
 }
 
-// ScorecardStrip fetches lazily (enabled only while its run is expanded) —
+// ScorecardStrip fetches lazily (enabled only while its run is expanded),
 // same posture as KBRefChip above, since most runs in the history list will
 // never be opened.
 function ScorecardStrip({ actionId }: { actionId: number }) {
@@ -729,6 +556,16 @@ function ScorecardStrip({ actionId }: { actionId: number }) {
   if (sc.isLoading) return <div className="empty-note">Loading scorecard…</div>;
   if (sc.isError || !sc.data) return null;
   const d = sc.data;
+  if (d.precondition_failed) {
+    // Not "0 checkpoints needed a human" / "post-verify not confirmed clean":
+    // both would misleadingly imply an attempt happened. This run never
+    // executed a single step, so neither framing applies.
+    return (
+      <div style={{ fontSize: 11, color: "var(--reserved)", padding: "8px 0 0", marginTop: 6, borderTop: "1px solid var(--border)" }}>
+        precondition not met: not applicable to this host, nothing was attempted
+      </div>
+    );
+  }
   return (
     <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, color: "var(--text-dim)", padding: "8px 0 0", marginTop: 6, borderTop: "1px solid var(--border)" }}>
       <span style={{ color: d.unattended_completion ? "var(--ok)" : "var(--text-dim)" }}>
@@ -829,9 +666,9 @@ function ProcedureRunsSection() {
   );
 }
 
-// ── Externally blocked work (P4 — docs/v5-smith.md §4.7) ────────────────────
+// ── Externally blocked work (P4, docs/v5-smith.md §4.7) ────────────────────
 // docs/investigations.md, parsed. A section on Diagnostics, not its own tab
-// (operator call) — the tracker is read maybe once a session, not a live
+// (operator call): the tracker is read maybe once a session, not a live
 // diagnostic surface like findings/investigations above it.
 
 function BlockedItemRow({ item }: { item: SmithBlockedItem }) {
@@ -928,93 +765,6 @@ function BlockedWorkSection() {
   );
 }
 
-// ── Notifications (collector alerts folded into Diagnostics, 2026-08-13) ──
-// Real-time system alerts (hang, OOM, crash, GTT-high, unit restart) pushed
-// from the collector via the notifications store + SSE. Rendered above the
-// smith Status strip because these are more urgent than periodic sweep
-// findings. Was a standalone NotificationsPanel.tsx (never rendered); folded
-// here per the operator's call.
-
-function NotificationsSection() {
-  const { canOperate } = useSession();
-  const notifications = useNotifications();
-  const ack = useAcknowledgeNotification();
-  const dismiss = useDismissNotification();
-  const ackAll = useAcknowledgeAllNotifications();
-
-  const list: NotificationItem[] = notifications.data?.notifications ?? [];
-  const unacked = list.filter((n) => !n.acknowledged_at);
-
-  return (
-    <div className="card" style={{ marginBottom: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <h3 style={{ margin: 0 }}>Notifications</h3>
-        {unacked.length > 0 && (
-          <span className="chip" style={{ color: "var(--crit)" }}>{unacked.length} new</span>
-        )}
-        {canOperate && unacked.length > 0 && (
-          <button
-            className="btn"
-            style={{ marginLeft: "auto", fontSize: 11, padding: "3px 10px" }}
-            disabled={ackAll.isPending}
-            onClick={() => ackAll.mutate()}
-          >
-            Acknowledge all
-          </button>
-        )}
-      </div>
-      {!notifications.data ? (
-        <div className="empty-note">Loading notifications…</div>
-      ) : list.length === 0 ? (
-        <div className="empty-note">No active notifications.</div>
-      ) : (
-        list.map((n) => (
-          <div
-            key={n.id}
-            className="qrow"
-            style={{ alignItems: "flex-start", borderLeft: `3px solid ${SEV_COLOR[n.severity]}`, paddingLeft: 10, marginBottom: 6 }}
-          >
-            <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
-                <span style={{ color: SEV_COLOR[n.severity], fontWeight: 600 }}>
-                  {CODE_LABEL[n.code] ?? n.code}
-                </span>
-                {n.subject && (
-                  <span style={{ fontFamily: "var(--mono)", color: "var(--text-mute)", fontSize: 11 }}>{n.subject}</span>
-                )}
-                {n.occurrences > 1 && <span className="chip" style={{ fontSize: 10 }}>×{n.occurrences}</span>}
-                {!n.acknowledged_at && <span className="chip" style={{ color: "var(--crit)", fontSize: 10 }}>new</span>}
-              </div>
-              <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 2 }}>{n.message}</div>
-              <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginTop: 2 }}>{formatRelativeTime(n.last_seen)}</div>
-            </div>
-            {canOperate && (
-              <div style={{ display: "flex", gap: 6, flex: "0 0 auto" }}>
-                {!n.acknowledged_at && (
-                  <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} disabled={ack.isPending} onClick={() => ack.mutate(n.id)}>
-                    Ack
-                  </button>
-                )}
-                <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} disabled={dismiss.isPending} onClick={() => dismiss.mutate(n.id)}>
-                  Dismiss
-                </button>
-              </div>
-            )}
-            {/* Sprint S3-Web (§2.3, R5): "Ask smith" affordance on notification
-                rows. Not operator-gated — asking is read-only. */}
-            <div style={{ flex: "0 0 auto" }}>
-              <AskSmithButton
-                context={[{ code: n.code, message: n.message, source: n.subject ?? "notification", at: n.last_seen }]}
-                title={`Ask smith about ${n.code}`}
-              />
-            </div>
-          </div>
-        ))
-      )}
-    </div>
-  );
-}
-
 // ── Main Diagnostics component ──────────────────────────────────────────────
 
 export function Diagnostics({
@@ -1032,7 +782,10 @@ export function Diagnostics({
   }, [sub]);
 
   const [selectedInvId, setSelectedInvId] = useState<number | null>(deepLinkedId);
-  const [severityFilter, setSeverityFilter] = useState<string>("");
+  // S7-followup smith UX sprint: default to crit-only; warn/info are almost
+  // never what the operator is looking for at a glance; the "all" tab is
+  // still one click away.
+  const [severityFilter, setSeverityFilter] = useState<string>("crit");
   const [manualSummary, setManualSummary] = useState("");
   const [showManual, setShowManual] = useState(false);
 
@@ -1052,10 +805,10 @@ export function Diagnostics({
   }
 
   // ── Data hooks ──
-  const status = useSmithStatus();
   const findings = useSmithFindings(severityFilter || undefined);
   const investigations = useSmithInvestigations();
   const createInvestigation = useSmithInvestigationCreate();
+  const status = useSmithStatus();
 
   // ── Grouped findings (by severity, then all) ──
   const groupedFindings = useMemo(() => {
@@ -1071,37 +824,12 @@ export function Diagnostics({
 
   return (
     <>
-      {/* ── Notifications (collector alerts — real-time, above smith sweep) ── */}
-      <NotificationsSection />
-
-      {/* ── Status strip ── */}
-      <div className="card" style={{ marginBottom: 12 }}>
-        {status.isLoading ? (
-          <div className="empty-note">Loading smith status…</div>
-        ) : status.isError ? (
-          <div className="error-note">Unable to reach smith: {apiErrorMessage(status.error)}</div>
-        ) : status.data ? (
-          <SelfContextChip status={status.data} />
-        ) : null}
-      </div>
-
-      {/* ── Pending actions ── Real gap found live 2026-08-12: Console's
-           compact ActionsTray chip links here (#help/smith), but
-          until this card existed, the only full-card ActionsTray render
-          anywhere in the app was scoped to one investigation's detail
-          view (below) — a standalone sweep proposal with no
-          investigation_id (every P6 auto-proposal: delete_files,
-          binary-rebuild runbooks, etc.) had no page that could ever show
-          it. status="pending" with no investigationId shows every pending
-          action regardless of investigation. */}
-      <PendingActionsCard />
-
-      {/* ── Sweep controls ── */}
-      <SweepControls />
-
       {/* ── Findings ── */}
       <div className="card" style={{ marginBottom: 12 }}>
         <h3>Findings</h3>
+        {status.data?.missed_patterns && status.data.missed_patterns.length > 0 && (
+          <MissedPatterns patterns={status.data.missed_patterns} />
+        )}
         {/* Severity filter */}
         <div style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
           <button

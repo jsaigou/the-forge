@@ -19,10 +19,10 @@ import (
 // across every message actually run through the engine (0 for either if
 // nothing in the request was tokenizable/compressible), for the caller to
 // fold into the tokens_saved metric.
-func compressMessages(engine *compress.Engine, body map[string]any, budget time.Duration) (originalTokens, compressedTokens int64) {
+func compressMessages(engine *compress.Engine, body map[string]any, budget time.Duration) (originalTokens, compressedTokens int64, failOpenTimeout, failOpenError int64) {
 	messagesRaw, ok := body["messages"].([]any)
 	if !ok {
-		return 0, 0
+		return 0, 0, 0, 0
 	}
 	for _, mRaw := range messagesRaw {
 		msg, ok := mRaw.(map[string]any)
@@ -33,12 +33,18 @@ func compressMessages(engine *compress.Engine, body map[string]any, budget time.
 		if !ok {
 			continue
 		}
-		res := compressOne(engine, content, budget)
+		res, reason := compressOne(engine, content, budget)
 		msg["content"] = res.Compressed
 		originalTokens += int64(res.OriginalTokens)
 		compressedTokens += int64(res.CompressedTokens)
+		switch reason {
+		case "timeout":
+			failOpenTimeout++
+		case "error":
+			failOpenError++
+		}
 	}
-	return originalTokens, compressedTokens
+	return originalTokens, compressedTokens, failOpenTimeout, failOpenError
 }
 
 // compressOne runs engine.Compress with a wall-clock fail-open budget and
@@ -49,7 +55,7 @@ func compressMessages(engine *compress.Engine, body map[string]any, budget time.
 // abandoned/slow call left running past the budget can't corrupt any
 // shared state, and its eventual result (if any) is simply discarded when
 // it lands on resultCh after nothing is left listening.
-func compressOne(engine *compress.Engine, content string, budget time.Duration) compress.Result {
+func compressOne(engine *compress.Engine, content string, budget time.Duration) (compress.Result, string) {
 	type outcome struct {
 		res compress.Result
 		err error
@@ -68,11 +74,11 @@ func compressOne(engine *compress.Engine, content string, budget time.Duration) 
 	select {
 	case out := <-ch:
 		if out.err != nil {
-			return failOpenResult(content)
+			return failOpenResult(content), "error"
 		}
-		return out.res
+		return out.res, ""
 	case <-time.After(budget):
-		return failOpenResult(content)
+		return failOpenResult(content), "timeout"
 	}
 }
 

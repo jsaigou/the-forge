@@ -71,6 +71,10 @@ export interface Status {
   // low-latency slot:activity SSE event (lib/sse.ts) is the push between
   // polls, merged into this same field rather than replacing it.
   slot_activity: Record<string, boolean>;
+  // Sprint S-B: per-slot consumer attribution for active generations —
+  // "ExampleHost (OpenCode)" style labels; "SMITH" when smith's brain holds the
+  // slot. Empty/absent when idle or unattributed.
+  slot_consumers?: Record<string, string>;
   // Additive, omitted entirely when no PROFILE run is in progress — lets
   // Bay.tsx show which slots a run is holding correctly on a fresh page
   // load / SSE reconnect, not just while profile:progress events are live.
@@ -592,6 +596,7 @@ export interface RouterConfig {
   max_retries_per_backend: number;
   ensure_loaded_timeout_s: number;
   embedding_url: string;
+  tts_url: string;
 }
 
 export type RouterConfigUpdate = Partial<RouterConfig>;
@@ -659,6 +664,54 @@ export type MetricsSettingsUpdate = Partial<MetricsSettings>;
 // frontend component renders them).
 export interface UISettings {}
 
+// VoiceSettings mirrors GET/PUT /api/v1/voice/settings (Tier 1 Sprint 2,
+// Voice & Speech settings, 2026-08-27) — the bare tts.engines shape, no
+// wrapper object (same unwrapped convention as MonitorSettings above).
+// Keyed to match go/internal/ttsctl.Engines exactly: customvoice/voicedesign/
+// base mirror tts.VoiceMode's three constants; kokoro gets its own field
+// since it isn't a VoiceMode at all (dual_engine routes to it by voice-id
+// namespace, never through the Qwen engine).
+export type VoiceEngineMode = "resident" | "available" | "disabled";
+
+export interface VoiceEngineConfig {
+  enabled: boolean;
+  mode: VoiceEngineMode;
+  /** Systemd unit to start/stop for resident mode. "" = daemon-unmanaged. */
+  unit: string;
+  /** Resident backend URL. "" = not configured (falls back to CLI/omitted). */
+  url: string;
+}
+
+export interface VoiceSettings {
+  kokoro: VoiceEngineConfig;
+  customvoice: VoiceEngineConfig;
+  voicedesign: VoiceEngineConfig;
+  base: VoiceEngineConfig;
+}
+
+export type VoiceSettingsUpdate = VoiceSettings; // always a full replace, never a partial patch
+
+// VoiceListResponse mirrors GET /api/v1/voice/list (Sprint 1 UI papercuts,
+// 2026-08-27) — forge-tts's live voice registry, passed through with an
+// added `engine` field (one of the VoiceSettings keys) per entry so the
+// Settings UI can group by engine without re-deriving forge-tts's own Type
+// taxonomy ("design"/"clone" vs. the engine keys "voicedesign"/"base").
+export interface VoiceListEntry {
+  id: string;
+  name: string;
+  type: string;
+  engine: keyof VoiceSettings | string;
+  language: string;
+  tier?: string;
+  builtin: boolean;
+  has_sample: boolean;
+  sample_text?: string;
+}
+
+export interface VoiceListResponse {
+  voices: VoiceListEntry[];
+}
+
 export type UISettingsUpdate = Partial<UISettings>;
 
 // DashboardLayout mirrors dashboardLayoutResponse (GET/PUT /api/v1/dashboard/layout).
@@ -701,6 +754,14 @@ export interface SystemSettings {
   ports: Record<string, number>;
   hostname: string;
   rp_id: string;
+  // Secure attribute on the session + WebAuthn challenge cookies (issue
+  // #27, sprint 4). Defaults true; false is the tailscale-serve-only
+  // opt-out (this process speaks plain HTTP behind a TLS-terminating
+  // proxy on the same host). Unlike every other field in this group, this
+  // one is genuinely live off ReloadConfig — no restart needed — though
+  // the save still raises the shared restart-required banner for the
+  // group as a whole.
+  cookie_secure: boolean;
 }
 
 // SystemSettingsUpdate mirrors systemSettingsBody exactly — NOT a bare
@@ -725,6 +786,7 @@ export interface SystemSettingsUpdate {
   // infra_handlers.go's systemSettingsBody doc comment.
   ports?: Record<string, number>;
   hostname?: string;
+  cookie_secure?: boolean;
 }
 
 // PreflightCheck/PreflightResult mirror preflight.go's preflightCheck +
@@ -1104,6 +1166,8 @@ export interface APIKey {
   kind: APIKeyKind;
   name: string;
   role?: Role;
+  /** Operator's preferred consumer label ("" = derive at request time). */
+  display_name?: string;
   created_at: number;
   last_used_at: number | null;
   revoked_at: number | null;
@@ -1117,6 +1181,8 @@ export interface APIKeyCreateRequest {
   kind: APIKeyKind;
   name: string;
   role?: Role;
+  /** Preferred consumer label shown on slot attribution when set. */
+  display_name?: string;
 }
 
 export interface APIKeyCreateResponse {
@@ -1813,6 +1879,10 @@ export interface SmithFinding {
   evidence: Record<string, unknown>;
   proposal_ids: string[];
   kb_refs: string[];
+  // confidence/confidence_note (Tier 1 Sprint 4): derived from evidence
+  // completeness, never guessed by a model. "high" when unset.
+  confidence: "high" | "medium" | "low";
+  confidence_note?: string;
 }
 
 // StoredFinding is a persisted finding row (GET /findings, investigation
@@ -1828,6 +1898,8 @@ export interface SmithStoredFinding {
   created_at: string;
   kb_refs: string[];
   repeat_count: number;
+  confidence: "high" | "medium" | "low";
+  confidence_note?: string;
 }
 
 export interface SmithInvestigation {
@@ -1981,6 +2053,143 @@ export interface SmithSourcingEvaluation {
   cached: boolean;
 }
 
+// HF model acquisition (go/internal/hfdownload + internal/hf) — search,
+// recursive tree/rank, pre-flight, and the download job queue.
+
+export interface HFSearchResult {
+  id: string;
+  author: string;
+  downloads: number;
+  likes: number;
+  tags: string[];
+  gated: boolean;
+  pipeline_tag: string;
+  last_modified: string;
+  // no_gguf marks the synthetic "true publisher, no compatible GGUF"
+  // entry the search endpoint injects when nobody has quantized this
+  // family yet — not a real downloadable result.
+  no_gguf?: boolean;
+}
+
+export interface HFSearchResponse {
+  results: HFSearchResult[];
+}
+
+// Reuses the same shape as SmithQuantCandidate — both are
+// hf.RankCandidates' output, one from the FR4 sourcing endpoint, one from
+// the acquisition track's own /hf/tree.
+export type HFQuantCandidate = SmithQuantCandidate;
+
+export interface HFTreeResponse {
+  repo: string;
+  candidates: HFQuantCandidate[];
+  recommended: HFQuantCandidate | null;
+}
+
+export interface HFPreflightFile {
+  filename: string;
+  size_bytes: number;
+}
+
+export interface HFPreflightCheck {
+  id: string;
+  severity: "ok" | "warn" | "block";
+  summary: string;
+}
+
+export interface HFPreflightReport {
+  repo: string;
+  files: HFPreflightFile[];
+  total_bytes: number;
+  dest_dir: string;
+  blocked: boolean;
+  checks: HFPreflightCheck[];
+  requires_backend?: string;
+}
+
+export type HFDownloadState =
+  | "pending_approval"
+  | "queued"
+  | "running"
+  | "paused"
+  | "verifying"
+  | "registering"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+export interface HFDownloadFile {
+  filename: string;
+  dest_rel_path: string;
+  bytes_done: number;
+  bytes_total: number;
+  state: string;
+}
+
+export interface HFDownload {
+  id: number;
+  repo: string;
+  revision: string;
+  dest_dir: string;
+  config_name?: string;
+  state: HFDownloadState;
+  bytes_done: number;
+  bytes_total: number;
+  error?: string;
+  attempts: number;
+  proposed_by?: string;
+  created_config_id?: number;
+  created_at: number;
+  updated_at: number;
+  files?: HFDownloadFile[];
+}
+
+export interface HFDownloadStartBody {
+  repo: string;
+  revision?: string;
+  files: HFPreflightFile[];
+  dest_dir?: string;
+  config_name?: string;
+}
+
+export interface HFTokenResponse {
+  token: string; // masked
+  configured: boolean;
+}
+
+// SSE payloads (download:progress|state_changed|done|failed — Contract 1
+// amendment, go/internal/hfdownload/events.go).
+export interface HFDownloadProgressEvent {
+  job_id: number;
+  state: string;
+  bytes_done: number;
+  bytes_total: number;
+  bytes_per_sec: number;
+  eta_s: number;
+  current_file: string;
+}
+
+export interface HFDownloadStateChangedEvent {
+  job_id: number;
+  state: HFDownloadState;
+  error?: string;
+}
+
+export interface HFDownloadDoneEvent {
+  job_id: number;
+  config_id: number;
+  model_id: number;
+}
+
+export interface HFDownloadFailedEvent {
+  job_id: number;
+  error: string;
+}
+
+export interface HFDownloadDeletedEvent {
+  job_id: number;
+}
+
 export type SmithActionStatus =
   | "pending"
   | "approved"
@@ -2047,7 +2256,10 @@ export interface SmithProcedureStepOutcome {
   at: number;
 }
 
-export type SmithProcedureRunStatus = "running" | "awaiting_checkpoint" | "completed" | "failed" | "aborted";
+// "precondition_failed" (added 2026-08-27) is distinct from "failed": the
+// run never executed a single step because its preconditions weren't met —
+// "not applicable to this host," not a genuine attempt-and-failure.
+export type SmithProcedureRunStatus = "running" | "awaiting_checkpoint" | "completed" | "failed" | "precondition_failed" | "aborted";
 
 export interface SmithProcedureRun {
   id: number;
@@ -2099,6 +2311,7 @@ export interface SmithProcedureScorecard {
   run_status: SmithProcedureRunStatus;
   action_status: string;
   completed: boolean;
+  precondition_failed: boolean;
   unattended_completion: boolean;
   checkpoints_declared: number;
   checkpoints_reached: number;
@@ -2249,12 +2462,18 @@ export interface SmithWebSettings {
 export interface SmithSettings {
   model: string;
   handoff_offerings: number[];
+  brain_chain: string[];
+  build_refresh_watchlist: string[];
+  comfyui_keep_files: string[];
   schedule: SmithSchedule;
   thresholds: {
     gtt_warn_pct: number;
     gtt_crit_pct: number;
     disk_warn_pct: number;
     disk_crit_pct: number;
+    device_lost_window_minutes: number;
+    build_refresh_behind_n: number;
+    compressor_failopen_warn_pct: number;
   };
   web: SmithWebSettings;
   tools: SmithToolsSettings;
@@ -2365,6 +2584,17 @@ export interface SmithTokenEvent {
   conversation_id: number;
   message_id: number;
   delta: string;
+}
+
+// smith:status (S4 phase 2, docs/v5-ops-sprints-2026-08-21.md) — a short
+// human sentence about a turn's progress (e.g. "loading brain model — first
+// load typically takes 20-90s"), published by Smith.publishStatus
+// (reasoning.go). status is free-text prose, not a machine-readable ETA
+// field — there is no numeric duration to drive a progress bar with.
+export interface SmithStatusEvent {
+  conversation_id: number;
+  message_id: number;
+  status: string;
 }
 
 export interface SmithMessageDoneEvent {

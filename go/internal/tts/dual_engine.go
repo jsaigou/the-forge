@@ -6,11 +6,17 @@ import (
 	"sort"
 )
 
-// dualEngine is the Orchestrator described in docs/adr-003-dual-model-tts.md.
-// It implements the Engine interface and routes synthesis by voice namespace:
+// dualEngine is the Orchestrator described in docs/tts-inference-core-research.md
+// (no dedicated ADR exists for this — the dual-model design predates the
+// docs/adr/ numbering, which runs 0001-0012 with none about TTS). It
+// implements the Engine interface and routes synthesis by voice namespace:
 //
 //   - Kokoro IDs (e.g. af_heart)   -> kokoroBackend (fast tier, CPU-resident)
 //   - Registry clones/designs       -> QwenTTS (premium tier, cold CLI / server)
+//
+// kokoro may be nil (Sprint 2, Voice & Speech settings: the operator can
+// disable the Kokoro engine entirely) — every method here is nil-safe, only
+// ever treating a nil kokoro as "not available," never dereferencing it.
 //
 // ListVoices merges both sources and tags each with a tier.
 type dualEngine struct {
@@ -36,6 +42,9 @@ func NewDualEngine(qwen *QwenTTS, kokoro *kokoroBackend, defaultVoice, defaultFa
 }
 
 func (d *dualEngine) routeKokoro(req SpeechRequest) bool {
+	if d.kokoro == nil {
+		return false
+	}
 	if req.Model == "kokoro" {
 		return true
 	}
@@ -145,8 +154,9 @@ func (d *dualEngine) Health(ctx context.Context) (map[string]any, error) {
 }
 
 func (d *dualEngine) Models() []ModelInfo {
-	models := []ModelInfo{
-		{ID: "kokoro-82m", Object: "model", OwnedBy: "forge"},
+	var models []ModelInfo
+	if d.kokoro != nil {
+		models = append(models, ModelInfo{ID: "kokoro-82m", Object: "model", OwnedBy: "forge"})
 	}
 	return append(models, d.qwen.Models()...)
 }

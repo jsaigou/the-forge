@@ -2,6 +2,7 @@ import { useState } from "react";
 import { apiErrorMessage } from "../../lib/api";
 import {
   useSmithActionApprove,
+  useSmithActionCheckNow,
   useSmithActionRecheck,
   useSmithActionReject,
   useSmithProcedureCheckpointAbort,
@@ -35,6 +36,18 @@ import { RunbookCard } from "./RunbookCard";
 // map onto cool/ok/crit, the same 3-of-4 slice Diagnostics' sevChip already
 // uses for info/ok/crit (this repo has a standing lesson against forcing a
 // new semantic color into an existing palette without a real gap).
+
+// WHY_CANT_RUN_LABELS maps smith.WhyCantRun's typed codes (Tier 1 Sprint 4)
+// to a consistent, human-readable reason — replacing whatever free-text a
+// proposer happened to write. An unrecognized or absent code falls back to
+// the pre-existing generic prose in the whyCantRun computation below, so an
+// older un-migrated proposal (or a future code this map hasn't caught up to
+// yet) still renders something sensible.
+const WHY_CANT_RUN_LABELS: Record<string, string> = {
+  requires_reboot: "requires rebooting the host — smith won't trigger that on its own",
+  policy_defers_to_human: "a deliberate guardrail — smith reports this, but leaves the judgment call to you",
+  risks_live_workload: "could disrupt something a live slot or service is actively using",
+};
 
 const RISK_COLOR: Record<SmithActionRisk, string> = {
   info: "var(--cool)",
@@ -220,9 +233,13 @@ export function ActionCard({ action }: { action: SmithAction }) {
   const approve = useSmithActionApprove(action.id);
   const reject = useSmithActionReject(action.id);
   const recheck = useSmithActionRecheck(action.id);
+  const checkNow = useSmithActionCheckNow(action.id);
   const gate = useStepUpGate();
   const [error, setError] = useState<string | null>(null);
   const [showDowntimeModal, setShowDowntimeModal] = useState(false);
+  // Distinct from `error` — a still-failing check-now is a successful check
+  // that just found the condition not yet resolved, not a request failure.
+  const [checkNowNote, setCheckNowNote] = useState<string | null>(null);
 
   function handleApprove() {
     setError(null);
@@ -242,6 +259,19 @@ export function ActionCard({ action }: { action: SmithAction }) {
   function handleRecheck() {
     setError(null);
     recheck.mutate(undefined, { onError: (e) => setError(apiErrorMessage(e)) });
+  }
+
+  function handleCheckNow() {
+    setError(null);
+    setCheckNowNote(null);
+    checkNow.mutate(undefined, {
+      onSuccess: (res) => {
+        if (res.still_failing && res.still_failing.length > 0) {
+          setCheckNowNote(`still failing: ${res.still_failing.join(", ")}`);
+        }
+      },
+      onError: (e) => setError(apiErrorMessage(e)),
+    });
   }
 
   // A self-evicting pending action never gets a naive Approve button — it
@@ -284,6 +314,31 @@ export function ActionCard({ action }: { action: SmithAction }) {
       ? `re-check ${recheckCheckId}`
       : "no check to re-verify";
 
+  // S7-followup smith UX sprint: the removed self-attestation "done — I ran
+  // it myself" button's replacement — a PENDING runbook's on-demand "check
+  // now" (smith re-verifies the underlying condition itself; a clean result
+  // closes the proposal without ever needing the operator to assert done).
+  // Same detection shape as canRecheck/recheckLabel above, just for pending
+  // instead of done_unverified.
+  const pendingRunbook = isSuggestion && action.status === "pending";
+  const canCheckNow = pendingRunbook && (action.investigation_id != null || recheckCheckId != null);
+  // A self-review-proposed closure ("smith already re-checked this looks
+  // resolved, confirm closing?") is a distinct case from an ordinary runbook
+  // suggestion — CheckPendingRunbook narrows to the exact checks smith
+  // already showed the operator (resolveRunbookRecheckTargets), so "check
+  // now" here really means "confirm resolved", and — since these are never
+  // procedurizable — it's the only meaningful action on the card, so it
+  // gets the primary/orange treatment (the render below also falls back to
+  // primary whenever there's no Approve button at all to be primary instead).
+  const isSelfReviewClose = action.detail?.self_review_close === true;
+  const checkNowLabel = isSelfReviewClose
+    ? "confirm resolved"
+    : action.investigation_id != null
+      ? "check now"
+      : recheckCheckId
+        ? `check ${recheckCheckId} now`
+        : "nothing to check";
+
   return (
     <div className="card action-card" style={{ padding: "10px 14px", marginBottom: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -305,6 +360,16 @@ export function ActionCard({ action }: { action: SmithAction }) {
         </div>
       )}
 
+      {/* Every proposal should say WHY, not just what — proposers that
+          stash a "reason" string in the raw detail (restart_forge_unit's
+          always has one; settings_change's is optional) surface it here
+          instead of leaving it buried in the collapsed raw-detail JSON
+          below. Real operator feedback, 2026-08-27: a fail-open-budget
+          proposal shipped with no reason at all. */}
+      {typeof action.detail?.reason === "string" && action.detail.reason && (
+        <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-dim)" }}>{action.detail.reason}</div>
+      )}
+
       <DetailBlock detail={action.detail} />
 
       {/* Plain runbook-kind actions store their steps in detail.steps, NOT
@@ -321,7 +386,7 @@ export function ActionCard({ action }: { action: SmithAction }) {
             storageKey={String(action.id)}
             whyCantRun={
               typeof action.detail.why_cant_run === "string"
-                ? action.detail.why_cant_run
+                ? (WHY_CANT_RUN_LABELS[action.detail.why_cant_run] ?? action.detail.why_cant_run)
                 : "these steps need a human to run them"
             }
           />
@@ -346,12 +411,32 @@ export function ActionCard({ action }: { action: SmithAction }) {
       )}
 
       {showNaiveApprove && (
-        <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
-          {action.kind === "delete_files" ? (
-            // delete_files is real, irreversible file deletion — the plain
-            // one-click Approve every other kind gets isn't enough here;
-            // this reuses the same arm-then-confirm interaction Reject
-            // already uses elsewhere on this card.
+        <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+          {canProcedurize ? (
+            // Operator feedback, 2026-08-27: "Needs your approval" and
+            // "Suggestions" read as the same thing to an operator — both
+            // just mean "smith found something you can approve." Any
+            // procedurizable action (real dispatch or runbook alike) now
+            // gets one "Approve" button, with DowntimeModal itself standing
+            // in as the confirmation prompt (impact/duration/affected
+            // slots, Cancel vs. commit) instead of a separate raw
+            // one-click dispatch alongside a second "Let smith fix it"
+            // button doing almost the same thing.
+            <button className="btn primary" onClick={() => setShowDowntimeModal(true)}>
+              Approve
+            </button>
+          ) : isSuggestion ? (
+            // A non-procedurizable runbook has no execution path at all —
+            // nothing to approve. "check now" (below) is the only real
+            // affordance; otherwise it's purely FYI, dismissable only.
+            null
+          ) : action.kind === "delete_files" ? (
+            // Defensive fallback — every delete_files action is mapped to
+            // comfyui_prune (procedurize.go), so canProcedurize should
+            // always be true here in practice. Kept in case that mapping
+            // ever narrows, so an unmapped delete_files action still gets
+            // its own irreversibility confirmation rather than silently
+            // falling through to a bare one-click Approve.
             <ConfirmButton
               onConfirm={handleApprove}
               pending={approve.isPending}
@@ -362,29 +447,46 @@ export function ActionCard({ action }: { action: SmithAction }) {
             />
           ) : (
             <button className="btn primary" disabled={approve.isPending} onClick={handleApprove}>
-              {approve.isPending ? "…" : isSuggestion ? "done — I ran it myself" : "Approve"}
+              {approve.isPending ? "…" : "Approve"}
+            </button>
+          )}
+          {canCheckNow && (
+            <button
+              className={isSelfReviewClose || !canProcedurize ? "btn primary" : "btn"}
+              disabled={checkNow.isPending}
+              onClick={handleCheckNow}
+            >
+              {checkNow.isPending ? "…" : checkNowLabel}
             </button>
           )}
           <ConfirmButton
             onConfirm={handleReject}
             pending={reject.isPending}
-            label={isSuggestion ? "Dismiss" : "Reject"}
-            confirmLabel={isSuggestion ? "Dismiss?" : "Reject?"}
-            warning={isSuggestion ? undefined : "This proposal will be marked rejected."}
+            label={isSuggestion && !canProcedurize ? "Dismiss" : "Reject"}
+            confirmLabel={isSuggestion && !canProcedurize ? "Dismiss?" : "Reject?"}
+            warning={isSuggestion && !canProcedurize ? undefined : "This proposal will be marked rejected."}
           />
-          {canProcedurize && (
-            <button className="btn" onClick={() => setShowDowntimeModal(true)}>
-              Let smith fix it
-            </button>
-          )}
         </div>
+      )}
+      {checkNowNote && (
+        <div style={{ fontSize: 11, color: "var(--warn)", marginTop: 6 }}>{checkNowNote}</div>
       )}
 
       {showHandoff && <HandoffPanel action={action} />}
 
       {action.kind === "procedure" && action.status === "executing" && <ProcedureRunPanel actionId={action.id} />}
 
-      {showDowntimeModal && <DowntimeModal actionId={action.id} onClose={() => setShowDowntimeModal(false)} />}
+      {showDowntimeModal && (
+        <DowntimeModal
+          actionId={action.id}
+          onClose={() => setShowDowntimeModal(false)}
+          extraWarning={
+            action.kind === "delete_files"
+              ? "This will permanently delete every file listed above. This cannot be undone."
+              : undefined
+          }
+        />
+      )}
 
       {resultBand && action.result && (
         <div

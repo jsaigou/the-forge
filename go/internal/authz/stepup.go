@@ -13,6 +13,7 @@ package authz
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // StepUpVerifier verifies a factor for step-up authentication (§3.5). The
@@ -88,6 +89,6 @@ func (s SettingsAdapter) Set(ctx context.Context, key string, value []byte) erro
 // KeyManager is the API-key management surface (§6). The *Authorizer
 // implements this; the HTTP routes for list/mint/revoke use it.
 type KeyManager interface {
-	MintKey(ctx context.Context, kind KeyKind, name string, role Role) (string, error)
+	MintKey(ctx context.Context, kind KeyKind, name, displayName string, role Role, boundIP string, expiresAt time.Time) (string, error)
 	RevokeKey(ctx context.Context, keyid string) error
 }

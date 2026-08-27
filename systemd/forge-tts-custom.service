@@ -4,9 +4,13 @@
 # to it with no per-call model reload. The Go service falls back to the CLI
 # backend automatically if this instance is down.
 #
-# To run voicedesign/base resident too, clone this unit (ports 8092/8093) and
-# point FORGE_TTS_SERVER_DESIGN / _BASE at them in
-# /opt/forge/tts_voices/.internal_token_env.
+# base already runs resident as forge-tts-base.service (port 8093, this
+# unit's own comment previously suggested cloning to 8092/8093 as if neither
+# existed yet). voicedesign has no resident unit deployed — clone this one at
+# port 8092 if that changes. Either way, don't hand-set FORGE_TTS_SERVER_* via
+# /opt/forge/tts_voices/.internal_token_env any more — the daemon now writes
+# /var/lib/forge/tts/forge-tts.env from the tts.engines setting (Settings ->
+# Voice & Speech) and restarts forge-tts.service itself when it changes.
 [Unit]
 Description=Forge — TTS resident customvoice (tts-server, port 8091)
 After=network.target

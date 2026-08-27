@@ -123,9 +123,13 @@ func (p *Provisioner) writeEnv(row store.ProxyRow) error {
 	if err := os.MkdirAll(p.EnvDir, 0o700); err != nil {
 		return fmt.Errorf("compressorctl: env dir: %w", err)
 	}
+	budgetMS := row.FailOpenBudgetMS
+	if budgetMS <= 0 {
+		budgetMS = 2000 // forge-compress default
+	}
 	content := fmt.Sprintf(
-		"OPENAI_TARGET_API_URL=%s\nCOMPRESS_ONNX_INTRA_THREADS=%d\nCOMPRESS_PROXY_TOKEN=%s\nCOMPRESS_PORT=%d\n",
-		row.TargetURL, kompressIntraThreads, row.Token, row.Port,
+		"OPENAI_TARGET_API_URL=%s\nCOMPRESS_ONNX_INTRA_THREADS=%d\nCOMPRESS_PROXY_TOKEN=%s\nCOMPRESS_PORT=%d\nFORGE_COMPRESS_FAILOPEN_BUDGET_MS=%d\n",
+		row.TargetURL, kompressIntraThreads, row.Token, row.Port, budgetMS,
 	)
 	if err := os.WriteFile(p.envPathForUnit(row.Unit), []byte(content), 0o600); err != nil {
 		return fmt.Errorf("compressorctl: write env: %w", err)

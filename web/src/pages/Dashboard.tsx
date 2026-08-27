@@ -12,7 +12,6 @@ import { MemoryMeterWidget } from "../components/widgets/MemoryMeterWidget";
 import { PerModelSpendTableWidget } from "../components/widgets/PerModelSpendTableWidget";
 import { ResourceGaugesWidget } from "../components/widgets/ResourceGaugesWidget";
 import { ResourceTrendWidget } from "../components/widgets/ResourceTrendWidget";
-import { RightNowWidget } from "../components/widgets/RightNowWidget";
 import { formatCurrency, formatCurrencyPrecise, formatPct, formatTokens } from "../lib/format";
 import { useCostSummary, useDashboardLayout, useCompressorSummary, useInfraServices, useUpdateDashboardLayout, useUsage } from "../lib/queries";
 import { useSession } from "../lib/session";
@@ -193,10 +192,10 @@ function PageNameInput({ name, onRename }: { name: string; onRename: (name: stri
 
 // ── Overview ──────────────────────────────────────────────────────────────
 // "Is it healthy, what is it costing me right now." Token activity heatmap,
-// then the Right Now strip (power, electricity, Compressor savings — all on a
-// consistent 24h window as of Phase 5). The memory meter lived here before
-// Phase 5; it's on the new Resources tab now, alongside the rest of the
-// footprint/utilization detail.
+// then the routing diagram. The memory meter lived here before Phase 5;
+// it's on the new Resources tab now, alongside the rest of the
+// footprint/utilization detail. The Right Now strip (power, electricity,
+// Compressor savings) was removed 2026-08-27 per operator request.
 
 function OverviewTab() {
   // Operator feedback 2026-08-14: the infra service chips moved here from
@@ -206,6 +205,7 @@ function OverviewTab() {
   return (
     <>
       <ServicesBar services={infraServices.data?.services} />
+      <ActivityHeatmapWidget />
       {/* Sprint 10 (docs/v5-headroom-replacement.md): the routing diagram,
           duplicated from Settings → Routing as a read-only copy whose links
           show each route's REAL compressor state × health — the detail the
@@ -214,8 +214,6 @@ function OverviewTab() {
       <div className="card">
         <RoutingTree readOnly />
       </div>
-      <ActivityHeatmapWidget />
-      <RightNowWidget />
     </>
   );
 }

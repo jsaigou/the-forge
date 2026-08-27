@@ -10,6 +10,7 @@ package smith
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -271,6 +272,47 @@ func TestMaybeAutoRunProcedure_RiskHighNeverEligible(t *testing.T) {
 	}
 	if got.Status != StatusPending {
 		t.Fatalf("status = %s, want pending — RiskHigh must never auto-run regardless of policy", got.Status)
+	}
+}
+
+// TestDispatchProcedure_AutonomyActorBypassingEligibilityIsRefused is
+// defense-in-depth (2026-08-27, idea from reviewing amd/skills' rocm-doctor
+// CLI): maybeAutoRunProcedure already refuses to call Procedurize for a
+// procedure outside autonomyEligible, so this simulates a bug that bypasses
+// that caller entirely — an action created directly with CreatedBy ==
+// autonomyActor, targeting a procedure never opted into autonomy at all
+// (disk_usage_report, not restart_down_unit). dispatchProcedure itself must
+// refuse it at the actual execution boundary, not just trust the caller.
+func TestDispatchProcedure_AutonomyActorBypassingEligibilityIsRefused(t *testing.T) {
+	if autonomyEligible["disk_usage_report"] {
+		t.Fatal("test assumption violated: disk_usage_report must not be autonomy-eligible")
+	}
+	db := openDB(t)
+	fake := &fakeRunStep{}
+	s := New(Deps{Store: db, RunStep: fake.run, Source: buildSnapshotAt(time.Now()), Logf: func(string, ...any) {}})
+
+	a, err := s.CreateAction(context.Background(), ActionDraft{
+		Kind: KindProcedure, Title: "test", Risk: RiskLow, CreatedBy: autonomyActor,
+		Detail: procedureDetailJSON(t, "disk_usage_report"),
+	})
+	if err != nil {
+		t.Fatalf("CreateAction: %v", err)
+	}
+	forceStatus(t, s.d.Store, a.ID, StatusApproved)
+	s.executeAction(context.Background(), a.ID)
+
+	if len(fake.calls) != 0 {
+		t.Fatalf("expected the procedure to never execute, but RunStep was called %d time(s)", len(fake.calls))
+	}
+	got, err := s.GetAction(context.Background(), a.ID)
+	if err != nil {
+		t.Fatalf("GetAction: %v", err)
+	}
+	if got.Status != StatusFailed {
+		t.Fatalf("status = %s, want failed", got.Status)
+	}
+	if got.Result == nil || !strings.Contains(got.Result.Error, "autonomy allowlist") {
+		t.Fatalf("result = %+v, want an autonomy-allowlist-shaped error", got.Result)
 	}
 }
 

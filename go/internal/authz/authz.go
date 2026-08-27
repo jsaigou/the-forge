@@ -57,6 +57,11 @@ type Identity struct {
 	// KeyID is set for bearer identities, "" for sessions.
 	KeyID string
 	Kind  KeyKind // "" for sessions
+	// DisplayName is the operator's preferred consumer label (api_keys
+	// display_name), set on bearer identities when the operator chose one.
+	// a0's slot-consumer attribution uses it verbatim; "" = derive at
+	// request time from key name + User-Agent.
+	DisplayName string
 	// Sprint 0-AUTH (§3.1): assurance level the session has proven. Set
 	// for session-based identities (from the session row); zero for bearer
 	// identities — bearer-key paths skip the policy matrix (§5).
@@ -131,9 +136,14 @@ func EffectiveRemoteAddr(remoteAddr netip.Addr, xff string) netip.Addr {
 type Authenticator interface {
 	// VerifySession resolves a session cookie value to an Identity.
 	VerifySession(sessionID string) (Identity, error)
-	// VerifyBearer resolves a full sk-* token to an Identity, enforcing
-	// the expected kind (a router token must not open the dashboard).
-	VerifyBearer(token string, want KeyKind) (Identity, error)
+	// VerifyBearerFrom resolves a full sk-* token to an Identity, enforcing
+	// the expected kind (a router token must not open the dashboard) and
+	// the per-IP rate limit shared with the login path (10 failed
+	// attempts / 60s). ip is an opaque rate-limit key (client address,
+	// port stripped) — every production caller must go through this, not
+	// the unlimited VerifyBearer, so bearer-key brute-forcing is bounded
+	// the same way password brute-forcing already is.
+	VerifyBearerFrom(ctx context.Context, ip, token string, want KeyKind) (Identity, error)
 }
 
 // LoginService is the account-creation/session-establishment surface for
@@ -163,7 +173,9 @@ var _ Authenticator = (*StubAuthenticator)(nil)
 
 func (s *StubAuthenticator) VerifySession(string) (Identity, error) { return s.Identity, nil }
 
-func (s *StubAuthenticator) VerifyBearer(token string, want KeyKind) (Identity, error) {
+// VerifyBearerFrom ignores ip and the rate limit entirely — this stub is
+// never wired in production (cmd/forge always wires the real *Authorizer).
+func (s *StubAuthenticator) VerifyBearerFrom(_ context.Context, _, token string, want KeyKind) (Identity, error) {
 	if _, _, _, err := ParseToken(token); err != nil {
 		return Identity{}, err
 	}

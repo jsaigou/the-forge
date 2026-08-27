@@ -163,9 +163,12 @@ func TestSmithSettingsGetPut(t *testing.T) {
 	if got.Schedule.Quick == "" || got.Schedule.Deep == "" {
 		t.Errorf("expected default schedule, got %+v", got.Schedule)
 	}
+	if got.BrainChain == nil {
+		t.Errorf("brain_chain should coalesce nil -> [] at the JSON boundary, got nil")
+	}
 
 	w = do(t, s, authedRequest("PUT", "/api/v1/smith/settings",
-		bytes.NewBufferString(`{"model":"ornith-35b","handoff_offerings":[3,7],"schedule":{"quick":"30m","deep":"12h","enabled":true},"thresholds":{"gtt_warn_pct":80,"gtt_crit_pct":90,"disk_warn_pct":80,"disk_crit_pct":90}}`)))
+		bytes.NewBufferString(`{"model":"ornith-35b","handoff_offerings":[3,7],"brain_chain":["gemma4-e4b-qat","qwen38-27b"],"build_refresh_watchlist":["CVE","breaking"],"comfyui_keep_files":["/models/checkpoints/keep-me.safetensors"],"schedule":{"quick":"30m","deep":"12h","enabled":true},"thresholds":{"gtt_warn_pct":80,"gtt_crit_pct":90,"disk_warn_pct":80,"disk_crit_pct":90,"device_lost_window_minutes":20,"build_refresh_behind_n":250}}`)))
 	if w.Code != 200 {
 		t.Fatalf("put = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
@@ -177,11 +180,28 @@ func TestSmithSettingsGetPut(t *testing.T) {
 	if len(updated.HandoffOfferings) != 2 || updated.HandoffOfferings[0] != 3 {
 		t.Errorf("handoff_offerings = %v, want [3 7]", updated.HandoffOfferings)
 	}
+	if len(updated.BrainChain) != 2 || updated.BrainChain[0] != "gemma4-e4b-qat" || updated.BrainChain[1] != "qwen38-27b" {
+		t.Errorf("brain_chain = %v, want [gemma4-e4b-qat qwen38-27b]", updated.BrainChain)
+	}
+	if len(updated.BuildRefreshWatchlist) != 2 || updated.BuildRefreshWatchlist[0] != "CVE" {
+		t.Errorf("build_refresh_watchlist = %v, want [CVE breaking]", updated.BuildRefreshWatchlist)
+	}
+	if len(updated.ComfyUIKeepFiles) != 1 || updated.ComfyUIKeepFiles[0] != "/models/checkpoints/keep-me.safetensors" {
+		t.Errorf("comfyui_keep_files = %v, want [/models/checkpoints/keep-me.safetensors]", updated.ComfyUIKeepFiles)
+	}
 	if updated.Schedule.Quick != "30m" || updated.Schedule.Deep != "12h" {
 		t.Errorf("schedule = %+v, want 30m/12h", updated.Schedule)
 	}
 	if updated.Thresholds.GTTWarnPct != 80 {
 		t.Errorf("gtt_warn_pct = %v, want 80", updated.Thresholds.GTTWarnPct)
+	}
+	// Previously unwritable despite being GET-readable — see smithThresholdsBody's
+	// doc comment (S7-followup, 2026-08-26).
+	if updated.Thresholds.DeviceLostWindowMinutes != 20 {
+		t.Errorf("device_lost_window_minutes = %v, want 20", updated.Thresholds.DeviceLostWindowMinutes)
+	}
+	if updated.Thresholds.BuildRefreshBehindN != 250 {
+		t.Errorf("build_refresh_behind_n = %v, want 250", updated.Thresholds.BuildRefreshBehindN)
 	}
 
 	// A GET afterwards must reflect the PUT (settings live-read, not cached).

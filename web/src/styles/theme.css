@@ -472,7 +472,11 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
 .provider-divider { height: 1px; background: var(--border); margin: 2px 0; }
 .bays { display: grid; grid-template-columns: repeat(auto-fill, var(--bay-w)); justify-content: start; gap: 12px; align-items: start; }
 .bay { background: var(--panel); border: 1px solid var(--card-border-bay); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); position: relative; overflow: hidden; display: flex; flex-direction: column; }
-.bay .slotid { font-family: var(--mono); font-size: 11px; color: var(--text-mute); letter-spacing: .1em; }
+.bay .slotid { font-family: var(--mono); font-size: 16.5px; color: var(--text-mute); letter-spacing: .1em; }
+/* Slots pass 2026-08-25: header icons sized to the 16.5px slot-name font
+   height (down from the 26px .icon.sm default). */
+.bay .slot-head .icon, .bay .slot-head .logo.sm { width: 17px; height: 17px; border-radius: 5px; }
+.bay .bay-eject { position: absolute; top: 10px; right: 10px; }
 /* Sprint K: diagonal warning-stripe overlay while a profiling run holds the
    fleet (see Bay.tsx's profilingHold comment for why this applies to every
    loaded bay rather than guessing which slot). Low-opacity so the bay's own
@@ -487,7 +491,9 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
    never both). Slightly larger than the 9px dot since it's a 3×3 grid,
    not a single circle, but kept badge-sized — see SquareSnake.tsx's doc
    comment for why this is deliberately not a card-border effect. */
-.bay .square-snake { position:absolute; top:12px; right:12px; }
+/* Slots pass 2026-08-25: SquareSnake moved out of the corner (eject button
+   took it) into the busy line below the config name — inline, not absolute. */
+.bay .square-snake { position: static; }
 .square-snake { display:inline-grid; grid-template-columns:repeat(3,3px); grid-template-rows:repeat(3,3px); gap:1.5px; }
 .square-snake .ss-cell { width:3px; height:3px; border-radius:1px; background:var(--heat); opacity:.18; animation:ss-glow 1.35s ease-in-out infinite; animation-delay:calc(var(--ss-step) * 120ms); }
 /* Sprint K: ScanFrame — amicro "Face ID" throbber, replaces ProfilingPanel's
@@ -630,7 +636,12 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
 /* Retheme round 2: square edges (operator request — no rounded corners
    on the memory meter). */
 .meter { height: 39px; border-radius: 0; background: var(--bg-2); border: 1px solid var(--border); display: flex; overflow: hidden; }
-.seg { height: 100%; display:flex; align-items:center; justify-content:center; font-family: var(--mono); font-size: 15px; color: #10100e; font-weight: 600; white-space: nowrap; overflow: hidden; padding: 0 8px; }
+/* justify-content: flex-start (not center) + text-overflow: ellipsis, matching
+   .memlegend .row .name below — a centered nowrap overflow clips symmetrically
+   from both edges (garbled middle fragment, no visible truncation cue); a
+   left-anchored ellipsis truncates once, from the end, same as the legend row
+   for the identical label (S7 visual QA, 2026-08-26). */
+.seg { height: 100%; display:flex; align-items:center; justify-content:flex-start; font-family: var(--mono); font-size: 15px; color: #10100e; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 8px; }
 /* One categorical color per loaded model (was 4 shades of one orange hue —
    not meaningfully distinct). Built from the --m1-4 vars (validated for
    CVD-safety against each other, see :root) rather than hardcoded hex, so
@@ -681,6 +692,10 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
 .badge.no { color: var(--crit); background: color-mix(in srgb,var(--crit) 15%, transparent); }
 
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); }
+/* Token activity heatmap card: no title/legend inside it (that lives in the
+   eyebrow above), so the standard 16px vertical .card padding just stacks
+   with the SVG's own internal TOP_PAD, reading as excess whitespace. */
+.card.heatmap-card { padding-top: 6px; padding-bottom: 6px; }
 .card h3 { font-size: 13px; font-weight: 600; display:flex; align-items:center; gap: 8px; margin-bottom: 12px; }
 .card h3 .tick { width:7px; height:7px; border-radius:50%; background: var(--heat); box-shadow:0 0 7px var(--heat); }
 
@@ -921,9 +936,10 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
   position: relative; z-index: 2;
   display: flex; flex-direction: column; align-items: center; text-align: center;
   gap: 7px; min-height: 0; height: 100%;
-  /* Clear the top-left logo box + inner frame inset (18px). Padding ensures
-     content stays within the inner border with breathing room. */
-  padding: calc(27% + 36px) 28px 20px;
+  /* Clears the top-left logo box + inner frame inset; bottom 24px (not 20)
+     so the pinned .mfoot row clears the frame's rounded corner, not just
+     its flat edge. */
+  padding: calc(27% + 36px) 28px 24px;
   overflow: hidden;
 }
 .pcard-body > * { min-height: 0; max-width: 100%; }
@@ -1170,6 +1186,7 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
 .stats-hero .stat .d { display: none; }
 .stat .v.cost { color: var(--crit); }
 .stat .v.saved { color: var(--ok); }
+.stat .v.empty { color: var(--text-mute); font-weight: 400; }
 
 /* compressor */
 .hoom { display:flex; flex-direction:column; gap: 8px; }
@@ -1241,7 +1258,14 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
 .rtree-lg-line.autobypass { border-top-color: var(--heat); border-top-style: dashed; border-top-width: 2px; }
 .rtree-lg-line.failing { border-top-color: var(--crit); }
 .rtree-lg-line.disabled { border-top-color: var(--text-mute); opacity: .3; }
-.rtree-lg-line.unreachable { border-top-color: var(--crit); border-top-style: dashed; border-top-width: 2px; }
+/* "failing" and "unreachable" share --crit (both are request-failure states;
+   only the compressor's own health differs) and are meant to read apart via
+   solid-vs-dashed alone — but border-style:dashed at this swatch's 26px
+   width/2-3px weight renders near-solid (confirmed via zoomed screenshot,
+   S7 visual QA 2026-08-26), so the two legend entries looked identical at a
+   glance in both themes. A repeating-linear-gradient dash is rendered crisply
+   at any size, unlike the browser's border-dash algorithm at small scales. */
+.rtree-lg-line.unreachable { height: 3px; border-top: none; background-image: repeating-linear-gradient(to right, var(--crit) 0 5px, transparent 5px 9px); }
 .rtree-lg-note { color: var(--text-mute); font-size: 10.5px; margin-left: auto; }
 @media (max-width: 560px) { .rtree { overflow-x: auto; } .rtree-lg-note { margin-left: 0; width: 100%; } }
 @media (prefers-reduced-motion: reduce) {
@@ -1391,10 +1415,25 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
 .modal { background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 20px; width: 100%; max-width: 420px; box-shadow: var(--shadow); }
 .modal h3 { margin-bottom: 14px; }
 
-/* Onboarding tour (P4) — the copyable a0 base-URL row inside the stepped
-   card. Uses existing panel/border/mono vars so it tracks both themes. */
-.onboarding-endpoint { display: flex; align-items: center; gap: 8px; margin: 10px 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius, 6px); }
-.onboarding-endpoint code { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+/* Onboarding spotlight tour (Sprint 6, replacing the P4 static modal) — a
+   dedicated z-index tier above everything else in the app (highest was 60,
+   .infotip-bubble/.confirm-warning; .modal-backdrop sits at 50). The cutout
+   is pointer-events:none and paints its dim OUTSIDE the target rect via a
+   9999px box-shadow spread, so the real element inside it stays untouched
+   and fully clickable — no cloning, no z-index promotion of the target. */
+.tour-cutout {
+  position: fixed; z-index: 70; border-radius: 10px; pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.6), 0 0 0 2px var(--tab-active);
+  transition: left .2s ease, top .2s ease, width .2s ease, height .2s ease;
+}
+.tour-card {
+  z-index: 71; background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow);
+  transition: top .2s ease, left .2s ease;
+}
+.tour-card[data-placement="center"] {
+  box-shadow: var(--shadow), 0 0 0 9999px rgba(0,0,0,.6);
+}
 
 /* Pre-release feedback round (2026-08-12) — glass treatment for genuine
    panel/content surfaces (cards, bays, stat tiles, the memory-usage panel,
@@ -1665,9 +1704,17 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
 .smith-code-lang { font-family: var(--mono); font-size: 9.5px; color: var(--text-mute); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 2px; }
 .smith-code-block .copy-btn { position: absolute; top: 4px; right: 4px; }
 
+.smith-quick-btn {
+  font-family: var(--ui); font-size: 11px; padding: 3px 8px; border-radius: 6px;
+  border: 1px solid var(--border-strong); background: var(--panel-2);
+  color: var(--text-dim); cursor: pointer;
+}
+.smith-quick-btn:hover:not(:disabled) { background: var(--bg); color: var(--text); }
+.smith-quick-btn:disabled { opacity: .5; cursor: default; }
+
 .smith-chat-input { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
 .smith-chat-input textarea {
-  flex: 1; resize: none; min-height: 38px; max-height: 160px; padding: 8px 10px;
+  flex: 1; resize: none; min-height: 57px; max-height: 240px; padding: 8px 10px;
   border-radius: 8px; border: 1px solid var(--border); background: var(--bg);
   color: var(--text); font-family: var(--ui); font-size: 12.5px; line-height: 1.5;
 }
@@ -1721,6 +1768,7 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
 }
 .umc-slide {
   flex: 0 0 var(--umc-slide-w);
+  min-width: 0; /* else .umc-members' nowrap text overrides flex-basis above */
   cursor: pointer;
   opacity: .45;
   position: relative;

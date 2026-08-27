@@ -244,7 +244,9 @@ func TestRecheckRunbookGuards(t *testing.T) {
 	s := recheckSmith(t, true)
 	ctx := context.Background()
 
-	// A pending runbook is not re-checkable (must be "done — I ran it myself" first).
+	// A pending runbook is not re-checkable via RecheckRunbook — that's
+	// CheckPendingRunbook's job now (see check_now_test.go); RecheckRunbook
+	// only ever operates on done_unverified.
 	a, err := s.CreateAction(ctx, ActionDraft{
 		Kind: KindRunbook, Title: "t", Risk: RiskInfo,
 		Detail:    mustJSON(t, map[string]any{"check_id": "always_on_ports"}),

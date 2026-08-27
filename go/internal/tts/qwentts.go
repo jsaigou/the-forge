@@ -10,17 +10,30 @@ import (
 type QwenTTS struct {
 	Backend    Backend
 	Registry   *Registry
+	Disabled   map[VoiceMode]bool // Sprint 2, Voice & Speech settings: modes the operator has turned off entirely
 	modelInfos []ModelInfo
 }
 
-func NewQwenTTS(backend Backend, reg *Registry) *QwenTTS {
+func NewQwenTTS(backend Backend, reg *Registry, disabled map[VoiceMode]bool) *QwenTTS {
 	return &QwenTTS{
 		Backend:  backend,
 		Registry: reg,
+		Disabled: disabled,
 		modelInfos: []ModelInfo{
 			{ID: "tts-1", Object: "model", OwnedBy: "forge"},
 		},
 	}
+}
+
+// checkEnabled refuses a mode the operator has disabled (Sprint 2) before
+// any work is done — a single gate shared by every entry point that ends up
+// resolving a SynthSpec.Mode (Speech via resolveSpec, GenerateSample via
+// resolveSpec, Preview which builds its own spec).
+func (q *QwenTTS) checkEnabled(mode VoiceMode) error {
+	if q.Disabled[mode] {
+		return fmt.Errorf("tts mode %q is disabled", mode)
+	}
+	return nil
 }
 
 func (q *QwenTTS) Health(ctx context.Context) (map[string]any, error) { return q.Backend.Health(ctx) }
@@ -71,6 +84,9 @@ func (q *QwenTTS) resolveSpec(req SpeechRequest) (SynthSpec, error) {
 	default:
 		return spec, fmt.Errorf("unsupported voice type %q", v.Type)
 	}
+	if err := q.checkEnabled(spec.Mode); err != nil {
+		return spec, err
+	}
 	return spec, nil
 }
 
@@ -108,6 +124,9 @@ func (q *QwenTTS) Preview(ctx context.Context, p PreviewRequest) (*SpeechResult,
 			return nil, fmt.Errorf("design preview requires an instruct string")
 		}
 		spec = SynthSpec{Mode: ModeVoiceDesign, Instruct: p.Instruct, Language: lang, Format: format}
+	}
+	if err := q.checkEnabled(spec.Mode); err != nil {
+		return nil, err
 	}
 	return q.Backend.Speech(ctx, spec, p.Text)
 }

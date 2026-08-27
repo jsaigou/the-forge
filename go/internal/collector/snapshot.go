@@ -259,6 +259,15 @@ type SlotInference struct {
 	// it; always record and compare against configured (crown jewels).
 	NCtx int
 
+	// ModelAlias/ModelPath are the actually-running llama-server process's
+	// own self-report from /props (top-level model_alias/model_path) — the
+	// ground truth for what's really loaded, independent of the engine's
+	// env-file-derived belief. Verified once per slot session, same as
+	// NCtx (see run.go's nctxCache). Empty when unscraped or the field is
+	// absent (older llama.cpp builds without model_alias in /props).
+	ModelAlias string
+	ModelPath  string
+
 	RequestsProcessing   int
 	PromptTokensTotal    int64
 	PredictedTokensTotal int64

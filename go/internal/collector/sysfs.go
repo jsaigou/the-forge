@@ -166,6 +166,9 @@ func (g *GPU) GTTUsedBytes() (int64, bool) {
 func (g *GPU) tempByLabel(dev, label string) *float64 {
 	hwmons, err := os.ReadDir(filepath.Join(dev, "hwmon"))
 	if err != nil {
+		// No hwmon dir under this device — the sensor simply isn't exposed
+		// (or dev itself is stale); a nil reading is the correct "unmeasured"
+		// signal, not a failure.
 		return nil
 	}
 	for _, h := range hwmons {
@@ -204,6 +207,8 @@ const maxPlausibleWatts = 2000
 func (g *GPU) packagePowerW(dev string) *float64 {
 	hwmons, err := os.ReadDir(filepath.Join(dev, "hwmon"))
 	if err != nil {
+		// Same degrade posture as tempByLabel just above: no hwmon dir means
+		// no power sensor exposed here, not an error worth surfacing.
 		return nil
 	}
 	for _, h := range hwmons {

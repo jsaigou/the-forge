@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // HumanBytes renders a byte count for humans.
@@ -158,13 +159,25 @@ func ServicesVerb(action, name string) error {
 	return nil
 }
 
-// KeyExportVerb mints an operator CLI key and writes it to the keyfile.
-func KeyExportVerb() error {
+// cliKeyTTL is the default lifetime for a keys-export-minted CLI/TUI key
+// (security sprint 3, #36) — a sane default for a key a human re-exports
+// occasionally, not a hard requirement; router/MCP consumer keys minted via
+// `forge mint-key` are unaffected and stay unbounded/non-expiring by default.
+const cliKeyTTL = 90 * 24 * time.Hour
+
+// KeyExportVerb mints an operator CLI key and writes it to the keyfile. By
+// default the new key is bound to this request's own resolved client IP and
+// expires in 90 days (#34/#36) — for the common case (run directly on the
+// host) that's loopback; for the documented remote-admin-over-tailnet flow
+// (FORGE_API_URL pointed at the tailnet HTTPS endpoint) it's the caller's
+// own tailnet IP. unbound skips the IP binding entirely — pass it when the
+// exported key needs to work from more than one machine/IP.
+func KeyExportVerb(unbound bool) error {
 	c, err := New()
 	if err != nil {
 		return err
 	}
-	resp, err := c.KeyCreate("forge", "cli-tui", "operator")
+	resp, err := c.KeyCreate("forge", "cli-tui", "operator", !unbound, int64(cliKeyTTL.Seconds()))
 	if err != nil {
 		return fmt.Errorf("minting requires admin — run `forge mint-key -kind forge -name cli -role operator` on the host: %w", err)
 	}
@@ -177,6 +190,6 @@ func KeyExportVerb() error {
 		fmt.Println(resp.Token)
 		return err
 	}
-	fmt.Printf("key %s written to %s\n", resp.KeyID, p)
+	fmt.Printf("key %s written to %s\n", resp.Key.KeyID, p)
 	return nil
 }

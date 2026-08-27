@@ -2,42 +2,35 @@
 
 ## Context
 
-Smith's `web_fetch` tool accepts LLM-controlled URLs and fetches them through a
-chain of adapters: firecrawl (tried first), then `direct` (fallback). The `direct`
-adapter uses `newGuardedHTTPClient` (`web/client.go`), whose `DialContext` rejects
-loopback, RFC1918, link-local, and CGNAT (100.64.0.0/10 — this fleet's tailnet
-range) addresses at dial time.
+Smith's `web_fetch` tool accepts LLM-controlled URLs and fetches them through a chain of
+adapters: firecrawl (tried first), then `direct` (fallback). The `direct` adapter uses a guarded
+HTTP client whose dial hook rejects loopback, RFC1918, link-local, and CGNAT addresses at dial
+time.
 
-**The problem:** firecrawl uses `newPlainHTTPClient` — no SSRF guard. Since
-firecrawl is tried *before* `direct`, the guard never runs when firecrawl succeeds.
-On ForgeHost, firecrawl is self-hosted on the tailnet, so it can reach internal services
-(a0 :8085, MCP :8095, ops :5000, ComfyUI, embeddings). An LLM coerced via prompt
-injection from fetched web content can call `web_fetch` on an internal URL; firecrawl
-fetches it and returns the content; `direct`'s SSRF guard never executes.
+**The problem:** the firecrawl adapter used a plain HTTP client with no SSRF guard at all. Since
+firecrawl is tried before `direct`, the guard never ran when firecrawl succeeded. If firecrawl
+itself is reachable from inside your private network (e.g. self-hosted on the same tailnet as
+your other internal services), it can reach those internal services on the caller's behalf. An
+LLM coerced via prompt injection from fetched web content could call `web_fetch` on an internal
+URL; firecrawl would fetch it and return the content, with `direct`'s SSRF guard never executing
+at all.
 
-The `direct` adapter's guard was correctly designed (dial-time IP validation, not
-pre-resolve, to resist DNS rebinding), but its scope was wrong — it only covered one
-of two fetch adapters.
+The `direct` adapter's guard was correctly designed (dial-time IP validation, not pre-resolve,
+to resist DNS rebinding), but its scope was wrong - it only covered one of two fetch adapters.
 
 ## Decision
 
-Move the SSRF validation to `doFetch` in `web/web.go`, before *any* adapter runs.
-The new `validateFetchURL` function (`web/client.go`) parses the URL, resolves the
-host, and rejects non-public IPs — the same `isPublicIP` check the `direct` adapter
-used, but applied universally. The `direct` adapter retains its dial-time check as
-defense-in-depth against DNS rebinding (a resolver that answers differently between
-the pre-check and the connect).
+Move the SSRF validation to run before *any* adapter, not just `direct`. A shared
+`validateFetchURL` function parses the URL, resolves the host, and rejects non-public IPs - the
+same check the `direct` adapter used, but applied universally. The `direct` adapter retains its
+own dial-time check as defense-in-depth against DNS rebinding (a resolver that answers
+differently between the pre-check and the connect).
 
 ## Consequences
 
 - Firecrawl and any future fetch adapter are covered by the same SSRF guard.
-- The `direct` adapter's dial-time guard is now the second layer, not the only one.
-- The `AllowDirectHost` override (used by tests pointing at `httptest.Server` on
-  127.0.0.1) is passed through to `validateFetchURL`, preserving test ergonomics.
-- `file://` and other non-http schemes are rejected explicitly at the URL-parse
-  stage, before any adapter sees them.
-
-## Remediation
-
-Implemented in Phase 1 of the QA remediation sprint (2026-08-13). See
-`QA-REPORT.md` finding #4 and `docs/v5-qa-remediation-2026-08-13.md` Phase 1.
+- The `direct` adapter's dial-time guard is now a second layer, not the only one.
+- A configurable allow-list for direct test/loopback hosts is passed through to the shared
+  validator, preserving test ergonomics without weakening the production check.
+- `file://` and other non-http schemes are rejected explicitly at the URL-parse stage, before any
+  adapter sees them.
