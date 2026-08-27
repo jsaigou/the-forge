@@ -2,12 +2,35 @@ package tts
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"sync"
 )
+
+// ErrInvalidVoiceID is returned by any Registry method that turns a voice
+// ID into a filename component when the ID isn't safe to do that with.
+var ErrInvalidVoiceID = errors.New("tts: invalid voice id")
+
+// validVoiceID matches server.go's createVoice, which already lowercases
+// incoming IDs — kept intentionally narrow (no ".", "/", or "\") since
+// every method below joins id straight into a filename (id+".wav",
+// id+"_sample.wav"). A caller-supplied id was previously trusted verbatim
+// here, which let a value like "../../../../etc/cron.d/x" read, write, or
+// delete files outside AudioDir — the id+"_sample.wav"/id+".wav" suffix
+// narrows but doesn't close that off, and GetSample/SetSample/Delete are
+// all reachable with an id that was never legitimately created via Put.
+var validVoiceID = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+func checkVoiceID(id string) error {
+	if !validVoiceID.MatchString(id) {
+		return ErrInvalidVoiceID
+	}
+	return nil
+}
 
 type Registry struct {
 	dir   string
@@ -106,6 +129,9 @@ func (r *Registry) Get(id string) (VoiceEntry, bool, error) {
 }
 
 func (r *Registry) Put(v VoiceEntry) error {
+	if err := checkVoiceID(v.ID); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.loadLocked(); err != nil {
@@ -116,19 +142,26 @@ func (r *Registry) Put(v VoiceEntry) error {
 }
 
 func (r *Registry) Delete(id string) error {
+	if err := checkVoiceID(id); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.loadLocked(); err != nil {
 		return err
 	}
-	if _, ok := r.index[id]; !ok {
+	v, ok := r.index[id]
+	if !ok {
 		return os.ErrNotExist
 	}
 	delete(r.index, id)
 	if err := r.flushLocked(); err != nil {
 		return err
 	}
-	if v, ok := r.index[id]; ok {
+	// Fixed above: this used to re-check r.index[id] after the delete
+	// already ran, so ok was always false and RefAudio was never cleaned
+	// up — v is now captured before the delete instead.
+	if v.Clone != nil && v.Clone.RefAudio != "" {
 		_ = os.Remove(filepath.Join(r.AudioDir(), v.Clone.RefAudio))
 	}
 	_ = os.Remove(filepath.Join(r.AudioDir(), id+"_sample.wav"))
@@ -136,6 +169,9 @@ func (r *Registry) Delete(id string) error {
 }
 
 func (r *Registry) GetSample(id string) ([]byte, error) {
+	if err := checkVoiceID(id); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(r.AudioDir(), 0o755); err != nil {
 		return nil, err
 	}
@@ -147,6 +183,9 @@ func (r *Registry) GetSample(id string) ([]byte, error) {
 }
 
 func (r *Registry) SetSample(id string, wav []byte) error {
+	if err := checkVoiceID(id); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(r.AudioDir(), 0o755); err != nil {
 		return err
 	}
