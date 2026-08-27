@@ -81,7 +81,6 @@ func (s *Server) registerPWARoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /apple-touch-icon.png", s.handlePWAFile("apple-touch-icon.png", "image/png", cacheImmutable))
 	mux.HandleFunc("GET /favicon.svg", s.handlePWAFile("favicon.svg", "image/svg+xml", cacheImmutable))
 	mux.HandleFunc("GET /favicon.png", s.handlePWAFile("favicon.png", "image/png", cacheImmutable))
-	mux.HandleFunc("GET /bmc-button.png", s.handlePWAFile("bmc-button.png", "image/png", cacheImmutable))
 
 	// Login + setup: server-rendered (not part of the PWA bundle) since the
 	// PWA shell is a static build with nowhere to hold pre-auth UI state.
