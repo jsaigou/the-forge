@@ -3,7 +3,7 @@
 Status: accepted (supersedes [ADR-0010](./0010-dashboard-builder-deferred.md)).
 
 ADR-0010 deferred the dashboard-builder sprint and deleted `widgetRegistry.ts`
-as YAGNI. The operator feedback round (deployed `v5.0.7-stripes`, commit
+as YAGNI. The operator feedback round (deployed `v0.5.7-stripes`, commit
 `6b0aacd`) made this the one deferred item now being planned. This ADR records
 the v1 scope, rendering seam, and persistence model decided in the planning
 session of 2026-08-14.
