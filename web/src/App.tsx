@@ -310,9 +310,10 @@ export function App() {
           href="https://www.buymeacoffee.com/jsaigou"
           target="_blank"
           rel="noreferrer noopener"
-          aria-label="Buy Me a Coffee"
+          aria-label="Buy me a coffee"
         >
-          <img src="/bmc-button.png" alt="Buy Me a Coffee" width={217} height={60} />
+          <span className="bmc-emoji">☕</span>
+          <span>Buy me a coffee</span>
         </a>
       </div>
     </div>
