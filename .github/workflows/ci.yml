@@ -16,6 +16,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod
+      # cmd/forge-compress links daulet/tokenizers (cgo); the static lib is
+      # not preinstalled on runners. Fetch the prebuilt lib matching the
+      # go.mod version and point the linker at it for the whole job.
+      - name: Install libtokenizers
+        run: |
+          V=$(awk '/daulet\/tokenizers/ {print $2; exit}' go/go.mod)
+          curl -fsSL -o /tmp/libtokenizers.tar.gz \
+            "https://github.com/daulet/tokenizers/releases/download/${V}/libtokenizers.linux-amd64.tar.gz"
+          mkdir -p /tmp/libtokenizers
+          tar -xzf /tmp/libtokenizers.tar.gz -C /tmp/libtokenizers
+          echo "CGO_LDFLAGS=-L/tmp/libtokenizers" >> "$GITHUB_ENV"
       - name: Build
         working-directory: go
         run: go build ./...
