@@ -92,7 +92,7 @@ func (v auditView) mirror(e AuditEntry) {
 	if err := os.MkdirAll(filepath.Dir(v.d.auditMirror), 0o755); err != nil {
 		return
 	}
-	f, err := os.OpenFile(v.d.auditMirror, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	f, err := os.OpenFile(v.d.auditMirror, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return
 	}

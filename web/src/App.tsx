@@ -305,6 +305,15 @@ export function App() {
       <div className="foot">
         <span><b>{role}</b> · {username}</span>
         <a href="#attributions" className={tab === "attributions" ? "active" : undefined}>Attributions</a>
+        <a
+          className="bmc"
+          href="https://www.buymeacoffee.com/jsaigou"
+          target="_blank"
+          rel="noreferrer noopener"
+          aria-label="Buy Me a Coffee"
+        >
+          <img src="/bmc-button.png" alt="Buy Me a Coffee" width={217} height={60} />
+        </a>
       </div>
     </div>
   );

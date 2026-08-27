@@ -197,7 +197,7 @@ func (p *Provisioner) writeEnv(cfg Engines) error {
 	if err := os.MkdirAll(p.EnvDir, 0o700); err != nil {
 		return fmt.Errorf("ttsctl: env dir: %w", err)
 	}
-	if err := os.WriteFile(p.envPath(), []byte(renderEnv(cfg)), 0o644); err != nil {
+	if err := os.WriteFile(p.envPath(), []byte(renderEnv(cfg)), 0o600); err != nil {
 		return fmt.Errorf("ttsctl: write env: %w", err)
 	}
 	return nil

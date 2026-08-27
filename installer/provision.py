@@ -26,14 +26,24 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 CHUNK = 1024 * 1024
 RETRIES = 3
 BACKOFF = 2  # seconds, doubled per retry
 
+# Trusted directory for the manifest: the installer directory this script
+# itself lives in. Asset paths are confined to the --root prefix at runtime.
+HERE = os.path.dirname(os.path.abspath(__file__))
+
 
 def load_manifest(path):
-    with open(path) as f:
+    resolved = Path(path).resolve()
+    if not resolved.is_relative_to(Path(HERE).resolve()):
+        raise ValueError(
+            "manifest path escapes the installer directory: {}".format(path)
+        )
+    with open(resolved) as f:
         m = json.load(f)
     if "models" not in m:
         raise ValueError("manifest missing 'models' array")
@@ -64,20 +74,23 @@ def url_for(base_url, repo, filename):
     )
 
 
-def verify_existing(path, entry):
+def verify_existing(path, entry, root):
     """Return (ok, reason) for a file already on disk."""
-    size = os.path.getsize(path)
+    resolved = Path(path).resolve()
+    if not resolved.is_relative_to(Path(root).resolve()):
+        raise ValueError("asset path escapes the install root: {}".format(path))
+    size = os.path.getsize(resolved)
     want_size = entry.get("size_bytes")
     if want_size is not None and size != want_size:
         return False, "size mismatch"
     if entry.get("gguf"):
-        with open(path, "rb") as f:
+        with open(resolved, "rb") as f:
             if f.read(4) != b"GGUF":
                 return False, "bad GGUF magic"
     want_sha = entry.get("sha256")
     if want_sha:
         h = hashlib.sha256()
-        with open(path, "rb") as f:
+        with open(resolved, "rb") as f:
             while True:
                 chunk = f.read(CHUNK)
                 if not chunk:
@@ -90,11 +103,16 @@ def verify_existing(path, entry):
     return True, "verified"
 
 
-def download(entry, dest_path, base_url):
+def download(entry, dest_path, base_url, root):
     """Download entry -> dest_path atomically with resume + retry.
     Returns (status, bytes_written) or raises on final failure."""
     url = url_for(base_url, entry["_hf_repo"], entry["filename"])
-    part = dest_path + ".part"
+    dest = Path(dest_path).resolve()
+    if not dest.is_relative_to(Path(root).resolve()):
+        raise ValueError(
+            "asset path escapes the install root: {}".format(dest_path)
+        )
+    part = dest.parent / (dest.name + ".part")
     tmp_hash = hashlib.sha256()
     offset = 0
     resumed = False
@@ -155,7 +173,7 @@ def download(entry, dest_path, base_url):
                 raise IOError(
                     "size mismatch: got {} want {}".format(written, want_size)
                 )
-            os.replace(part, dest_path)
+            os.replace(part, dest)
             return ("RESUMED" if resumed else "DOWNLOADED"), written
         except Exception as err:  # noqa: BLE001 — report and retry anything
             last_err = err
@@ -171,9 +189,8 @@ def human(n):
 
 
 def main(argv=None):
-    here = os.path.dirname(os.path.abspath(__file__))
     ap = argparse.ArgumentParser(description="Forge asset provisioner")
-    ap.add_argument("--manifest", default=os.path.join(here, "assets.manifest.json"))
+    ap.add_argument("--manifest", default=os.path.join(HERE, "assets.manifest.json"))
     ap.add_argument("--root", default="/opt/forge",
                     help="base directory dest_rel_path is resolved against")
     sel = ap.add_mutually_exclusive_group()
@@ -202,6 +219,7 @@ def main(argv=None):
                   file=sys.stderr)
             return 2
 
+    root = Path(args.root).resolve()
     rows = []
     failed = False
     for model in select_models(manifest, args):
@@ -212,7 +230,11 @@ def main(argv=None):
         if not model.get("hf_repo"):
             rows.append((mid, "-", "PENDING (hf_repo TBD in manifest)", "-"))
             continue
-        dest_dir = os.path.join(args.root, model.get("dest_rel_path", ""))
+        dest_dir = (root / model.get("dest_rel_path", "")).resolve()
+        if not dest_dir.is_relative_to(root):
+            print("error: dest_rel_path escapes install root: {}".format(
+                model.get("dest_rel_path")), file=sys.stderr)
+            return 2
         for entry in model.get("files", []):
             fname = entry.get("filename")
             if not fname:
@@ -222,10 +244,15 @@ def main(argv=None):
             if args.dry_run:
                 rows.append((mid, disp, "DRY-RUN", str(entry.get("size_bytes") or "-")))
                 continue
-            dest_path = os.path.join(dest_dir, fname)
+            dest_path = (dest_dir / fname).resolve()
+            if not dest_path.is_relative_to(root):
+                print("error: filename escapes install root: {}".format(fname),
+                      file=sys.stderr)
+                return 2
             if not args.force and os.path.exists(dest_path):
                 ok, why = verify_existing(dest_path,
-                                          {**entry, "gguf": model.get("gguf", False)})
+                                          {**entry, "gguf": model.get("gguf", False)},
+                                          root)
                 if ok:
                     rows.append((mid, disp, "SKIP ({})".format(why),
                                  human(os.path.getsize(dest_path))))
@@ -240,7 +267,7 @@ def main(argv=None):
             dl_entry["_hf_repo"] = model["hf_repo"]
             dl_entry.setdefault("gguf", model.get("gguf", False))
             try:
-                status, nbytes = download(dl_entry, dest_path, args.base_url)
+                status, nbytes = download(dl_entry, dest_path, args.base_url, root)
                 rows.append((mid, disp, status, human(nbytes)))
             except (OSError, urllib.error.URLError) as e:
                 rows.append((mid, disp, "FAIL ({})".format(e), "-"))

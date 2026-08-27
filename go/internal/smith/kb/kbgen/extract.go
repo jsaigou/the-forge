@@ -242,7 +242,7 @@ func Sync(repoRoot string) (int, error) {
 	}
 	for name, content := range files {
 		path := filepath.Join(kbDir, filepath.FromSlash(name))
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			return 0, fmt.Errorf("kbgen: write %s: %w", name, err)
 		}
 	}

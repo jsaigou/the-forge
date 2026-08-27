@@ -42,7 +42,7 @@ func NewRegistry(dir string) *Registry {
 	return &Registry{dir: dir, index: map[string]VoiceEntry{}}
 }
 
-func (r *Registry) path() string { return filepath.Join(r.dir, "voices.json") }
+func (r *Registry) path() string     { return filepath.Join(r.dir, "voices.json") }
 func (r *Registry) AudioDir() string { return filepath.Join(r.dir, "audio") }
 
 func (r *Registry) Load() error {
@@ -98,7 +98,7 @@ func (r *Registry) flushLocked() error {
 		return err
 	}
 	tmp := r.path() + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	if err := os.WriteFile(tmp, b, 0o600); err != nil { //nolint:gosec // tmp is a fixed registry path
 		return err
 	}
 	return os.Rename(tmp, r.path())
@@ -189,5 +189,5 @@ func (r *Registry) SetSample(id string, wav []byte) error {
 	if err := os.MkdirAll(r.AudioDir(), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(r.AudioDir(), id+"_sample.wav"), wav, 0o644)
+	return os.WriteFile(filepath.Join(r.AudioDir(), id+"_sample.wav"), wav, 0o600) //nolint:gosec // id validated by checkVoiceID
 }
