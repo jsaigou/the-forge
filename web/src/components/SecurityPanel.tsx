@@ -503,7 +503,7 @@ function APIKeys({ canAdmin }: { canAdmin: boolean }) {
                 <input value={draftName} placeholder="opencode" onChange={(e) => setDraftName(e.target.value)} />
               </label>
               <label className="form-row">Preferred label
-                <input value={draftDisplayName} placeholder={'ExampleHost (OpenCode) — shown on slot attribution'} onChange={(e) => setDraftDisplayName(e.target.value)} />
+                <input value={draftDisplayName} placeholder={'Examplehost (OpenCode) — shown on slot attribution'} onChange={(e) => setDraftDisplayName(e.target.value)} />
               </label>
               {draftKind === "forge" && (
                 <label className="form-row">Role

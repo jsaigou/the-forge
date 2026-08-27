@@ -37,11 +37,11 @@ func TestStatusResponseSlotConsumers(t *testing.T) {
 		t.Errorf("unmarked slots → SlotConsumers should be nil/absent, got %+v", resp.SlotConsumers)
 	}
 
-	s.deps.Activity.Mark("a1", "ExampleHost (OpenCode)")
+	s.deps.Activity.Mark("a1", "Examplehost (OpenCode)")
 	s.deps.Activity.Mark("a2", "SMITH")
 	resp = s.buildStatusResponse()
-	if got := resp.SlotConsumers["a1"]; got != "ExampleHost (OpenCode)" {
-		t.Errorf("slot_consumers[a1] = %q, want ExampleHost (OpenCode)", got)
+	if got := resp.SlotConsumers["a1"]; got != "Examplehost (OpenCode)" {
+		t.Errorf("slot_consumers[a1] = %q, want Examplehost (OpenCode)", got)
 	}
 	if got := resp.SlotConsumers["a2"]; got != "SMITH" {
 		t.Errorf("slot_consumers[a2] = %q, want SMITH", got)

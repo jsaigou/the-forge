@@ -143,7 +143,7 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
   // between polls by the low-latency slot:activity SSE merge (lib/sse.ts).
   const active = status.slot_activity[slotKey] ?? false;
   // Sprint S-B/S-C: who is consuming this slot right now (e.g.
-  // "ExampleHost (OpenCode)") — empty when idle or unknown. Backend populates
+  // "Examplehost (OpenCode)") — empty when idle or unknown. Backend populates
   // from a0's live request attribution; SMITH is rendered bold-caps.
   const consumer = status.slot_consumers?.[slotKey] ?? "";
 

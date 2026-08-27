@@ -15,7 +15,7 @@ import (
 
 // TestChatCompletions_AttributesSlotToBearerKey proves the per-slot consumer
 // registry gets marked on a successful foundry_slot attempt with the
-// bearer-key-derived label ("opencode-examplehost" → "ExampleHost (OpenCode)") and
+// bearer-key-derived label ("opencode-examplehost" → "Examplehost (OpenCode)") and
 // that the completion mark fires once the response body is fully consumed.
 func TestChatCompletions_AttributesSlotToBearerKey(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -51,8 +51,8 @@ func TestChatCompletions_AttributesSlotToBearerKey(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
 	}
 
-	if got := reg.Label("a1", time.Minute); got != "ExampleHost (OpenCode)" {
-		t.Errorf("Label(a1) = %q, want ExampleHost (OpenCode)", got)
+	if got := reg.Label("a1", time.Minute); got != "Examplehost (OpenCode)" {
+		t.Errorf("Label(a1) = %q, want Examplehost (OpenCode)", got)
 	}
 	if got := reg.Label("a2", time.Minute); got != "" {
 		t.Errorf("Label(a2) = %q, want empty (untouched slot)", got)
@@ -169,11 +169,11 @@ func TestConsumerLabel_Derivation(t *testing.T) {
 		ua       string
 		want     string
 	}{
-		{name: "bearer opencode-examplehost", identity: authz.Identity{Name: "opencode-examplehost"}, remote: "8.8.8.8:1", ua: "OpenCode/1.2.3", want: "ExampleHost (OpenCode)"},
+		{name: "bearer opencode-examplehost", identity: authz.Identity{Name: "opencode-examplehost"}, remote: "8.8.8.8:1", ua: "OpenCode/1.2.3", want: "Examplehost (OpenCode)"},
 		{name: "bearer bare librechat", identity: authz.Identity{Name: "librechat"}, remote: "8.8.8.8:1", ua: "LibreChat/2.0", want: "LibreChat"},
 		// No UA → raw key name; DisplayName wins over everything.
 		{name: "bearer unmatched, no UA", identity: authz.Identity{Name: "sakuga-ingest"}, remote: "8.8.8.8:1", want: "sakuga-ingest"},
-		{name: "preferred display name wins", identity: authz.Identity{Name: "opencode-core", DisplayName: "ExampleHost (OpenCode)"}, remote: "8.8.8.8:1", ua: "curl/8.4", want: "ExampleHost (OpenCode)"},
+		{name: "preferred display name wins", identity: authz.Identity{Name: "opencode-core", DisplayName: "Examplehost (OpenCode)"}, remote: "8.8.8.8:1", ua: "curl/8.4", want: "Examplehost (OpenCode)"},
 		{name: "tailnet bypass → IP", remote: "100.64.0.9:1", want: "100.64.0.9"},
 		{name: "tailscale serve → XFF IP", remote: "127.0.0.1:1", xff: "100.100.100.100", want: "100.100.100.100"},
 	}
