@@ -469,7 +469,7 @@ func downloadFileAttempt(ctx context.Context, client *http.Client, rawURL, part 
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return 0, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	f, err := os.OpenFile(part, flags, 0o644)
+	f, err := os.OpenFile(part, flags, 0o600) //nolint:gosec // part path contained by DestRelPath
 	if err != nil {
 		return 0, err
 	}

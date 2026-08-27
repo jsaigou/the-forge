@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -48,10 +49,22 @@ func (c *cliBackend) codec() string {
 	return filepath.Join(c.modelsDir, c.tokenizer)
 }
 
+// Request-derived values below become argv of the qwen-tts subprocess.
+// argv exec is not shell-injectable, but a value shaped like a flag could
+// still be parsed as one (argument injection), so each gets a strict shape
+// check at this boundary.
+var (
+	cliLangRe    = regexp.MustCompile(`^[A-Za-z][A-Za-z .,'-]*$`)
+	cliSpeakerRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+)
+
 func (c *cliBackend) args(spec SynthSpec) ([]string, error) {
 	lang := spec.Language
 	if lang == "" {
 		lang = "English"
+	}
+	if !cliLangRe.MatchString(lang) {
+		return nil, fmt.Errorf("unsupported language %q", spec.Language)
 	}
 	args := []string{
 		"--model", c.talker(spec.Mode),
@@ -63,8 +76,14 @@ func (c *cliBackend) args(spec SynthSpec) ([]string, error) {
 		if spec.Speaker == "" {
 			return nil, fmt.Errorf("customvoice requires a speaker")
 		}
+		if !cliSpeakerRe.MatchString(spec.Speaker) {
+			return nil, fmt.Errorf("invalid speaker %q", spec.Speaker)
+		}
 		args = append(args, "--speaker", spec.Speaker)
 	case ModeVoiceDesign:
+		if strings.ContainsAny(spec.Instruct, "\x00\r\n") || strings.HasPrefix(spec.Instruct, "-") {
+			return nil, fmt.Errorf("invalid instruct text")
+		}
 		args = append(args, "--instruct", spec.Instruct)
 	case ModeBase:
 		if len(spec.RefAudio) == 0 {

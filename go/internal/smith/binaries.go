@@ -20,6 +20,7 @@ package smith
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -90,6 +91,11 @@ func gitTreeVersion(root string) (string, error) {
 	ref, isSymbolic := strings.CutPrefix(head, "ref: ")
 	if !isSymbolic {
 		return head, nil // detached HEAD — the SHA is right there
+	}
+	// ref names the HEAD file's target; keep it inside .git no matter what
+	// a corrupt/malicious HEAD contains.
+	if ref == "" || strings.HasPrefix(ref, "/") || strings.Contains(ref, "..") {
+		return "", fmt.Errorf("gitTreeVersion: malformed HEAD ref %q", ref)
 	}
 
 	if sha, err := os.ReadFile(filepath.Join(root, ".git", filepath.FromSlash(ref))); err == nil {

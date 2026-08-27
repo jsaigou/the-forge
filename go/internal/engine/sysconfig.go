@@ -6,11 +6,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/jsaigou/the-forge/internal/collector"
 	"github.com/jsaigou/the-forge/internal/config"
 )
+
+// slotNameRe bounds what may appear in forge-<slot>-{env,args} filenames
+// (and systemd unit names): config-supplied slot keys can never turn the
+// service-file path into a traversal.
+var slotNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
 
 // writeServiceFiles writes /etc/sysconfig/forge-<slot>-env (KEY=VALUE) and
 // forge-<slot>-args (one arg per line), preserving non-FORGE_ keys in
@@ -32,6 +38,9 @@ import (
 // bookkeeping moved on. See docs/pitfalls.md's FOUNDRY_*/FORGE_* divergence
 // entry for the live incident this fixed.
 func (m *Manager) writeServiceFiles(slot string, svc config.Service) error {
+	if !slotNameRe.MatchString(slot) {
+		return fmt.Errorf("writeServiceFiles: invalid slot name %q", slot)
+	}
 	cfg := m.d.Cfg()
 	envPath := filepath.Join(cfg.Paths.SysconfigDir, "forge-"+slot+"-env")
 	argsPath := filepath.Join(cfg.Paths.SysconfigDir, "forge-"+slot+"-args")
@@ -39,7 +48,7 @@ func (m *Manager) writeServiceFiles(slot string, svc config.Service) error {
 	// Preserve existing lines that are neither FORGE_ (rewritten fresh below)
 	// nor FOUNDRY_ (permanently supplanted — see the doc comment above).
 	var preserved []string
-	if raw, err := os.ReadFile(envPath); err == nil {
+	if raw, err := os.ReadFile(envPath); err == nil { //nolint:gosec // slot charset-validated by slotNameRe
 		for _, line := range strings.Split(string(raw), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
@@ -73,11 +82,11 @@ func (m *Manager) writeServiceFiles(slot string, svc config.Service) error {
 	}
 	lines = append(lines, preserved...)
 
-	if err := os.WriteFile(envPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(envPath, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		return fmt.Errorf("engine: writing %s: %w", envPath, err)
 	}
 	args := strings.Join(svc.ExtraArgs, "\n") + "\n"
-	if err := os.WriteFile(argsPath, []byte(args), 0o644); err != nil {
+	if err := os.WriteFile(argsPath, []byte(args), 0o600); err != nil {
 		return fmt.Errorf("engine: writing %s: %w", argsPath, err)
 	}
 	return nil

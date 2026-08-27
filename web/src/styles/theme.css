@@ -1534,6 +1534,10 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
 .foot a { color: var(--text-mute); text-decoration: underline; text-underline-offset: 2px; }
 .foot a:hover, .foot a:focus-visible { color: var(--text-dim); }
 .foot a.active { color: var(--tab-active); font-weight: 600; text-decoration: none; }
+/* Buy Me a Coffee button — official asset is 217×60; keep it exact on
+   desktop, shrink proportionally instead of overflowing on narrow phones. */
+.foot a.bmc { display: inline-flex; text-decoration: none; line-height: 0; }
+.foot a.bmc img { display: block; width: 217px; max-width: 100%; height: auto; }
 
 @media (max-width: 900px) {
   .bays, .gallery, .sys { grid-template-columns: repeat(2, minmax(0, 1fr)); }

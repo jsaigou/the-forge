@@ -94,6 +94,11 @@ func (g *GPU) invalidate() {
 }
 
 func readInt(path string) (int64, bool) {
+	// This package only ever reads sysfs counters; pin the invariant here
+	// so no caller can ever point the helper outside /sys.
+	if !strings.HasPrefix(path, "/sys/") {
+		return 0, false
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return 0, false

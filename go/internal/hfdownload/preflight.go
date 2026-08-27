@@ -62,12 +62,12 @@ type PreflightCheck struct {
 
 // PreflightReport is Preflight's result.
 type PreflightReport struct {
-	Repo            string           `json:"repo"`
-	Files           []PreflightFile  `json:"files"`
-	TotalBytes      int64            `json:"total_bytes"`
-	DestDir         string           `json:"dest_dir"`
-	Blocked         bool             `json:"blocked"`
-	Checks          []PreflightCheck `json:"checks"`
+	Repo       string           `json:"repo"`
+	Files      []PreflightFile  `json:"files"`
+	TotalBytes int64            `json:"total_bytes"`
+	DestDir    string           `json:"dest_dir"`
+	Blocked    bool             `json:"blocked"`
+	Checks     []PreflightCheck `json:"checks"`
 	// RequiresBackend is "" (either backend is fine) or "rocm" (the total
 	// size exceeds the Vulkan ceiling — a generated Config must request
 	// backend=rocm with unified memory, never guessed from a name; see
@@ -96,13 +96,22 @@ func DefaultDestDir(repo string, fileCount int) string {
 // for one file, relative to Paths.ModelsDir. Shard files are flattened
 // into destDir by basename — HF shard filenames already sort correctly
 // (…-00001-of-00003.gguf, …-00002-of-00003.gguf) without preserving any
-// upstream subdirectory structure.
+// upstream subdirectory structure. Both inputs are caller-supplied, so the
+// result is always a RELATIVE path: absolute prefixes and "." / ".."
+// components are dropped, keeping every download inside ModelsDir.
 func DestRelPath(destDir, filename string) string {
-	base := filepath.Base(filename)
-	if destDir == "" {
-		return base
+	return filepath.Join(safeRelDir(destDir), filepath.Base(filename))
+}
+
+func safeRelDir(destDir string) string {
+	var parts []string
+	for _, c := range strings.Split(filepath.ToSlash(destDir), "/") {
+		if c == "" || c == "." || c == ".." {
+			continue
+		}
+		parts = append(parts, c)
 	}
-	return filepath.Join(destDir, base)
+	return strings.Join(parts, "/")
 }
 
 // Preflight validates repo/files/destDir without writing anything. A
