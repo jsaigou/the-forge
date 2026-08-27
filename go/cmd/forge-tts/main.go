@@ -43,6 +43,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jsaigou/the-forge/internal/tts"
 )
@@ -132,7 +133,16 @@ func main() {
 		fastDesc = "Kokoro " + kokoroURL
 	}
 	log.Printf("forge-tts listening on %s (inference %s; fast=%s)", listen, engineDesc, fastDesc)
-	if err := http.ListenAndServe(listen, srv.Handler()); err != nil {
+	// Explicit Server instead of http.ListenAndServe so the listener carries
+	// header-read/idle timeouts (slowloris posture; synthesis itself can be
+	// slow, so no WriteTimeout).
+	server := &http.Server{
+		Addr:              listen,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("forge-tts: %v", err)
 	}
 }

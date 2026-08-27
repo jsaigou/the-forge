@@ -31,7 +31,7 @@
       "source": "docs/pitfalls.md",
       "category": "memory",
       "mode": "heading",
-      "anchor": "vLLM on Strix Halo APU \u2014 PyTorch `hipMalloc` Ceiling"
+      "anchor": "vLLM on Strix Halo APU - PyTorch `hipMalloc` Ceiling"
     },
     {
       "slug": "inference-hang",
@@ -98,7 +98,7 @@
       "source": "docs/modes.md",
       "category": "memory",
       "mode": "heading",
-      "anchor": "`gemma4-31b-mtp` OOMs at full context \u2014 RESOLVED (2026-07-29)"
+      "anchor": "`gemma4-31b-mtp` OOMs at full context - RESOLVED (2026-07-29)"
     },
     {
       "slug": "slot-rename-a1-a2",

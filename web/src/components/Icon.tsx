@@ -58,20 +58,20 @@ function ringClass(edge: IconEdge): string {
   }
 }
 
-// variantMark renders one `.icon-v` child. An SVG mark gets
-// dangerouslySetInnerHTML directly on the .icon-v span itself (so the
-// pre-existing `.icon-v > svg` sizing rule in theme.css matches with no
-// extra nesting level); a data: URL mark instead gets a plain <img> child,
-// matched by the dedicated `.icon-v > img` sizing rule.
+// SVG marks render as data: URL <img> children rather than inline HTML:
+// the vendored marks are third-party content, and <img> keeps any embedded
+// script inert (the `.icon-v > img` / `.icon > img` sizing rules in
+// theme.css cover this shape).
+function svgDataURL(svg: string): string {
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+}
+
 function variantMark(svg: string | undefined, dataURL: string | undefined, name: string, className: string) {
-  if (dataURL) {
-    return (
-      <span className={className}>
-        <img src={dataURL} alt={name} />
-      </span>
-    );
-  }
-  return <span className={className} dangerouslySetInnerHTML={{ __html: svg ?? "" }} />;
+  return (
+    <span className={className}>
+      <img src={dataURL ?? svgDataURL(svg ?? "")} alt={name} />
+    </span>
+  );
 }
 
 export function Icon({
@@ -153,11 +153,9 @@ export function Icon({
     // No dark variant from either source — single mark, no light/dark DOM
     // split, identical to pre-Phase-3 behavior.
     return (
-      <span
-        className={`icon ${sizeClass} ${ringClass(entry.edge)}`.trim()}
-        title={name}
-        dangerouslySetInnerHTML={{ __html: entry.svg }}
-      />
+      <span className={`icon ${sizeClass} ${ringClass(entry.edge)}`.trim()} title={name}>
+        <img src={svgDataURL(entry.svg)} alt={name} />
+      </span>
     );
   }
 

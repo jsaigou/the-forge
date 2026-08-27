@@ -77,7 +77,13 @@ func run() error {
 		return err
 	}
 
-	httpServer := &http.Server{Handler: srv.mux()}
+	// Header-read/idle timeouts for slowloris posture; no WriteTimeout —
+	// compression responses stream for as long as the upstream generation runs.
+	httpServer := &http.Server{
+		Handler:           srv.mux(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		log.Printf("forge-compress: listening on %s (model=%s tokenizer=%s target=%q)", addr, cfg.ModelPath, cfg.TokenizerPath, cfg.TargetAPIURL)

@@ -190,7 +190,7 @@ func (m *Manager) saveMode(mode string) {
 	path := m.stateFilePath()
 	line := fmt.Sprintf("%s %s\n", mode, m.d.Now().Format(time.RFC3339))
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(line), 0o644); err != nil {
+	if err := os.WriteFile(tmp, []byte(line), 0o600); err != nil {
 		m.logf("WARNING: could not write state file %s: %v", path, err)
 		return
 	}

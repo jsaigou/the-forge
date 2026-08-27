@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,9 @@ func New() (*Client, error) {
 		base = DefaultBaseURL
 	}
 	base = strings.TrimRight(base, "/")
+	if u, err := url.Parse(base); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, fmt.Errorf("FORGE_API_URL must be an http(s) URL with a host, got %q", base)
+	}
 
 	key := os.Getenv("FORGE_API_KEY")
 	if key == "" {
@@ -63,6 +67,12 @@ func New() (*Client, error) {
 }
 
 func (c *Client) do(method, path string, body any) ([]byte, error) {
+	// Paths are API routes composed onto BaseURL; reject anything that is
+	// not a clean absolute path so a caller bug can never redirect the
+	// request to another host or inject header CRLFs.
+	if !strings.HasPrefix(path, "/") || strings.ContainsAny(path, "\r\n\x00") {
+		return nil, fmt.Errorf("cli: invalid API path %q", path)
+	}
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)

@@ -87,7 +87,7 @@ func (s *Server) handleCatalogIconUpload(w http.ResponseWriter, r *http.Request,
 			writeError(w, http.StatusInternalServerError, "failed to create icons dir")
 			return
 		}
-		if err := os.WriteFile(dst, data, 0o644); err != nil {
+		if err := os.WriteFile(dst, data, 0o600); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to write icon")
 			return
 		}
