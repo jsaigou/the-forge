@@ -72,7 +72,7 @@ export interface Status {
   // polls, merged into this same field rather than replacing it.
   slot_activity: Record<string, boolean>;
   // Sprint S-B: per-slot consumer attribution for active generations —
-  // "ExampleHost (OpenCode)" style labels; "SMITH" when smith's brain holds the
+  // "Examplehost (OpenCode)" style labels; "SMITH" when smith's brain holds the
   // slot. Empty/absent when idle or unattributed.
   slot_consumers?: Record<string, string>;
   // Additive, omitted entirely when no PROFILE run is in progress — lets

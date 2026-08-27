@@ -12,9 +12,9 @@ func TestRegistryMarkAndLabel(t *testing.T) {
 	if got := r.Label("a1", time.Minute); got != "" {
 		t.Errorf("empty registry Label = %q, want %q", got, "")
 	}
-	r.Mark("a1", "ExampleHost (OpenCode)")
-	if got := r.Label("a1", time.Minute); got != "ExampleHost (OpenCode)" {
-		t.Errorf("Label = %q, want ExampleHost (OpenCode)", got)
+	r.Mark("a1", "Examplehost (OpenCode)")
+	if got := r.Label("a1", time.Minute); got != "Examplehost (OpenCode)" {
+		t.Errorf("Label = %q, want Examplehost (OpenCode)", got)
 	}
 	if got := r.Label("a2", time.Minute); got != "" {
 		t.Errorf("unmarked slot Label = %q, want empty", got)
@@ -52,8 +52,8 @@ func TestRegistryNilSafe(t *testing.T) {
 func TestDeriveLabel(t *testing.T) {
 	cases := []struct{ key, ua, want string }{
 		// UA-derived app + host segment from the operator's key name.
-		{"opencode-examplehost", "opencode/1.2.3", "ExampleHost (opencode)"},
-		{"OPENCODE-EXAMPLEHOST", "OpenCode", "ExampleHost (OpenCode)"}, // key match is case-insensitive; UA casing verbatim
+		{"opencode-examplehost", "opencode/1.2.3", "Examplehost (opencode)"},
+		{"OPENCODE-EXAMPLEHOST", "OpenCode", "Examplehost (OpenCode)"}, // key match is case-insensitive; UA casing verbatim
 		{"librechat", "librechat/2.0", "librechat"},
 		{"kakehashi", "kakehashi", "kakehashi"},
 		// Distinct app + raw key name.
