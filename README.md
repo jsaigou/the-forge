@@ -6,6 +6,7 @@
 ![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)
 ![React](https://img.shields.io/badge/web-React%20%2B%20Vite-61DAFB?logo=react&logoColor=black)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%2F%20ROCm-red)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/jsaigou)
 
 </div>
 
@@ -188,6 +189,10 @@ Full list in [docs/pitfalls.md](docs/pitfalls.md).
 Early public release: source and installer are published for review. Binaries and model weights
 aren't distributed — build from source against your own llama.cpp. Expect churn in the scheduler
 and auth surfaces while the v0.5 line stabilizes.
+
+## Support
+
+If this saved you some GPU-memory headaches, [buymeacoffee.com/jsaigou](https://buymeacoffee.com/jsaigou).
 
 ## License
 
