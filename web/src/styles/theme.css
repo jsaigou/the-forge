@@ -1540,12 +1540,12 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
 .foot a.bmc {
   display: inline-flex; align-items: center; gap: 6px;
   margin-left: auto; padding: 5px 14px; border-radius: 8px;
-  background: #40DCA5; color: #fff; border: 1px solid #000;
+  background: #40DCA5; color: #000; border: 1px solid #000;
   font-family: 'Cookie', 'Snell Roundhand', cursive;
   font-size: 15px; font-weight: 600; text-decoration: none; line-height: 1;
   transition: filter 0.15s;
 }
-.foot a.bmc:hover, .foot a.bmc:focus-visible { filter: brightness(0.92); color: #fff; }
+.foot a.bmc:hover, .foot a.bmc:focus-visible { filter: brightness(0.92); color: #000; }
 .foot a.bmc .bmc-emoji { font-size: 17px; }
 
 @media (max-width: 900px) {
