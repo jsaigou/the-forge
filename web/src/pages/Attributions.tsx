@@ -60,6 +60,12 @@ export function Attributions() {
               Apache-2.0 — <LinkOrText href="https://github.com/jsaigou/the-forge/blob/main/LICENSE">LICENSE</LinkOrText>
             </span>
           </div>
+          <div className="prox">
+            <span className="pn">Support</span>
+            <span className="pu">
+              <LinkOrText href="https://buymeacoffee.com/jsaigou">Buy me a coffee</LinkOrText>
+            </span>
+          </div>
         </div>
       </div>
 
