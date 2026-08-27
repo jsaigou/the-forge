@@ -43,6 +43,37 @@ type Scheduler interface {
 	CreateReservation(ctx context.Context, r Reservation) error
 	UpdateReservation(ctx context.Context, label string, r Reservation) error
 	CancelReservation(ctx context.Context, label, requestedBy string) error
+
+	// LoadStatus answers "what is model doing right now" without blocking
+	// or mutating scheduler state (Sprint 1, a0 load visibility, 2026-08-27).
+	// Distinct from EnsureLoaded: this never queues, never places, never
+	// loads — a pure snapshot read a consumer can poll from a second
+	// connection while its own chat request blocks inside EnsureLoaded.
+	LoadStatus(model string) LoadState
+}
+
+// LoadState mirrors GET /v1/load-status?model=... on the a0 listener.
+// Model-keyed rather than ticket-keyed: a consumer only ever knows the
+// model name it asked for — ticket IDs are internal and don't survive
+// EnsureLoaded's return (queue.go's dequeue deletes the row on every
+// return path, success or failure). State resolution order: currently
+// loaded > actively queued/loading > a short-lived memory of the last
+// terminal outcome > "idle" (never requested, or too long ago to still be
+// relevant).
+type LoadState struct {
+	Model         string        `json:"model"`
+	State         string        `json:"state"` // "loaded"|"loading"|"queued"|"idle"|"failed"
+	QueuePosition int           `json:"queue_position,omitempty"`
+	Slot          string        `json:"slot,omitempty"`
+	Reason        RefusalReason `json:"reason,omitempty"`
+	Message       string        `json:"message,omitempty"`
+	// Since is a pointer so an unknown/not-applicable time (the currently-
+	// loaded case, which doesn't track when the load happened) omits
+	// cleanly instead of marshaling as time.Time's zero value
+	// ("0001-01-01T00:00:00Z") — a real, once-live wart in this API found
+	// during Sprint 1's own verification pass, fixed before it had any
+	// consumers.
+	Since *time.Time `json:"since,omitempty"`
 }
 
 // EnsureRequest asks for a model to be available.
@@ -64,6 +95,15 @@ type Ticket struct {
 	Status      string // "loaded" | "queued" | "loading" | "failed" | ...
 	SmallJob    bool
 	EnqueuedAt  time.Time
+
+	// Reason/Message carry the most recent retryable blocker while queued
+	// (Sprint 1, a0 load visibility) — set from place()'s RefusalReason
+	// when a placement attempt can't proceed yet, so a live poll of the
+	// queue sees WHY a ticket is stuck instead of just its bare status.
+	// Both are "" when nothing has refused this ticket (e.g. still waiting
+	// its turn) or on success.
+	Reason  RefusalReason `json:"reason,omitempty"`
+	Message string        `json:"message,omitempty"`
 }
 
 // Status mirrors GET /api/v1/scheduler/status.
@@ -184,3 +224,5 @@ func (s *Stub) CreateReservation(context.Context, Reservation) error { return ni
 func (s *Stub) UpdateReservation(context.Context, string, Reservation) error { return nil }
 
 func (s *Stub) CancelReservation(context.Context, string, string) error { return nil }
+
+func (s *Stub) LoadStatus(model string) LoadState { return LoadState{Model: model, State: "idle"} }

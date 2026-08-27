@@ -69,6 +69,11 @@ type Store interface {
 	// daemon's jobs runner fires through sched.EnsureLoaded (P3 track,
 	// migration 0066).
 	SchedulerJobs() SchedulerJobs
+	// ModelDownloads persists HF model-acquisition jobs (migration 0070) —
+	// internal/hfdownload's queue/resume/progress state. Separate from
+	// Catalog: a download is a process with state that outlives (and may
+	// never reach) a catalog row, not a catalog entity itself.
+	ModelDownloads() ModelDownloads
 	Close() error
 }
 
@@ -130,9 +135,18 @@ type APIKey struct {
 	Name       string
 	SecretHash string // Argon2id encoded; never logged
 	Role       string // forge kind only; "" otherwise
+	// DisplayName is the operator's preferred human-facing label for
+	// slot-consumer attribution ("" = derive at request time).
+	DisplayName string
+	// BoundIP restricts verification to requests whose resolved client IP
+	// (authz.EffectiveRemoteAddr) matches exactly; "" = unbound (security
+	// sprint 3, #34).
+	BoundIP    string
 	CreatedAt  time.Time
 	LastUsedAt time.Time
 	RevokedAt  time.Time // zero = active
+	// ExpiresAt is zero for "never expires" (security sprint 3, #36).
+	ExpiresAt time.Time
 }
 
 type Keys interface {
@@ -426,6 +440,11 @@ type CompressorSavingsSampleRow struct {
 	RequestsTimeout  int64
 	RequestsCanceled int64
 
+	// FailOpenTotal is the sum of fail-open events (timeout + error) across
+	// the interval — from compress_failopen_total{reason}. Used by the smith
+	// fail-open rate check to detect when the budget is too low.
+	FailOpenTotal int64
+
 	// CacheReadTokens / UncachedTokens are the scalar sums across all
 	// providers of compress_cache_read_tokens_total and
 	// compress_uncached_input_tokens_total — how many tokens were served
@@ -475,6 +494,7 @@ type CompressorProxySummary struct {
 	TokensIn, TokensOut, TokensSaved                              int64
 	Requests, RequestsCached, RequestsFailed, RequestsRateLimited int64
 	RequestsTimeout, RequestsCanceled                             int64
+	FailOpenTotal                                                 int64
 
 	CacheReadTokens     int64
 	UncachedTokens      int64
@@ -532,6 +552,11 @@ type ProxyRow struct {
 	ProviderName string
 	Token        string // secret; never logged
 	Passthrough  bool
+	// FailOpenBudgetMS is the per-proxy override of
+	// FORGE_COMPRESS_FAILOPEN_BUDGET_MS (Sprint D). Zero = use the
+	// binary's 2000ms default. Written by the smith settings_change apply
+	// path; read by compressorctl's writeEnv.
+	FailOpenBudgetMS int
 	// OrphanedAt is set (Phase 2, docs/v5-headroom-topology.md) when a proxy
 	// is torn down (compressorctl.Provisioner.Teardown stops the unit + removes
 	// its env file) but the row is kept for audit/history rather than
@@ -635,6 +660,12 @@ type SavingsTotal struct {
 // existed only as names that looked like real, configurable features.
 // Migration 0029 deletes any stored rows. hf.token was a secret; that
 // deletion is irreversible (see the migration's own comment).
+//
+// HF model-acquisition track (migration 0070): hf.token is REINTRODUCED,
+// this time with a real reader — internal/hf.LoadTokenConfig, consumed by
+// internal/hfdownload for gated-repo downloads. Masked on every read
+// (httpapi.maskSecret) via the same masked-value-means-unchanged write
+// contract smith.web.* providers use (resolveAPIKeyWrite, smith_chat.go).
 type Settings interface {
 	Get(ctx context.Context, key string) ([]byte, error) // ErrNotFound when unset
 	Set(ctx context.Context, key string, value []byte) error

@@ -101,6 +101,7 @@ function SystemDangerZone({ canAdmin }: { canAdmin: boolean }) {
           db_path: draft.db_path, tts_unit: draft.tts_unit, models_dir: draft.models_dir,
           sysconfig_dir: draft.sysconfig_dir, state_dir: draft.state_dir, icons_dir: draft.icons_dir,
           vulkan_bin: draft.vulkan_bin, rocm_bin: draft.rocm_bin, ports: draft.ports, hostname: draft.hostname,
+          cookie_secure: draft.cookie_secure,
         })
       }
       onSave={(draft) =>
@@ -109,6 +110,7 @@ function SystemDangerZone({ canAdmin }: { canAdmin: boolean }) {
           db_path: draft.db_path, tts_unit: draft.tts_unit, models_dir: draft.models_dir,
           sysconfig_dir: draft.sysconfig_dir, state_dir: draft.state_dir, icons_dir: draft.icons_dir,
           vulkan_bin: draft.vulkan_bin, rocm_bin: draft.rocm_bin, ports: draft.ports, hostname: draft.hostname,
+          cookie_secure: draft.cookie_secure,
         })
       }
       renderFields={(active, setField, disabled) => (
@@ -126,6 +128,7 @@ function SystemDangerZone({ canAdmin }: { canAdmin: boolean }) {
             <Field rec={F["danger.vulkan_bin"]} value={active.vulkan_bin} disabled={disabled} onChange={(v) => setField("vulkan_bin", String(v))} />
             <Field rec={F["danger.rocm_bin"]} value={active.rocm_bin} disabled={disabled} onChange={(v) => setField("rocm_bin", String(v))} />
             <Field rec={F["danger.hostname"]} value={active.hostname} disabled={disabled} onChange={(v) => setField("hostname", String(v))} />
+            <Field rec={F["danger.cookie_secure"]} value={active.cookie_secure} disabled={disabled} onChange={(v) => setField("cookie_secure", Boolean(v))} />
           </div>
           <PortsEditor ports={active.ports} disabled={disabled} onChange={(p) => setField("ports", p)} />
         </>

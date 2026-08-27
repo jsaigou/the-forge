@@ -133,18 +133,33 @@ export function CompressorSavingsChips({ window_ }: { window_: string }) {
       ? `${formatTokens(external.compressedTokens)} tokens compressed, priced at each provider's blended input rate in ${displayCurrency}`
       : `${formatTokens(external.compressedTokens)} tokens compressed, but no priced offering to value them against this window`;
 
+  // The tooltip (title=) carries the full disclosure sentence, but a title
+  // attribute is invisible without a mouse and unreachable on touch — the
+  // empty-data case needs its own short, always-visible text, not a blank
+  // div relying on hover alone (S7 visual QA, 2026-08-26).
+  const localValue = local.hasTime
+    ? formatDurationShort(local.timeSavedS)
+    : local.hasTokens
+      ? "unmeasured"
+      : "no data";
+  const externalValue = external.hasMoney
+    ? formatCurrencyPrecise(external.moneyDisplay, displayCurrency)
+    : external.hasTokens
+      ? "unpriced"
+      : "no data";
+
   return (
     <>
       <div className="stat">
         <div className="k">{`Local · compressor saved (${window_})`}</div>
-        <div className="v saved" title={localTitle}>
-          {local.hasTime ? formatDurationShort(local.timeSavedS) : ""}
+        <div className={`v ${local.hasTime ? "saved" : "empty"}`} title={localTitle}>
+          {localValue}
         </div>
       </div>
       <div className="stat">
         <div className="k">{`External · compressor saved (${window_})`}</div>
-        <div className="v saved" title={externalTitle}>
-          {external.hasMoney ? formatCurrencyPrecise(external.moneyDisplay, displayCurrency) : ""}
+        <div className={`v ${external.hasMoney ? "saved" : "empty"}`} title={externalTitle}>
+          {externalValue}
         </div>
       </div>
     </>

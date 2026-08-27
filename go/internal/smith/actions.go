@@ -18,11 +18,11 @@ import (
 // deferred (no allowlisted scripts dir wired) — catalog_change and
 // delete_files land in P6 (§4.9).
 const (
-	KindRunbook            = "runbook"
-	KindLoadConfig         = "load_config"
-	KindUnloadSlot         = "unload_slot"
+	KindRunbook          = "runbook"
+	KindLoadConfig       = "load_config"
+	KindUnloadSlot       = "unload_slot"
 	KindRestartForgeUnit = "restart_forge_unit"
-	KindSettingsChange     = "settings_change"
+	KindSettingsChange   = "settings_change"
 	// KindCatalogChange executes a create/update against store.Catalog
 	// (P6 FR4 — model sourcing proposals). Risk is always RiskLow: it only
 	// ever adds or edits catalog rows, never deletes.
@@ -108,6 +108,20 @@ var (
 	// errors when detail.procedure_id doesn't resolve in the procedures
 	// registry.
 	ErrProcedureNotFound = errors.New("smith: unknown procedure id")
+
+	// ErrProcedureNotAutonomyEligible is wrapped into dispatchProcedure's
+	// error when an action created by the standing autonomy actor
+	// (autonomyActor) targets a procedure ID outside autonomyEligible.
+	// Defense-in-depth (2026-08-27, idea from reviewing amd/skills'
+	// rocm-doctor CLI, which bakes its own auto-applicable allowlist into the
+	// tool itself rather than trusting only the caller): maybeAutoRunProcedure
+	// already refuses to call Procedurize for an ineligible procedure, so
+	// this should never fire in practice — it exists so a future bug in that
+	// caller (a new code path that creates an autonomy-actor action some
+	// other way, a refactor that drops the eligibility check) fails the run
+	// outright at the actual privileged-execution boundary instead of
+	// silently letting an unreviewed procedure run unattended.
+	ErrProcedureNotAutonomyEligible = errors.New("smith: procedure is not on the autonomy allowlist")
 
 	// ErrProcedureUnwired is returned by procedure execution when
 	// Deps.RunStep is nil — an unwired daemon can never run a command by
@@ -643,29 +657,9 @@ func (s *Smith) RecheckRunbook(ctx context.Context, id int64, actor string) (*Ac
 		return nil, ErrInvalidTransition
 	}
 
-	// Resolve which checks to re-run: an attached investigation's warn/crit
-	// set, or (standalone) the source check stamped into detail. A
-	// self-review closure runbook (self_review_close marker) narrows to
-	// relevantWarnCritCheckIDs — same gate approveSelfReviewClose uses —
-	// so a re-check on this path matches what the operator was actually
-	// shown when the proposal was offered, not the full unnarrowed set
-	// (which would forever re-flag an unrelated ambient warn like
-	// comfyui_prune and never let the investigation close).
-	var inv *Investigation
-	var checkIDs []string
-	if a.InvestigationID != nil {
-		var findings []StoredFinding
-		inv, findings, err = s.GetInvestigation(ctx, *a.InvestigationID)
-		if err != nil {
-			return nil, fmt.Errorf("smith: recheck runbook %d: get investigation: %w", a.ID, err)
-		}
-		if isSelfReviewCloseDetail(a.Detail) {
-			checkIDs = relevantWarnCritCheckIDs(inv.Trigger, findings)
-		} else {
-			checkIDs = warnCritFindingCheckIDs(findings)
-		}
-	} else if cid := runbookCheckID(a.Detail); cid != "" {
-		checkIDs = []string{cid}
+	inv, checkIDs, err := s.resolveRunbookRecheckTargets(ctx, a)
+	if err != nil {
+		return nil, fmt.Errorf("smith: recheck runbook %d: %w", a.ID, err)
 	}
 
 	var result ActionResult
@@ -736,6 +730,110 @@ func (s *Smith) RecheckRunbook(ctx context.Context, id int64, actor string) (*Ac
 		}
 	}
 	s.publishActionUpdate(ctx, updated, StatusDoneUnverified)
+	return updated, nil
+}
+
+// resolveRunbookRecheckTargets figures out which check(s) re-verify a
+// runbook's underlying condition — an attached investigation's warn/crit set
+// (narrowed for a self-review-close runbook via relevantWarnCritCheckIDs, the
+// same gate approveSelfReviewClose uses, so a re-check matches what the
+// operator was actually shown when the proposal was offered), or the
+// standalone check stamped into detail.check_id. Shared by RecheckRunbook
+// (done_unverified) and CheckPendingRunbook (pending) — the two only differ
+// in what happens to the action's own status afterward.
+func (s *Smith) resolveRunbookRecheckTargets(ctx context.Context, a *Action) (inv *Investigation, checkIDs []string, err error) {
+	if a.InvestigationID != nil {
+		var findings []StoredFinding
+		inv, findings, err = s.GetInvestigation(ctx, *a.InvestigationID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("get investigation: %w", err)
+		}
+		if isSelfReviewCloseDetail(a.Detail) {
+			checkIDs = relevantWarnCritCheckIDs(inv.Trigger, findings)
+		} else {
+			checkIDs = warnCritFindingCheckIDs(findings)
+		}
+		return inv, checkIDs, nil
+	}
+	if cid := runbookCheckID(a.Detail); cid != "" {
+		return nil, []string{cid}, nil
+	}
+	return nil, nil, nil
+}
+
+// RunbookStillFailingError is CheckPendingRunbook's non-terminal outcome —
+// the on-demand check ran fine, it just found the underlying condition still
+// failing. Not really an "error" in the exec-failed sense, but the caller
+// needs the failing check IDs to report back, and a pending runbook has no
+// interim-result column to persist an OK:false result into the way
+// done_unverified's `result` field does (RecheckRunbook's equivalent case).
+type RunbookStillFailingError struct{ CheckIDs []string }
+
+func (e *RunbookStillFailingError) Error() string {
+	return "still failing: " + strings.Join(e.CheckIDs, ", ")
+}
+
+// CheckPendingRunbook re-runs a PENDING runbook's underlying check(s) on
+// demand — the operator's "check now", replacing the removed self-attestation
+// "done — I ran it myself" button (S7-followup smith UX sprint, 2026-08-26).
+// A clean result closes the proposal as resolved via supersedeActionWithNote
+// — the exact same write path self-review's periodic reviewPendingProposals
+// already uses for this — so the operator never asserts done, smith verifies
+// it, on-demand instead of waiting for the next sweep. A still-failing result
+// leaves the action untouched (still pending) and returns
+// *RunbookStillFailingError.
+func (s *Smith) CheckPendingRunbook(ctx context.Context, id int64, actor string) (*Action, error) {
+	if s.d.Store == nil {
+		return nil, ErrStoreUnwired
+	}
+	a, err := s.GetAction(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if a.Kind != KindRunbook {
+		return nil, errors.New("smith: check-now applies only to runbook actions")
+	}
+	if a.Status != StatusPending {
+		return nil, ErrInvalidTransition
+	}
+
+	inv, checkIDs, err := s.resolveRunbookRecheckTargets(ctx, a)
+	if err != nil {
+		return nil, fmt.Errorf("smith: check-now runbook %d: %w", a.ID, err)
+	}
+	if len(checkIDs) == 0 {
+		return nil, errors.New("smith: nothing to check — this runbook has no source check attached")
+	}
+
+	findings := s.runChecksBare(ctx, checkIDs)
+	var failing []string
+	for _, f := range findings {
+		if f.Severity == SeverityWarn || f.Severity == SeverityCrit {
+			failing = append(failing, f.CheckID)
+		}
+	}
+	if len(failing) > 0 {
+		return nil, &RunbookStillFailingError{CheckIDs: failing}
+	}
+
+	if inv != nil {
+		s.finishResolution(ctx, a.ID, *a.InvestigationID, inv, nil, true)
+	}
+	if !s.supersedeActionWithNote(ctx, a.ID, "operator-requested check: underlying condition(s) clean, closing as resolved") {
+		return nil, ErrInvalidTransition
+	}
+	updated, err := s.GetAction(ctx, a.ID)
+	if err != nil {
+		return nil, err
+	}
+	if s.d.Audit != nil {
+		if err := s.d.Audit.Write(ctx, store.AuditEntry{
+			Actor: actor, Action: "smith_action_check_now",
+			Target: fmt.Sprintf("%d:%s", updated.ID, updated.Kind),
+		}); err != nil {
+			s.logf("audit write failed: %v", err)
+		}
+	}
 	return updated, nil
 }
 

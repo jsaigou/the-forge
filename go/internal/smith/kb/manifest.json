@@ -68,6 +68,15 @@
       "title": "Contiguous GTT allocation can silently reduce n_ctx"
     },
     {
+      "slug": "foundry-forge-env-divergence",
+      "doc": "pitfalls",
+      "source": "docs/pitfalls.md",
+      "category": "slots",
+      "mode": "line",
+      "anchor": "FOUNDRY_*`/`FORGE_*` sysconfig divergence",
+      "title": "A rename that redeploys code but not deployed scripts leaves the running process silently stale"
+    },
+    {
       "slug": "debugging-gotchas",
       "doc": "pitfalls",
       "source": "docs/pitfalls.md",
@@ -293,6 +302,14 @@
       "mode": "paragraph",
       "anchor": "Four refusal guardrails, checked in order",
       "title": "ComfyUI pruning \u2014 the four refusal guardrails"
+    },
+    {
+      "slug": "symptom-catalog",
+      "doc": "rocm-vulkan-catalog",
+      "source": "docs/rocm-vulkan-diagnosis-catalog.md",
+      "category": "gpu",
+      "mode": "heading",
+      "anchor": "Symptom \u2192 Cause \u2192 Fix Catalog"
     }
   ]
 }

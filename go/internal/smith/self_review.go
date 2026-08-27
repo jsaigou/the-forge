@@ -143,16 +143,23 @@ func (s *Smith) reviewInvestigations(ctx context.Context, now time.Time, grace t
 }
 
 // proposeInvestigationClosure creates (or, via the existing dedupe/supersede
-// machinery, reuses) a runbook action carrying the self_review_close marker
-// actions.go's approveRunbook checks for — approving it is the human
-// confirmation gate that actually closes the investigation, re-verified
-// fresh at approval time (approveSelfReviewClose), not trusted blindly from
-// this sweep's possibly-stale snapshot. Returns whether a NEW proposal was
-// created (false when an identical one was already pending — dedupe keeps a
-// repeat sweep before approval from spamming duplicates).
+// machinery, reuses) a runbook action carrying the self_review_close marker.
+// The human confirmation gate that actually closes the investigation is now
+// CheckPendingRunbook's "check now" (S7-followup smith UX sprint,
+// 2026-08-26 — the removed self-attestation "done — I ran it myself"/
+// "Approve" button used to reach this via approveRunbook→
+// approveSelfReviewClose; CheckPendingRunbook's resolveRunbookRecheckTargets
+// narrows to the exact same relevantWarnCritCheckIDs set and calls the same
+// finishResolution, so the investigation only ever closes on a fresh
+// re-verify, never a trusted stale snapshot, same guarantee either path).
+// approveRunbook/approveSelfReviewClose still exist and still work if a
+// caller reaches them some other way, but the FE no longer offers an
+// Approve-equivalent button for any runbook kind. Returns whether a NEW
+// proposal was created (false when an identical one was already pending —
+// dedupe keeps a repeat sweep before confirmation from spamming duplicates).
 func (s *Smith) proposeInvestigationClosure(ctx context.Context, invID int64, checkIDs []string) bool {
 	steps := []RunbookStep{{
-		Title:  fmt.Sprintf("Review investigation #%d's re-checked evidence, then Approve to close", invID),
+		Title:  fmt.Sprintf("Review investigation #%d's re-checked evidence, then click \"confirm resolved\" to close", invID),
 		Why:    "self-review found the checks that were previously warn/crit on this investigation now read clean",
 		Verify: "the investigation closes and a summary is posted to its linked conversation, if any",
 	}}

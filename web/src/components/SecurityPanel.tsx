@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiErrorMessage } from "../lib/api";
+import { SaveButton } from "./SaveButton";
 import {
   useAuthConfig,
   useAuthPolicy,
+  useHFToken,
   useIdentityLinkCreate,
   useIdentityLinkDelete,
   useIdentityLinks,
@@ -11,6 +13,7 @@ import {
   useKeys,
   useRecoveryCodesGenerate,
   useRecoveryCodesStatus,
+  useSetHFToken,
   useTOTPConfirm,
   useTOTPDelete,
   useTOTPEnroll,
@@ -331,6 +334,48 @@ function ForwardAuthDangerZone({ canAdmin }: { canAdmin: boolean }) {
   );
 }
 
+// ── HF token (model acquisition) ────────────────────────────────────────────
+// Follows the same masked-value-means-unchanged contract as smith's web-
+// provider keys (resolveAPIKeyWrite, go/internal/httpapi/hf_handlers.go):
+// re-submitting the masked value read from GET is a no-op, never a clobber.
+
+function HFTokenSection({ canAdmin }: { canAdmin: boolean }) {
+  const token = useHFToken();
+  const setToken = useSetHFToken();
+  const [value, setValue] = useState("");
+
+  useEffect(() => {
+    if (token.data) setValue(token.data.token);
+  }, [token.data]);
+
+  return (
+    <>
+      <div className="eyebrow" id="security-hf-token">HuggingFace access token</div>
+      <div className="card">
+        <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, lineHeight: 1.55 }}>
+          Needed to download gated models (license click-through repos, e.g. Gemma, Llama). Write-only —
+          the real value is never shown once set.
+        </div>
+        {setToken.isError && <div className="error-note" style={{ marginBottom: 10 }}>{apiErrorMessage(setToken.error)}</div>}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <label className="form-row" style={{ flex: "1 1 260px" }}>
+            <input
+              type="password"
+              value={value}
+              disabled={!canAdmin}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder={token.data?.configured ? "configured" : "not configured"}
+            />
+          </label>
+          {canAdmin && (
+            <SaveButton pending={setToken.isPending} isError={setToken.isError} onClick={() => setToken.mutate(value)} />
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ── API keys ────────────────────────────────────────────────────────────────
 
 function APIKeys({ canAdmin }: { canAdmin: boolean }) {
@@ -343,6 +388,7 @@ function APIKeys({ canAdmin }: { canAdmin: boolean }) {
   const [creating, setCreating] = useState(false);
   const [draftKind, setDraftKind] = useState<APIKeyKind>("forge");
   const [draftName, setDraftName] = useState("");
+  const [draftDisplayName, setDraftDisplayName] = useState("");
   const [draftRole, setDraftRole] = useState<Role>("viewer");
   const [showRevoked, setShowRevoked] = useState(false);
 
@@ -350,9 +396,9 @@ function APIKeys({ canAdmin }: { canAdmin: boolean }) {
     setError(null);
     const doCreate = () =>
       create.mutate(
-        { kind: draftKind, name: draftName, role: draftKind === "forge" ? draftRole : undefined },
+        { kind: draftKind, name: draftName, display_name: draftDisplayName || undefined, role: draftKind === "forge" ? draftRole : undefined },
         {
-          onSuccess: (data) => { setNewToken(data.token); setCreating(false); setDraftName(""); },
+          onSuccess: (data) => { setNewToken(data.token); setCreating(false); setDraftName(""); setDraftDisplayName(""); },
           onError: (e) => { if (!gate.handle(e, doCreate)) setError(apiErrorMessage(e)); },
         },
       );
@@ -455,6 +501,9 @@ function APIKeys({ canAdmin }: { canAdmin: boolean }) {
               </label>
               <label className="form-row">Name
                 <input value={draftName} placeholder="opencode" onChange={(e) => setDraftName(e.target.value)} />
+              </label>
+              <label className="form-row">Preferred label
+                <input value={draftDisplayName} placeholder={'ExampleHost (OpenCode) — shown on slot attribution'} onChange={(e) => setDraftDisplayName(e.target.value)} />
               </label>
               {draftKind === "forge" && (
                 <label className="form-row">Role
@@ -838,6 +887,7 @@ export function SecurityPanel({ canAdmin }: { canAdmin: boolean }) {
       <PolicyMatrix canAdmin={canAdmin} />
       <AuthConfigSection canAdmin={canAdmin} />
       <ForwardAuthDangerZone canAdmin={canAdmin} />
+      <HFTokenSection canAdmin={canAdmin} />
       <APIKeys canAdmin={canAdmin} />
       <IdentityLinks canAdmin={canAdmin} />
       <TOTPSection />

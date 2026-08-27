@@ -139,6 +139,10 @@ func (s *Server) restartRequired(ctx context.Context) *restartRequiredInfo {
 	}
 	raw, err := s.deps.Settings.Get(ctx, settingRestartRequired)
 	if err != nil {
+		// Collapses ErrNotFound (the common case: nothing pending) and any
+		// other read failure into the same "nothing pending" answer — this
+		// is an advisory banner, not a source of truth worth failing loudly
+		// over.
 		return nil
 	}
 	var info restartRequiredInfo
@@ -169,6 +173,10 @@ func (s *Server) getRawSetting(ctx context.Context, key string) []byte {
 	}
 	raw, err := s.deps.Settings.Get(ctx, key)
 	if err != nil {
+		// Same collapse as restartRequired just above: this func's own doc
+		// comment already treats "not set" as the expected empty case, so a
+		// real read error degrades to the same thing rather than a distinct
+		// error path callers would have to handle.
 		return nil
 	}
 	return raw
@@ -360,6 +368,14 @@ func putStringField(patch map[string]json.RawMessage, key string, v *string) {
 	patch[key] = b
 }
 
+func putBoolField(patch map[string]json.RawMessage, key string, v *bool) {
+	if v == nil {
+		return
+	}
+	b, _ := json.Marshal(*v)
+	patch[key] = b
+}
+
 // ── GET/PUT /api/v1/router/config — infra.router (restart) ─────────────────
 //
 // Deliberately excludes listen_port: it is a genuine dead field on
@@ -396,6 +412,7 @@ type routerConfigResponse struct {
 	MaxRetriesPerBackend int     `json:"max_retries_per_backend"`
 	EnsureLoadedTimeoutS float64 `json:"ensure_loaded_timeout_s"`
 	EmbeddingURL         string  `json:"embedding_url"`
+	TTSURL               string  `json:"tts_url"`
 }
 
 func (r *routerConfigResponse) applyRouterDefaults() {
@@ -433,6 +450,7 @@ type routerConfigBody struct {
 	MaxRetriesPerBackend *int     `json:"max_retries_per_backend"`
 	EnsureLoadedTimeoutS *float64 `json:"ensure_loaded_timeout_s"`
 	EmbeddingURL         *string  `json:"embedding_url"`
+	TTSURL               *string  `json:"tts_url"`
 }
 
 // handleRouterConfigPut — PUT /api/v1/router/config (admin, page.settings).
@@ -473,6 +491,19 @@ func (s *Server) handleRouterConfigPut(w http.ResponseWriter, r *http.Request) {
 		}
 		if fields["embedding_url"] == "" {
 			putStringField(patch, "embedding_url", body.EmbeddingURL)
+		}
+	}
+	if body.TTSURL != nil {
+		// Same rule as embedding_url just above (and the same rule
+		// router/config.go's own validate() applies to TTSURL).
+		if *body.TTSURL != "" {
+			u, err := url.Parse(*body.TTSURL)
+			if err != nil || u.Scheme == "" || u.Host == "" {
+				fields["tts_url"] = "must be an absolute http(s) URL"
+			}
+		}
+		if fields["tts_url"] == "" {
+			putStringField(patch, "tts_url", body.TTSURL)
 		}
 	}
 	if len(fields) > 0 {
@@ -606,15 +637,23 @@ type systemSettingsResponse struct {
 	// setting"), deliberately absent from systemSettingsBody below so this
 	// endpoint never offers to write a field that has no effect.
 	RPID string `json:"rp_id"`
+
+	// CookieSecure mirrors config.Server.CookieSecure (issue #27, sprint 4)
+	// — plain bool here rather than *bool: resolvedSystemSettings below
+	// seeds the true default before unmarshaling the stored `infra.server`
+	// JSON onto it, same literal-default-then-overlay idiom
+	// resolvedRouterSettings uses for InjectStreamUsage, so an absent field
+	// in storage never gets misread as an explicit false.
+	CookieSecure bool `json:"cookie_secure"`
 }
 
-// Defaults mirror config.Config.applyDefaults() exactly (config.go:380-393)
+// Defaults mirror config.Config.applyDefaults() exactly (config.go:380-397)
 // — Paths and Tailscale have none at all (empty string = genuinely unset,
 // a deployment-time provisioning fact, not something to paper over with a
 // fake default). Duplicated here rather than read via s.deps.Config() for
 // the same self-consistency reason as the monitor/router groups above.
 const (
-	systemDefaultListen       = ":5000"
+	systemDefaultListen       = "127.0.0.1:5000"
 	systemDefaultRouterListen = ":8085"
 	systemDefaultMCPListen    = ":8095"
 	systemDefaultDBPath       = "/var/lib/forge/forge.db"
@@ -640,8 +679,8 @@ func (r *systemSettingsResponse) applySystemDefaults() {
 }
 
 func (s *Server) resolvedSystemSettings(ctx context.Context) systemSettingsResponse {
-	resp := systemSettingsResponse{Ports: map[string]int{}}
-	if err := json.Unmarshal(s.getRawSetting(ctx, "infra.server"), &resp); err != nil { // Listen/RouterListen/MCPListen/DBPath/TTSUnit
+	resp := systemSettingsResponse{Ports: map[string]int{}, CookieSecure: true}
+	if err := json.Unmarshal(s.getRawSetting(ctx, "infra.server"), &resp); err != nil { // Listen/RouterListen/MCPListen/DBPath/TTSUnit/CookieSecure
 		log.Printf("httpapi: warning: corrupt stored setting: %v", err)
 	}
 	if err := json.Unmarshal(s.getRawSetting(ctx, "infra.paths"), &resp); err != nil { // ModelsDir/SysconfigDir/StateDir/IconsDir/VulkanBin/RocmBin
@@ -682,6 +721,8 @@ type systemSettingsBody struct {
 	Ports map[string]int `json:"ports"`
 
 	Hostname *string `json:"hostname"`
+
+	CookieSecure *bool `json:"cookie_secure"`
 }
 
 // buildSystemCandidate applies structural validation (address shape, ports
@@ -747,6 +788,9 @@ func (s *Server) buildSystemCandidate(ctx context.Context, body systemSettingsBo
 	}
 	if body.Hostname != nil {
 		merged.Hostname = *body.Hostname
+	}
+	if body.CookieSecure != nil {
+		merged.CookieSecure = *body.CookieSecure
 	}
 	return merged, fields
 }
@@ -819,6 +863,7 @@ func (s *Server) handleSystemSettingsPut(w http.ResponseWriter, r *http.Request)
 	putStringField(serverPatch, "mcp_listen", &merged.MCPListen)
 	putStringField(serverPatch, "db_path", &merged.DBPath)
 	putStringField(serverPatch, "tts_unit", &merged.TTSUnit)
+	putBoolField(serverPatch, "cookie_secure", &merged.CookieSecure)
 	serverRaw, err := mergeSettingJSON(s.getRawSetting(ctx, "infra.server"), serverPatch)
 	if err != nil {
 		writeInternalError(w, err)
@@ -882,7 +927,13 @@ func (s *Server) handleSystemSettingsPut(w http.ResponseWriter, r *http.Request)
 	// itself no longer depends on it for correctness (it reads straight off
 	// the settings store, same fix applied to the router/monitor groups
 	// above after this file's own regression test caught the equivalent bug
-	// in an earlier version that read via s.deps.Config()).
+	// in an earlier version that read via s.deps.Config()). CookieSecure is
+	// the one field in this group that genuinely is live off this call —
+	// unlike Listen it's read fresh off s.deps.Config() on every cookie set
+	// (setSessionCookie, the WebAuthn challenge cookie), nothing was baked
+	// in at process start — but markRestartRequired below still fires for
+	// the whole infra.server group rather than special-casing this one
+	// field, so the Danger Zone banner errs conservative.
 	if s.deps.ReloadConfig != nil {
 		s.deps.ReloadConfig()
 	}

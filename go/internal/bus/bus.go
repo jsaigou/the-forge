@@ -18,6 +18,14 @@
 // repo's SSE convention (never a bare event name). Not a replacement for
 // status_update's slot_activity field — that field is the source of truth
 // on connect/reconnect; this event is the low-latency push between polls.
+//
+// Contract 1 amendment (HF model-acquisition track): download:progress,
+// download:state_changed, download:done, download:failed added
+// (go/internal/hfdownload/events.go) — the colon-namespaced form, matching
+// every other Sprint-era addition (profile:*, slot:activity, smith:*)
+// rather than the legacy underscore "download_*" this doc comment already
+// listed from V4 history: nothing in the v0.5 Go rewrite ever implemented
+// that name, so there's no live consumer to stay compatible with.
 package bus
 
 import (

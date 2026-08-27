@@ -16,7 +16,7 @@ const CELL = 11;
 const GAP = 3;
 const STEP = CELL + GAP;
 const LEFT_PAD = 28; // room for the Mon/Wed/Fri weekday labels
-const TOP_PAD = 16; // room for month labels
+const TOP_PAD = 12; // room for month labels
 // "All" scope's ramp — the app's existing themed --usage-1..4 sequential
 // vars (theme.css), unchanged.
 const DEFAULT_COLORS = ["var(--border)", "var(--usage-1)", "var(--usage-2)", "var(--usage-3)", "var(--usage-4)"];
@@ -86,7 +86,7 @@ export function ActivityHeatmap({ days, colors = DEFAULT_COLORS, ariaLabel = "To
   }
 
   const width = LEFT_PAD + (maxCol + 1) * STEP;
-  const height = TOP_PAD + 7 * STEP + 4;
+  const height = TOP_PAD + 7 * STEP + 2;
 
   return (
     <>
@@ -99,7 +99,7 @@ export function ActivityHeatmap({ days, colors = DEFAULT_COLORS, ariaLabel = "To
         aria-label={ariaLabel}
       >
         {monthLabels.map((m) => (
-          <text key={m.x} x={m.x} y={TOP_PAD - 5} style={{ fill: "var(--text-mute)", fontSize: 9, fontFamily: "var(--mono)" }}>
+          <text key={m.x} x={m.x} y={TOP_PAD - 4} style={{ fill: "var(--text-mute)", fontSize: 9, fontFamily: "var(--mono)" }}>
             {m.text}
           </text>
         ))}
@@ -126,13 +126,6 @@ export function ActivityHeatmap({ days, colors = DEFAULT_COLORS, ariaLabel = "To
           );
         })}
       </svg>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4, marginTop: 4, fontSize: 10, color: "var(--text-mute)" }}>
-        <span>Less</span>
-        {colors.map((color) => (
-          <span key={color} style={{ width: CELL, height: CELL, borderRadius: 2, background: color, display: "inline-block" }} />
-        ))}
-        <span>More</span>
-      </div>
     </>
   );
 }

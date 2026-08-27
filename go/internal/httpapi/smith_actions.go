@@ -38,14 +38,14 @@ type smithActionsResponse struct {
 
 // validActionKinds bounds smithActionCreateBody.Kind.
 var validActionKinds = map[string]bool{
-	smith.KindRunbook:            true,
-	smith.KindLoadConfig:         true,
-	smith.KindUnloadSlot:         true,
+	smith.KindRunbook:          true,
+	smith.KindLoadConfig:       true,
+	smith.KindUnloadSlot:       true,
 	smith.KindRestartForgeUnit: true,
-	smith.KindSettingsChange:     true,
-	smith.KindCatalogChange:      true,
-	smith.KindDeleteFiles:        true,
-	smith.KindProcedure:          true,
+	smith.KindSettingsChange:   true,
+	smith.KindCatalogChange:    true,
+	smith.KindDeleteFiles:      true,
+	smith.KindProcedure:        true,
 }
 
 // validActionRisks bounds smithActionCreateBody.Risk.
@@ -277,6 +277,53 @@ func (s *Server) handleSmithActionRecheck(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.audit(r, identity(r).Name, "smith_action_recheck", fmt.Sprintf("%d:%s", a.ID, a.Kind), "")
+	writeJSON(w, http.StatusOK, map[string]any{"action": a})
+}
+
+// handleSmithActionCheckNow — POST .../check-now (operator, ungated beyond
+// role: it only ever re-runs a read-only check, same posture as recheck
+// above). This is a PENDING runbook's "check now" — replaces the removed
+// self-attestation "done — I ran it myself" button: the operator asks smith
+// to verify the underlying condition immediately instead of waiting for the
+// next self-review sweep. A clean result closes the proposal (200, the
+// updated — now superseded — action); a still-failing result is NOT an
+// error state (the check itself succeeded, the condition just isn't
+// resolved yet) — reported as 200 with `still_failing`, action left pending
+// and unchanged, so the FE can show it without treating it like a request
+// failure.
+func (s *Server) handleSmithActionCheckNow(w http.ResponseWriter, r *http.Request) {
+	if !s.smithOK(w) {
+		return
+	}
+	id, ok := parseID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid action id")
+		return
+	}
+	a, err := s.deps.Smith.CheckPendingRunbook(r.Context(), id, identity(r).Name)
+	if err != nil {
+		var stillFailing *smith.RunbookStillFailingError
+		if errors.As(err, &stillFailing) {
+			cur, gerr := s.deps.Smith.GetAction(r.Context(), id)
+			if gerr != nil {
+				writeActionFetchError(w, gerr)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"action": cur, "still_failing": stillFailing.CheckIDs})
+			return
+		}
+		if errors.Is(err, smith.ErrInvalidTransition) {
+			status := ""
+			if cur, gerr := s.deps.Smith.GetAction(r.Context(), id); gerr == nil {
+				status = cur.Status
+			}
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid_state", "status": status})
+			return
+		}
+		writeActionFetchError(w, err)
+		return
+	}
+	s.audit(r, identity(r).Name, "smith_action_check_now", fmt.Sprintf("%d:%s", a.ID, a.Kind), "")
 	writeJSON(w, http.StatusOK, map[string]any{"action": a})
 }
 

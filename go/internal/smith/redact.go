@@ -39,6 +39,7 @@ var sensitiveKeyNames = map[string]bool{
 	"apikey":          true,
 	"active_token":    true, // the exact field GET /compressor/config leaked, 2026-07-21
 	"token":           true,
+	"hf_token":        true, // HF model-acquisition track — internal/hf.SettingToken's field name
 	"access_token":    true,
 	"bearer_token":    true,
 	"secret":          true,
@@ -110,6 +111,10 @@ func isSensitiveKeyName(key string) bool {
 var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`sk-[a-zA-Z0-9]+-[a-zA-Z0-9]+-[a-zA-Z0-9]{8,}`),
 	regexp.MustCompile(`(?i)bearer\s+[a-zA-Z0-9._\-]{16,}`),
+	// HuggingFace access tokens (hf_...) — matches neither pattern above,
+	// so a token that made it into free text (e.g. a raw HTTP error from
+	// internal/hf) would otherwise slip past this safety net.
+	regexp.MustCompile(`hf_[A-Za-z0-9]{20,}`),
 }
 
 // scrubSecretPatterns replaces any secret-shaped substring of s with the

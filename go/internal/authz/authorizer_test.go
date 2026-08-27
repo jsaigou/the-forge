@@ -188,7 +188,7 @@ func TestBearerKeys(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 
-	token, err := f.a.MintKey(ctx, KindForge, "opencode", RoleOperator)
+	token, err := f.a.MintKey(ctx, KindForge, "opencode", "", RoleOperator, "", time.Time{})
 	if err != nil {
 		t.Fatalf("MintKey: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestBearerKeys(t *testing.T) {
 	}
 
 	// Router/MCP keys carry no role.
-	mcpToken, err := f.a.MintKey(ctx, KindMCP, "agent-x", "")
+	mcpToken, err := f.a.MintKey(ctx, KindMCP, "agent-x", "", "", "", time.Time{})
 	if err != nil {
 		t.Fatalf("MintKey mcp: %v", err)
 	}
@@ -236,15 +236,15 @@ func TestBearerKeys(t *testing.T) {
 	if mcpID.Role.Allows(RoleViewer) {
 		t.Error("role-less identity must not pass any RBAC check")
 	}
-	if _, err := f.a.MintKey(ctx, KindMCP, "agent-x", RoleAdmin); err == nil {
+	if _, err := f.a.MintKey(ctx, KindMCP, "agent-x", "", RoleAdmin, "", time.Time{}); err == nil {
 		t.Error("mcp key with role must be rejected")
 	}
-	if _, err := f.a.MintKey(ctx, KindForge, "x", "superuser"); err == nil {
+	if _, err := f.a.MintKey(ctx, KindForge, "x", "", "superuser", "", time.Time{}); err == nil {
 		t.Error("invalid role must be rejected")
 	}
 
 	// Re-minting the same name revokes the old key.
-	token2, err := f.a.MintKey(ctx, KindForge, "opencode", RoleViewer)
+	token2, err := f.a.MintKey(ctx, KindForge, "opencode", "", RoleViewer, "", time.Time{})
 	if err != nil {
 		t.Fatalf("re-mint: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestBearerKeys(t *testing.T) {
 func TestBearerRateLimit(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	token, err := f.a.MintKey(ctx, KindRouter, "libre", "")
+	token, err := f.a.MintKey(ctx, KindRouter, "libre", "", "", "", time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,10 +287,76 @@ func TestBearerRateLimit(t *testing.T) {
 	}
 }
 
+// TestMintKeyBoundIP covers #34: a key minted with a non-empty boundIP only
+// verifies from that exact IP — both via VerifyBearerFrom (production path)
+// and VerifyBearer (test-only, ip="").
+func TestMintKeyBoundIP(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	token, err := f.a.MintKey(ctx, KindForge, "laptop-cli", "", RoleOperator, "100.100.100.100", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.a.VerifyBearerFrom(ctx, "100.100.100.100", token, KindForge); err != nil {
+		t.Fatalf("bound IP should verify: %v", err)
+	}
+	if _, err := f.a.VerifyBearerFrom(ctx, "203.0.113.9", token, KindForge); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("different IP must not verify, got %v", err)
+	}
+	if _, err := f.a.VerifyBearer(token, KindForge); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("VerifyBearer (ip=\"\") must not verify a bound key, got %v", err)
+	}
+}
+
+// TestMintKeyUnboundVerifiesFromAnyIP covers the router/MCP default (#34):
+// boundIP="" must keep verifying from any IP, unchanged from pre-#34
+// behavior.
+func TestMintKeyUnboundVerifiesFromAnyIP(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	token, err := f.a.MintKey(ctx, KindRouter, "opencode", "", "", "", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ip := range []string{"100.100.100.100", "203.0.113.9", "ip-anything"} {
+		if _, err := f.a.VerifyBearerFrom(ctx, ip, token, KindRouter); err != nil {
+			t.Errorf("unbound key from %s: %v", ip, err)
+		}
+	}
+}
+
+// TestMintKeyExpiry covers #36: a key minted with a non-zero expiresAt
+// verifies until that instant, then fails — never expiring for a zero
+// expiresAt is exercised implicitly by every other MintKey test in this file.
+func TestMintKeyExpiry(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	token, err := f.a.MintKey(ctx, KindForge, "cli", "", RoleOperator, "", f.now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.a.VerifyBearer(token, KindForge); err != nil {
+		t.Fatalf("not yet expired: %v", err)
+	}
+
+	// Exactly at expiry: not-before semantics (a.now().Before(ExpiresAt))
+	// treat the boundary instant itself as expired.
+	f.now = f.now.Add(time.Hour)
+	if _, err := f.a.VerifyBearer(token, KindForge); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("at expiry instant, want ErrUnauthenticated, got %v", err)
+	}
+
+	f.now = f.now.Add(time.Minute)
+	if _, err := f.a.VerifyBearer(token, KindForge); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("past expiry, want ErrUnauthenticated, got %v", err)
+	}
+}
+
 func TestTouchThrottling(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	token, err := f.a.MintKey(ctx, KindForge, "k", RoleViewer)
+	token, err := f.a.MintKey(ctx, KindForge, "k", "", RoleViewer, "", time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +441,7 @@ func TestNoSecretsInErrors(t *testing.T) {
 		t.Error("login error leaks the password")
 	}
 
-	token, _ := f.a.MintKey(ctx, KindForge, "k", RoleViewer)
+	token, _ := f.a.MintKey(ctx, KindForge, "k", "", RoleViewer, "", time.Time{})
 	_, _, secret, _ := ParseToken(token)
 	_, err = f.a.VerifyBearer(token, KindRouter)
 	if err != nil && (strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), token)) {

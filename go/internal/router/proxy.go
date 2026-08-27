@@ -73,7 +73,8 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(ctx)
 	}
 
-	if !s.checkAuth(r).ok {
+	auth := s.checkAuth(r)
+	if !auth.ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication required"})
 		return
 	}
@@ -82,6 +83,11 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// audit trail (auditOutcome reads it back; see clientAddrKey).
 	ctx = context.WithValue(ctx, clientAddrKey{},
 		authz.EffectiveRemoteAddr(parseRemoteAddr(r.RemoteAddr), r.Header.Get("X-Forwarded-For")).String())
+
+	// Per-slot consumer attribution (status.slot_consumers): derive the
+	// caller's human-facing label once up front and stash it in ctx —
+	// tryBackends Marks each foundry_slot attempt with it.
+	ctx = context.WithValue(ctx, consumerLabelKey{}, s.consumerLabel(r, auth))
 
 	// Read & buffer the body once — used for validation and re-serialised
 	// per-backend with wire_model overwritten. Cap at 32 MiB to prevent
@@ -149,17 +155,21 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// fallback today.
 	requestedBy := requestedByHeader(r)
 	var chain []*Backend
-	catChain, handled, errMsg := s.catalogChain(ctx, model, requestedBy)
+	catChain, handled, errMsg, loadReason := s.catalogChain(ctx, model, requestedBy)
 	switch {
 	case handled && catChain != nil:
 		chain = catChain
 	case handled:
-		writeJSON(w, http.StatusBadGateway, map[string]string{
+		body := map[string]string{
 			"error":   "catalog_load_failed",
 			"model":   model,
 			"detail":  errMsg,
 			"message": unavailableMessageFor(model, "", errMsg),
-		})
+		}
+		if loadReason != "" {
+			body["reason"] = string(loadReason)
+		}
+		writeJSON(w, http.StatusBadGateway, body)
 		return
 	default:
 		offChain, offHandled, offErrMsg := s.offeringChain(ctx, model)
@@ -296,6 +306,17 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 		return
 	}
 
+	// Per-slot consumer attribution: Mark this foundry_slot attempt's slot
+	// with the request's consumer label at START; the completion mark (same
+	// label, refreshed timestamp) happens when the upstream body finishes
+	// streaming — see markOnCloseBody in ModifyResponse below.
+	slotID := ""
+	attemptLabel := consumerLabelFromCtx(ctx)
+	if b.Kind == "foundry_slot" {
+		slotID = s.slotForPort(probePort(b))
+		s.markSlot(slotID, attemptLabel)
+	}
+
 	// attemptBackend runs one ReverseProxy attempt against targetBase.
 	// bypass=true is the Sprint 8 auto-bypass retry: going straight to
 	// resolved.DirectUpstreamURL with no x-compress-base-url header — the
@@ -409,6 +430,15 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 							s.recordExternalUsage(captured, model, buf, streaming)
 						})
 					}
+					// Consumer attribution completion mark: ReverseProxy
+					// always closes the upstream body after copying it, so
+					// this fires when the response is fully streamed — both
+					// SSE and buffered alike.
+					if slotID != "" && attemptLabel != "" {
+						resp.Body = &markOnCloseBody{ReadCloser: resp.Body, mark: func() {
+							s.markSlot(slotID, attemptLabel)
+						}}
+					}
 				}
 				s.auditOutcome(ctx, model, "ok", cl.String())
 				return nil
@@ -464,6 +494,29 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 	}
 
 	attemptBackend(w, r, resolved.BaseURL, false)
+}
+
+// markOnCloseBody wraps an upstream response body so closing it refreshes
+// the slot-consumer attribution mark — httputil.ReverseProxy always closes
+// the upstream body after copying it to the client, which is exactly
+// "response fully streamed" for both SSE and buffered responses.
+type markOnCloseBody struct {
+	io.ReadCloser
+	mark func()
+}
+
+func (b *markOnCloseBody) Close() error {
+	b.mark()
+	return b.ReadCloser.Close()
+}
+
+// markSlot records one consumer-attribution mark (nil-registry safe, and a
+// no-op without a resolved slot id or label).
+func (s *Server) markSlot(slotID, label string) {
+	if s.deps.Activity == nil || slotID == "" || label == "" {
+		return
+	}
+	s.deps.Activity.Mark(slotID, label)
 }
 
 // mutateBody returns body serialized as JSON with model overwritten to

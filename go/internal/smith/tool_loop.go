@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -96,7 +97,6 @@ func (s *Smith) runToolLoop(ctx context.Context, convID, msgID int64, sysPrompt,
 	tctx, cancel := context.WithTimeout(ctx, turnBudget)
 	defer cancel()
 
-
 	messages := []chatWireMessage{
 		{Role: "system", Content: sysPrompt},
 		{Role: "user", Content: userText},
@@ -130,6 +130,19 @@ func (s *Smith) runToolLoop(ctx context.Context, convID, msgID int64, sysPrompt,
 	toolsUsed := false
 	verifyNudged := false
 	verified := false
+
+	// Tier 1 Sprint 4: deterministic pre-check state, reset at the top of
+	// every round. lastRoundAllRunCheck stays true only when EVERY call in
+	// the round just completed was a successful run_check with a
+	// recognizable result shape — anything else (a different tool, an
+	// error, an unparseable result) disqualifies the round from the cheap
+	// pre-check, falling back to today's full LLM-auditor gate unchanged.
+	// lastRoundCheckSeverity accumulates check_id -> severity across the
+	// round's run_check calls (a round can batch up to 4 check_ids per
+	// call, and — for remote brains only — up to maxToolCallsPerRound
+	// separate calls).
+	lastRoundAllRunCheck := false
+	var lastRoundCheckSeverity map[string]Severity
 
 	// NOTE: deliberately NOT a post-statement loop — this body ends with
 	// its own `round++`, and the verify-gate below also does `round++;
@@ -210,30 +223,70 @@ func (s *Smith) runToolLoop(ctx context.Context, convID, msgID int64, sysPrompt,
 			// (not parallel), so it costs one extra short inference call, and
 			// smaller local models are the ones that need verification most.
 			if toolsUsed && !verifyNudged && !forceNoTools && round < maxRounds {
-				// Swap to the adversarial auditor system prompt — same model,
-				// different role. The auditor sees the full investigation
-				// history but is instructed not to trust it and to verify
-				// independently. This is the LongHorizon-Harness separation
-				// of Executor (prompt.md) from Auditor (audit.md) adapted to
-				// a single in-process agent.
-				//
-				// toolsInstructionBlock is re-appended here, not just carried
-				// over from the executor prompt: replacing messages[0]
-				// wholesale drops whatever tool text the executor's
-				// buildContext header had. In native mode that's harmless
-				// (toolsWireFor sends the real `tools` field every round,
-				// unaffected by system-prompt content), but in fenced mode
-				// tools are ONLY ever offered via prompt text — with no
-				// instructions here, a fenced-mode brain has no way to
-				// re-verify via a real tool call, and its best-effort guess
-				// at a call syntax becomes the "verified" answer instead
-				// (found live, Sprint 6, smith efficiency initiative — smith's
-				// real fenced-mode production brain was silently affected).
-				messages[0] = chatWireMessage{Role: "system", Content: embeddedAuditPrompt + "\n" + toolsInstructionBlock(tools, mode)}
-				messages = append(messages, chatWireMessage{Role: "user", Content: verifyNudge})
-				verifyNudged = true
-				round++
-				continue
+				// Tier 1 Sprint 4: a cheap deterministic pre-check before
+				// paying for the LLM auditor round below. Restricted to
+				// run_check — the one tool whose whole purpose is
+				// re-answerable idempotent verification (checks.go: "Checks
+				// stay pure Finding-returning functions"), and exactly what
+				// verifyNudge's own text already asks the model to do
+				// ("re-run the check most relevant to your conclusion via
+				// run_check"). Any other tool (kb_search, web_search, a
+				// mixed round, a failed/unparseable result) falls through to
+				// the unchanged full-auditor path below — this never makes
+				// verification LESS thorough, only skips it when a plain
+				// re-run already settles the question.
+				if lastRoundAllRunCheck && len(lastRoundCheckSeverity) > 0 {
+					confirmed, changed := s.precheckRunChecks(tctx, env, lastRoundCheckSeverity)
+					verifyNudged = true
+					// Either way, a real deterministic re-verification just
+					// happened — smith's own re-run, more rigorous than an
+					// LLM auditor's own tool call would be — so both
+					// outcomes count as verified: confirmed accepts the
+					// existing answer outright, and a contradiction still
+					// counts once the model rephrases against a fact smith
+					// itself already confirmed, not something it merely
+					// trusted unchecked.
+					verified = true
+					if confirmed {
+						// Fall through to "Accept the answer" below with the
+						// model's already-produced content from this round —
+						// no extra LLM call was needed to trust it.
+					} else {
+						// A real, load-bearing discrepancy: skip the
+						// adversarial persona swap (this isn't ambiguous —
+						// smith itself already knows what changed) and ask
+						// for a direct reconciliation instead. Still costs
+						// one round, same as the full-auditor path would.
+						messages = append(messages, chatWireMessage{Role: "user", Content: precheckContradictionNudge(changed)})
+						round++
+						continue
+					}
+				} else {
+					// Swap to the adversarial auditor system prompt — same model,
+					// different role. The auditor sees the full investigation
+					// history but is instructed not to trust it and to verify
+					// independently. This is the LongHorizon-Harness separation
+					// of Executor (prompt.md) from Auditor (audit.md) adapted to
+					// a single in-process agent.
+					//
+					// toolsInstructionBlock is re-appended here, not just carried
+					// over from the executor prompt: replacing messages[0]
+					// wholesale drops whatever tool text the executor's
+					// buildContext header had. In native mode that's harmless
+					// (toolsWireFor sends the real `tools` field every round,
+					// unaffected by system-prompt content), but in fenced mode
+					// tools are ONLY ever offered via prompt text — with no
+					// instructions here, a fenced-mode brain has no way to
+					// re-verify via a real tool call, and its best-effort guess
+					// at a call syntax becomes the "verified" answer instead
+					// (found live, Sprint 6, smith efficiency initiative — smith's
+					// real fenced-mode production brain was silently affected).
+					messages[0] = chatWireMessage{Role: "system", Content: embeddedAuditPrompt + "\n" + toolsInstructionBlock(tools, mode)}
+					messages = append(messages, chatWireMessage{Role: "user", Content: verifyNudge})
+					verifyNudged = true
+					round++
+					continue
+				}
 			}
 			// Accept the answer. If tools were used but no verification
 			// round ran, mark the answer as unverified (forceNoTools
@@ -271,6 +324,10 @@ func (s *Smith) runToolLoop(ctx context.Context, convID, msgID int64, sysPrompt,
 		}
 
 		records := make([]toolCallRecord, 0, len(calls))
+		// Tier 1 Sprint 4: reset per-round pre-check tracking; set to true
+		// only if every call below turns out to be a clean run_check.
+		lastRoundAllRunCheck = len(calls) > 0
+		lastRoundCheckSeverity = map[string]Severity{}
 		for i, c := range calls {
 			id := wireCalls[i].ID
 			dupeKey := c.Name + ":" + string(c.Args)
@@ -281,6 +338,18 @@ func (s *Smith) runToolLoop(ctx context.Context, convID, msgID int64, sysPrompt,
 
 			resultVal, callErr := s.dispatchTool(tctx, env, c, dupeHash, repeatCount, &netCalls, &forceNoTools)
 			dur := s.d.Now().Sub(started)
+
+			if c.Name == "run_check" && callErr == nil {
+				if sevs, ok := severityMapFromRunCheckResult(resultVal); ok {
+					for cid, sev := range sevs {
+						lastRoundCheckSeverity[cid] = sev
+					}
+				} else {
+					lastRoundAllRunCheck = false
+				}
+			} else {
+				lastRoundAllRunCheck = false
+			}
 
 			var src []MessageSource
 			if wtr, ok := resultVal.(webToolResult); ok {
@@ -360,6 +429,79 @@ func (s *Smith) parseRoundCalls(cr *chatRound, model string, mode *string) (cont
 	}
 	fencedCalls, stripped, _ := parseFencedToolCalls(cr.Content)
 	return stripped, fencedCalls
+}
+
+// severityMapFromRunCheckResult extracts check_id -> severity from a
+// run_check tool result (map[string]any{"findings": []toolFinding}, the
+// exact in-process value runCheckTool returns — never JSON-round-tripped,
+// so the concrete []toolFinding type assertion holds). ok=false for
+// anything that doesn't match that shape (an error result, a future format
+// change) — the caller treats that as "can't pre-check, fall back to the
+// full auditor."
+func severityMapFromRunCheckResult(v any) (map[string]Severity, bool) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	findings, ok := m["findings"].([]toolFinding)
+	if !ok {
+		return nil, false
+	}
+	out := make(map[string]Severity, len(findings))
+	for _, f := range findings {
+		out[f.CheckID] = Severity(f.Severity)
+	}
+	return out, true
+}
+
+// precheckRunChecks re-runs run_check for exactly the check_ids the model
+// already called this turn (via runTool directly, NOT dispatchTool — this
+// is smith's own verification action, not a model-spent call, so it must
+// not debit the model's repeat-call or network-call turn budgets) and
+// compares fresh severities against what the model saw. confirmed=true
+// only when every check_id's severity is unchanged — an unambiguous
+// confirm, safe to accept the model's already-produced answer without an
+// LLM auditor round. changed names every check_id whose severity moved (or
+// dropped out of the fresh result, or whose re-run itself failed) so the
+// contradiction nudge can be specific instead of vague.
+func (s *Smith) precheckRunChecks(ctx context.Context, env *ToolEnv, seen map[string]Severity) (confirmed bool, changed []string) {
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	tool, ok := findTool("run_check")
+	if !ok {
+		return false, ids // can't even attempt it — treat every id as unconfirmed
+	}
+	args, err := json.Marshal(map[string]any{"check_ids": ids})
+	if err != nil {
+		return false, ids
+	}
+	fresh, err := runTool(ctx, env, tool, args)
+	if err != nil {
+		return false, ids
+	}
+	freshSevs, ok := severityMapFromRunCheckResult(fresh)
+	if !ok {
+		return false, ids
+	}
+	for _, id := range ids {
+		if freshSevs[id] != seen[id] {
+			changed = append(changed, id)
+		}
+	}
+	return len(changed) == 0, changed
+}
+
+// precheckContradictionNudge asks the model to reconcile a real,
+// already-known discrepancy — deliberately not the adversarial audit.md
+// persona: smith already knows what changed (this isn't an ambiguous case
+// to investigate), so the nudge states the fact directly.
+func precheckContradictionNudge(changed []string) string {
+	return fmt.Sprintf(
+		"Before answering: re-running %s just now produced a DIFFERENT result than what you saw earlier this turn — live state has changed. Reconcile your answer against the current result (call run_check again if you need to see it) before responding.",
+		strings.Join(changed, ", "))
 }
 
 // dispatchTool runs one tool call, applying the network/dedupe/panic

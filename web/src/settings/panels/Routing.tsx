@@ -231,6 +231,8 @@ function ConfigCard({ canAdmin }: { canAdmin: boolean }) {
         <div className="form-grid wide">
           <Field rec={F["routing.embedding_url"]} value={g.active.embedding_url} disabled={!canAdmin} hideApplyBadge
             onChange={(v) => g.setField("embedding_url", String(v))} />
+          <Field rec={F["routing.tts_url"]} value={g.active.tts_url} disabled={!canAdmin} hideApplyBadge
+            onChange={(v) => g.setField("tts_url", String(v))} />
         </div>
         {canAdmin && (
           <div className="form-actions" style={{ marginTop: 12, gap: 8 }}>

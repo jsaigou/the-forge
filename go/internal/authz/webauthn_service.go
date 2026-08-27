@@ -406,6 +406,13 @@ func (s *WebAuthnService) ListCredentials(ctx context.Context, userID int64) ([]
 	return s.creds.ListByUser(ctx, userID)
 }
 
+// GetCredential returns a single credential by ID, for ownership checks
+// before a mutating operation (callers must verify UserID themselves —
+// this does not scope by caller).
+func (s *WebAuthnService) GetCredential(ctx context.Context, id string) (WebAuthnCredentialRecord, error) {
+	return s.creds.Get(ctx, id)
+}
+
 // DeleteCredential removes a credential by ID.
 func (s *WebAuthnService) DeleteCredential(ctx context.Context, id string) error {
 	return s.creds.Delete(ctx, id)

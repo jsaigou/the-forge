@@ -94,6 +94,7 @@ function renderInput(rec: SettingRecord, value: FieldValue, onChange: (v: FieldV
         <input
           type="text"
           value={String(value)}
+          placeholder={rec.placeholder}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
         />

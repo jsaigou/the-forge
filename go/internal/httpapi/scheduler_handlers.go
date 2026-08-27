@@ -867,6 +867,27 @@ func (s *Server) handleTTS(w http.ResponseWriter, r *http.Request) {
 	s.runUnitOp(w, r, unit, "tts", "tts")
 }
 
+// handleFixedInfraService starts/stops one of the always-on fixed infra
+// services (STT/Embedding/Aligner) — Tier 1 Sprint 2, Voice & Speech
+// settings: these had no start/stop route at all before this sprint (only
+// TTS did). Unit names are the same literals handleInfraServices already
+// uses to build these services' rows (services_handlers.go); presence in
+// cfg.Ports gates whether this deployment has the service at all, matching
+// handleInfraServices's own gate.
+func (s *Server) handleFixedInfraService(name, unit string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.Config == nil {
+			writeError(w, http.StatusServiceUnavailable, "config not available")
+			return
+		}
+		if _, ok := s.deps.Config().Ports[name]; !ok {
+			writeError(w, http.StatusNotFound, name+" is not configured on this deployment")
+			return
+		}
+		s.runUnitOp(w, r, unit, name, name)
+	}
+}
+
 // runUnitOp dispatches a start/stop (inferred from the URL suffix) to the
 // engine's aux-unit control and writes the uniform lifecycle response.
 func (s *Server) runUnitOp(w http.ResponseWriter, r *http.Request, unit, action, target string) {

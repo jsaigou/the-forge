@@ -247,6 +247,49 @@ func (l *LlamaClient) NCtx(ctx context.Context, port int) (int, error) {
 	return props.DefaultGenerationSettings.NCtx, nil
 }
 
+// Props is the subset of /props the collector caches once per slot session
+// (run.go's nctxCache pattern extended). ModelAlias/ModelPath are the
+// actually-running process's own self-report — the only ground truth for
+// "what's really loaded" independent of the engine's env-file-derived
+// belief. See docs/pitfalls.md's FOUNDRY_*/FORGE_* divergence incident:
+// smith's slot_model_identity check compares this against the engine's
+// configured alias to catch exactly that class of silent drift.
+type Props struct {
+	NCtx       int
+	ModelAlias string
+	ModelPath  string
+}
+
+// PropsInfo queries /props once and returns NCtx (same dual-location read
+// as NCtx above) plus ModelAlias/ModelPath. A separate method from NCtx
+// rather than changing its signature — NCtx has other callers
+// (internal/profile, internal/engine/lifecycle) that only ever needed the
+// int and shouldn't have to carry the extra fields through.
+func (l *LlamaClient) PropsInfo(ctx context.Context, port int) (Props, error) {
+	raw, err := l.get(ctx, port, "/props")
+	if err != nil {
+		return Props{}, err
+	}
+	var parsed struct {
+		NCtx                      int `json:"n_ctx"`
+		DefaultGenerationSettings struct {
+			NCtx int `json:"n_ctx"`
+		} `json:"default_generation_settings"`
+		ModelAlias string `json:"model_alias"`
+		ModelPath  string `json:"model_path"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return Props{}, err
+	}
+	p := Props{ModelAlias: parsed.ModelAlias, ModelPath: parsed.ModelPath}
+	if parsed.NCtx > 0 {
+		p.NCtx = parsed.NCtx
+	} else {
+		p.NCtx = parsed.DefaultGenerationSettings.NCtx
+	}
+	return p, nil
+}
+
 // Healthy queries /health. llama.cpp returns {"status":"ok"}; vLLM returns
 // an empty body (any 200 = ready).
 func (l *LlamaClient) Healthy(ctx context.Context, port int) bool {
@@ -284,6 +327,10 @@ type compressorCounters struct {
 	// parsePromScalar's ok=false being ignored below, same as every other
 	// optional counter in this struct).
 	RequestsTimeout, RequestsCanceled                    float64
+	// FailOpenByReason tracks compress_failopen_total{reason} — the count
+	// of messages that fell through to passthrough on timeout or error.
+	// Absent on legacy proxies; treated as empty map (zero fail-opens).
+	FailOpenByReason map[string]float64
 	TTFBCount, TTFBSum, TTFBMin, TTFBMax                 float64
 	LatencyCount, LatencySum, LatencyMin, LatencyMax     float64
 	OverheadCount, OverheadSum, OverheadMin, OverheadMax float64
@@ -333,6 +380,7 @@ func (l *LlamaClient) scrapeCompressorCounters(ctx context.Context, port int) (*
 	c.RequestsRateLimited, _ = parsePromScalar(text, "compress_requests_rate_limited_total")
 	c.RequestsTimeout, _ = parsePromScalar(text, "compress_requests_timeout_total")
 	c.RequestsCanceled, _ = parsePromScalar(text, "compress_requests_canceled_total")
+	c.FailOpenByReason = parsePromByLabel(text, "compress_failopen_total", "reason")
 	c.TTFBCount, _ = parsePromScalar(text, "compress_ttfb_ms_count")
 	c.TTFBSum, _ = parsePromScalar(text, "compress_ttfb_ms_sum")
 	c.TTFBMin, _ = parsePromScalar(text, "compress_ttfb_ms_min")

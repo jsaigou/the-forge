@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -184,6 +185,50 @@ func TestPreflightSystemListenAddr(t *testing.T) {
 	}
 }
 
+// TestIsSelfWildcardNarrowing covers the sprint-4 fix directly against the
+// decision function: narrowing an already-bound wildcard host to a specific
+// one on the SAME port is expected self-collision (the daemon's own running
+// wildcard socket already occupies it, even though restarting would free it
+// cleanly) and must warn, not error/422 — while a genuine conflict (a
+// different port, a non-wildcard current bind, or a non-EADDRINUSE failure)
+// must not be reclassified.
+//
+// A live-socket reproduction was tried first and dropped: whether binding a
+// specific address alongside an already-bound wildcard on the same port
+// actually collides is platform-dependent — it does on this repo's real
+// Linux deployment (verified live on ForgeHost, sprint 4) but does not on
+// macOS's BSD-derived stack (verified directly: net.Listen("tcp4", ":0")
+// followed by net.Listen("tcp", "127.0.0.1:<same port>") succeeds on
+// darwin). Testing the pure decision function is deterministic and
+// platform-independent; the actual wiring is proven live against the real
+// target OS.
+func TestIsSelfWildcardNarrowing(t *testing.T) {
+	addrInUse := &net.OpError{Op: "listen", Err: &os.SyscallError{Syscall: "bind", Err: syscall.EADDRINUSE}}
+	otherErr := &net.OpError{Op: "listen", Err: &os.SyscallError{Syscall: "bind", Err: syscall.EACCES}}
+
+	cases := []struct {
+		name     string
+		cur, cnd string
+		err      error
+		want     bool
+	}{
+		{"narrowing wildcard on same port", ":5000", "127.0.0.1:5000", addrInUse, true},
+		{"narrowing 0.0.0.0 form on same port", "0.0.0.0:5000", "127.0.0.1:5000", addrInUse, true},
+		{"different port is a real conflict", ":5000", "127.0.0.1:5001", addrInUse, false},
+		{"current already specific is a real conflict", "127.0.0.1:5000", "127.0.0.2:5000", addrInUse, false},
+		{"candidate also wildcard is not narrowing", ":5000", "0.0.0.0:5000", addrInUse, false},
+		{"non-EADDRINUSE error is never reclassified", ":5000", "127.0.0.1:5000", otherErr, false},
+		{"unparseable addresses fall through", ":5000", "not-an-addr", addrInUse, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isSelfWildcardNarrowing(c.cur, c.cnd, c.err); got != c.want {
+				t.Errorf("isSelfWildcardNarrowing(%q, %q, %v) = %v, want %v", c.cur, c.cnd, c.err, got, c.want)
+			}
+		})
+	}
+}
+
 func TestPreflightSystemPortCollision(t *testing.T) {
 	// serverWithSettings' fixture config has slot "a1" on port 8080.
 	s := serverWithSettings(t, newFakeSettings())
@@ -309,9 +354,9 @@ func TestSystemSettingsPutRejectsFailingPreflight(t *testing.T) {
 		t.Fatalf("PUT with a failing preflight = %d, want 422, body=%s", w.Code, w.Body)
 	}
 	var resp struct {
-		Error  string           `json:"error"`
+		Error  string            `json:"error"`
 		Fields map[string]string `json:"fields"`
-		Checks []preflightCheck `json:"checks"`
+		Checks []preflightCheck  `json:"checks"`
 	}
 	decodeJSON(t, w.Body, &resp)
 	if resp.Error != "preflight_failed" {

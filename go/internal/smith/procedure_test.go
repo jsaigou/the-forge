@@ -469,6 +469,31 @@ func TestRunProcedureSteps_CritPreconditionBlocksRun(t *testing.T) {
 	if a.Result == nil || !strings.Contains(a.Result.Error, "precondition") {
 		t.Fatalf("result = %+v, want a precondition-shaped error", a.Result)
 	}
+
+	// The action's own status stays "failed" (unchanged, correct — the
+	// request as a whole did not succeed), but the underlying procedure run
+	// must be distinguishable from a real mid-run failure: nothing was
+	// attempted here, so a scorecard/run-history reader shouldn't have to
+	// guess whether this needs investigation (2026-08-27 fix, idea from
+	// reviewing amd/skills' rocm-doctor exit-code contract).
+	run, err := s.GetProcedureRun(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetProcedureRun: %v", err)
+	}
+	if run.Status != procRunStatusPreconditionFailed {
+		t.Fatalf("run.Status = %q, want %q (not %q — a precondition gate is not a mid-run failure)",
+			run.Status, procRunStatusPreconditionFailed, procRunStatusFailed)
+	}
+	sc, err := s.ProcedureScorecard(context.Background(), id)
+	if err != nil {
+		t.Fatalf("ProcedureScorecard: %v", err)
+	}
+	if !sc.PreconditionFailed {
+		t.Fatalf("scorecard.PreconditionFailed = false, want true")
+	}
+	if sc.Completed {
+		t.Fatalf("scorecard.Completed = true, want false")
+	}
 }
 
 // TestRunProcedureSteps_OKPreconditionAllowsRun confirms the same procedure

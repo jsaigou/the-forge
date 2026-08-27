@@ -149,6 +149,9 @@ func (p Proc) NetDev() (rxBytes, txBytes uint64, ok bool) {
 func (p Proc) ByComm(name string) []int {
 	entries, err := os.ReadDir(p.root())
 	if err != nil {
+		// /proc unreadable (non-Linux dev host, sandboxed environment) —
+		// degrade to "nothing found" rather than fail; every caller already
+		// treats an empty result as "not running".
 		return nil
 	}
 	var pids []int

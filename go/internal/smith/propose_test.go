@@ -161,6 +161,12 @@ func TestProposeKernelParamsRunbook(t *testing.T) {
 	if !strings.Contains(string(actions[0].Detail), `"check_id":"kernel_params"`) {
 		t.Errorf("detail = %s, want the source check id stamped (§5.5)", actions[0].Detail)
 	}
+	// Tier 1 Sprint 4: a typed reason ActionCard.tsx can render consistently
+	// instead of whatever prose a proposer happened to write — this one
+	// requires a reboot, which smith will never trigger on its own.
+	if !strings.Contains(string(actions[0].Detail), `"why_cant_run":"requires_reboot"`) {
+		t.Errorf("detail = %s, want why_cant_run=requires_reboot", actions[0].Detail)
+	}
 }
 
 func TestProposeFreeMemoryRunbook(t *testing.T) {
@@ -185,6 +191,11 @@ func TestProposeFreeMemoryRunbook(t *testing.T) {
 			found = true
 			if !strings.Contains(string(a.Detail), `"check_id":"gtt_ceiling"`) {
 				t.Errorf("detail = %s, want the source check id stamped (§5.5)", a.Detail)
+			}
+			// Tier 1 Sprint 4: this is a deliberate guardrail (§4.5), not a
+			// capability gap — distinct from requires_reboot/risks_live_workload.
+			if !strings.Contains(string(a.Detail), `"why_cant_run":"policy_defers_to_human"`) {
+				t.Errorf("detail = %s, want why_cant_run=policy_defers_to_human", a.Detail)
 			}
 		}
 	}

@@ -19,11 +19,11 @@ func (d *DB) Keys() Keys { return keysView{d} }
 
 func (v keysView) Create(ctx context.Context, k APIKey) error {
 	_, err := v.d.sql.ExecContext(ctx,
-		`INSERT INTO api_keys (keyid, kind, name, secret_hash, role, created_at,
-		                       last_used_at, revoked_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		k.KeyID, k.Kind, k.Name, k.SecretHash, nullStr(k.Role),
-		unixOf(orNow(k.CreatedAt)), nullUnix(k.LastUsedAt), nullUnix(k.RevokedAt),
+		`INSERT INTO api_keys (keyid, kind, name, secret_hash, role, display_name,
+		                       bound_ip, created_at, last_used_at, revoked_at, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		k.KeyID, k.Kind, k.Name, k.SecretHash, nullStr(k.Role), k.DisplayName, k.BoundIP,
+		unixOf(orNow(k.CreatedAt)), nullUnix(k.LastUsedAt), nullUnix(k.RevokedAt), nullUnix(k.ExpiresAt),
 	)
 	if err != nil {
 		return fmt.Errorf("store: keys.create: %w", err)
@@ -33,13 +33,15 @@ func (v keysView) Create(ctx context.Context, k APIKey) error {
 
 func (v keysView) Get(ctx context.Context, keyid string) (APIKey, error) {
 	var k APIKey
-	var role sql.NullString
+	var role, displayName sql.NullString
 	var created int64
-	var lastUsed, revoked sql.NullInt64
+	var lastUsed, revoked, expires sql.NullInt64
 	err := v.d.sql.QueryRowContext(ctx,
-		`SELECT keyid, kind, name, secret_hash, role, created_at, last_used_at, revoked_at
+		`SELECT keyid, kind, name, secret_hash, role, display_name, bound_ip,
+		        created_at, last_used_at, revoked_at, expires_at
 		 FROM api_keys WHERE keyid = ?`, keyid,
-	).Scan(&k.KeyID, &k.Kind, &k.Name, &k.SecretHash, &role, &created, &lastUsed, &revoked)
+	).Scan(&k.KeyID, &k.Kind, &k.Name, &k.SecretHash, &role, &displayName, &k.BoundIP,
+		&created, &lastUsed, &revoked, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return APIKey{}, ErrNotFound
 	}
@@ -47,15 +49,18 @@ func (v keysView) Get(ctx context.Context, keyid string) (APIKey, error) {
 		return APIKey{}, fmt.Errorf("store: keys.get: %w", err)
 	}
 	k.Role = strOf(role)
+	k.DisplayName = strOf(displayName)
 	k.CreatedAt = timeOf(sql.NullInt64{Int64: created, Valid: true})
 	k.LastUsedAt = timeOf(lastUsed)
 	k.RevokedAt = timeOf(revoked)
+	k.ExpiresAt = timeOf(expires)
 	return k, nil
 }
 
 // List returns keys of one kind, or all kinds when kind == "".
 func (v keysView) List(ctx context.Context, kind string) ([]APIKey, error) {
-	query := `SELECT keyid, kind, name, secret_hash, role, created_at, last_used_at, revoked_at
+	query := `SELECT keyid, kind, name, secret_hash, role, display_name, bound_ip,
+	                 created_at, last_used_at, revoked_at, expires_at
 	          FROM api_keys`
 	args := []any{}
 	if kind != "" {
@@ -71,17 +76,19 @@ func (v keysView) List(ctx context.Context, kind string) ([]APIKey, error) {
 	var out []APIKey
 	for rows.Next() {
 		var k APIKey
-		var role sql.NullString
+		var role, displayName sql.NullString
 		var created int64
-		var lastUsed, revoked sql.NullInt64
-		if err := rows.Scan(&k.KeyID, &k.Kind, &k.Name, &k.SecretHash, &role,
-			&created, &lastUsed, &revoked); err != nil {
+		var lastUsed, revoked, expires sql.NullInt64
+		if err := rows.Scan(&k.KeyID, &k.Kind, &k.Name, &k.SecretHash, &role, &displayName, &k.BoundIP,
+			&created, &lastUsed, &revoked, &expires); err != nil {
 			return nil, fmt.Errorf("store: keys.list: %w", err)
 		}
 		k.Role = strOf(role)
+		k.DisplayName = strOf(displayName)
 		k.CreatedAt = timeOf(sql.NullInt64{Int64: created, Valid: true})
 		k.LastUsedAt = timeOf(lastUsed)
 		k.RevokedAt = timeOf(revoked)
+		k.ExpiresAt = timeOf(expires)
 		out = append(out, k)
 	}
 	if err := rows.Err(); err != nil {

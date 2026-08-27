@@ -52,7 +52,7 @@ func TestTailscalePeers_AllOnline(t *testing.T) {
 			return []collector.Peer{
 				{DNSName: "pairnode.example.ts.net.", Online: true},
 				{DNSName: "core.example.ts.net.", Online: true},
-				{DNSName: "sastun.example.ts.net.", Online: false}, // unwatched, must not affect result
+				{DNSName: "examplehost.example.ts.net.", Online: false}, // unwatched, must not affect result
 			}, true
 		},
 	}

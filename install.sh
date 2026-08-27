@@ -9,8 +9,6 @@
 #   sudo ./install.sh --upgrade              # in-place legacy upgrade
 #   sudo ./install.sh --dry-run              # show checks without making changes
 #   sudo ./install.sh --skip-models          # skip model download prompts
-#   sudo ./install.sh --min-age-hours 48     # stricter package age window
-#   sudo ./install.sh --skip-strict --reason "reason"  # disable age check
 #   sudo ./install.sh --help-hermes          # print Hermes agent connection guide
 #
 # Targets:
@@ -49,49 +47,50 @@ FORCE=0
 UPGRADE=0
 DRY_RUN=0
 SKIP_MODELS=0
-SKIP_STRICT=0
-SKIP_STRICT_REASON=""
-MIN_AGE_HOURS=24
-CVE_EXCEPTION=""
-OVERRIDE_PKG=""
-OVERRIDE_REASON=""
 
 print_hermes_guide() {
     cat <<'HERMES'
 
 ════════════════════════════════════════════════════════════════
-  HERMES AGENT CONNECTION GUIDE
-  Connecting to the Forge inference API from agent frameworks
+  AGENT CONNECTION GUIDE
+  Connecting to Forge's inference API from agent frameworks
 ════════════════════════════════════════════════════════════════
 
-The Forge exposes two persistent inference endpoints via Tailscale:
+Recommended: the a0 router (OpenAI-compatible, port 8085)
 
-  Primary slot:    https://a1.example.ts.net  (port 8080 internally)
-  Secondary slot:  https://a2.example.ts.net  (port 8081 internally)
+  https://a0.example.ts.net/v1/chat/completions
 
-Both endpoints speak the OpenAI-compatible chat completions API:
+  a0 picks a live slot for you, tracks usage/cost, applies the compressor,
+  and audit-logs the request — direct slot access below does none of that.
+  Mint a bearer key first:
+    /opt/forge/forge mint-key -db /var/lib/forge/forge.db -kind mcp -name <agent>
+  (token prints once — store it immediately). Requests from a tailnet
+  address skip the bearer check; anything else needs
+  "Authorization: Bearer sk-router-...".
 
-  POST https://a1.example.ts.net/v1/chat/completions
+Direct slot access (bypasses a0 entirely — no usage tracking, no
+compression, no audit log; tailnet membership is the only gate):
 
-Authentication: these inference endpoints do NOT require a Forge API key.
-They are gated by Tailscale network membership — any node on the
-example-tailnet.ts.net tailnet can reach them directly.
+  https://a1.example.ts.net  (slot a1, port 8080 internally)
+  https://a2.example.ts.net  (slot a2, port 8081 internally)
+  — a3/a4 exist too; see `tailscale serve status` on the host for the
+    full current list, it changes as slots/services are added.
 
 Quick test (from any tailnet node):
-  curl -s https://a1.example.ts.net/v1/models | python3 -m json.tool
+  curl -s https://a0.example.ts.net/v1/models \
+    -H "Authorization: Bearer sk-router-..." | python3 -m json.tool
 
 The ops dashboard (mode switching, metrics) is at:
   https://ops.example.ts.net
   — requires Forge login credentials.
 
-For full agent framework configuration examples, see:
-  docs/hermes-connection.md
+Full router design + auth model: docs/llm-router.md
 HERMES
     exit 0
 }
 
 usage() {
-    sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit 2
 }
 
@@ -103,11 +102,6 @@ while [[ $# -gt 0 ]]; do
         --upgrade)         UPGRADE=1 ;;
         --dry-run)         DRY_RUN=1 ;;
         --skip-models)     SKIP_MODELS=1 ;;
-        --skip-strict)     SKIP_STRICT=1; SKIP_STRICT_REASON="${2:-}"; [[ -n "${2:-}" ]] && shift ;;
-        --min-age-hours)   MIN_AGE_HOURS="$2"; shift ;;
-        --cve)             CVE_EXCEPTION="$2"; shift ;;
-        --override-package) OVERRIDE_PKG="$2"; shift ;;
-        --reason)          OVERRIDE_REASON="$2"; shift ;;
         --help|-h)         usage ;;
         --help-hermes)     print_hermes_guide ;;
         --yes)             YES=1 ;;
@@ -126,6 +120,25 @@ esac
 [[ "$TARGET" == "public" ]] && TOTAL_STEPS=16   # extra pre-flight step
 
 [[ $EUID -ne 0 ]] && { fail "Run as root: sudo ./install.sh"; exit 1; }
+
+# ── dev-target host guard ──────────────────────────────────────────────────
+# --target=dev hardcodes /opt/forge paths and testuser:testuser ownership — correct by
+# design (it's this operator's reference host), but a landmine if run
+# elsewhere without reading the header comment above. Require --force to
+# proceed with dev on a host that isn't recognizably ForgeHost.
+if [[ "$TARGET" == "dev" ]]; then
+    CURRENT_HOST="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)"
+    if [[ "${CURRENT_HOST,,}" != "forgehost"* ]]; then
+        if [[ $FORCE -eq 1 ]]; then
+            warn "Host '${CURRENT_HOST}' doesn't look like ForgeHost — continuing with --target=dev anyway (--force)"
+        else
+            fail "Host '${CURRENT_HOST}' doesn't look like ForgeHost, but --target=dev hardcodes"
+            fail "/opt/forge paths and testuser:testuser ownership for the reference host."
+            fail "Use --target=public on a generic host, or pass --force to proceed with dev anyway."
+            exit 1
+        fi
+    fi
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -495,28 +508,44 @@ check_model_inventory() {
     GGUF_COUNT=$(find "${MODELS_DIR}" -name "*.gguf" 2>/dev/null | wc -l)
     ok "Models directory: ${MODELS_DIR} (${GGUF_COUNT} GGUF files found)"
 
-    # Required models for default modes
-    declare -A REQUIRED_MODELS=(
-        ["Gemma 4 E2B (gemma4-e2b mode)"]="gemma4-e2b"
-        ["Qwen3.6-35B (qwen36, coding modes)"]="Qwen3.6-35B"
-    )
-    for MODEL_DESC in "${!REQUIRED_MODELS[@]}"; do
-        PATTERN="${REQUIRED_MODELS[$MODEL_DESC]}"
-        if find "${MODELS_DIR}" -name "*${PATTERN}*.gguf" -maxdepth 2 2>/dev/null | grep -q .; then
-            ok "Found: ${MODEL_DESC}"
-        else
-            warn "Missing: ${MODEL_DESC}"
-            info "  Required for modes referencing this model."
-            if [[ $DRY_RUN -eq 0 ]]; then
-                echo -en "  Download now? [y/N]: "
-                read -r -t 30 ANSWER || ANSWER="n"
-                if [[ "${ANSWER,,}" == "y" ]]; then
-                    info "  Use: installer/provision.py --only <model-id> --root $(dirname "${MODELS_DIR}")"
-                    info "  (Manifest: installer/assets.manifest.json)"
+    # Required models come from installer/assets.manifest.json's mandatory,
+    # non-service entries — the same manifest offer_provisioning already
+    # treats as authoritative. A hardcoded model list drifts silently (the
+    # catalog DB, not this script, owns which models a live deployment
+    # actually uses); the manifest is the one place this repo already
+    # maintains that list.
+    MANIFEST="${SCRIPT_DIR}/installer/assets.manifest.json"
+    ROOT_DIR="$(dirname "${MODELS_DIR}")"
+    if [[ ! -f "${MANIFEST}" ]]; then
+        warn "installer/assets.manifest.json not found — skipping mandatory-model check"
+    else
+        while IFS=$'\t' read -r MODEL_ID MODEL_PATH; do
+            [[ -z "${MODEL_ID}" ]] && continue
+            if [[ -f "${ROOT_DIR}/${MODEL_PATH}" ]]; then
+                ok "Found: ${MODEL_ID}"
+            else
+                warn "Missing: ${MODEL_ID} (expected ${ROOT_DIR}/${MODEL_PATH})"
+                if [[ $DRY_RUN -eq 0 ]]; then
+                    echo -en "  Download now? [y/N]: "
+                    read -r -t 30 ANSWER || ANSWER="n"
+                    if [[ "${ANSWER,,}" == "y" ]]; then
+                        info "  Use: installer/provision.py --only ${MODEL_ID} --root ${ROOT_DIR}"
+                    fi
                 fi
             fi
-        fi
-    done
+        done < <(python3 - "${MANIFEST}" <<'PYEOF'
+import json, sys
+m = json.load(open(sys.argv[1]))
+for item in m.get("models", []):
+    if item.get("role") != "mandatory" or item.get("type") == "service":
+        continue
+    for f in item.get("files", []):
+        fn = f.get("filename")
+        if fn:
+            print(f"{item['id']}\t{item['dest_rel_path']}/{fn}")
+PYEOF
+)
+    fi
 
     # ComfyUI reachability (PairNode) — reference-host topology only
     if [[ "$TARGET" == "dev" && ${TS_OK:-0} -eq 1 && -n "${TAILNET:-}" ]]; then
@@ -532,148 +561,27 @@ check_model_inventory() {
 # ── Step 9: Package age + OSV check (strict mode) ────────────────────────────
 
 verify_packages() {
-    if [[ "$TARGET" != "dev" ]]; then
-        step "Package verification (dev-target strict mode — skipped on public)"
-        info "The v0.5 daemon is a self-contained Go binary — no Python package supply chain on the host."
-        return
-    fi
-
-    step "Package verification (strict mode — PyPI age + OSV)"
-
-    LOCKFILE="${SCRIPT_DIR}/uv.lock"
-    if [[ ! -f "${LOCKFILE}" ]]; then
-        warn "uv.lock not found — skipping package verification"
-    elif [[ $SKIP_STRICT -eq 1 ]]; then
-        warn "Strict mode DISABLED. Reason: ${SKIP_STRICT_REASON}"
-    else
-        info "Checking package ages against PyPI API (min age: ${MIN_AGE_HOURS}h) ..."
-
-        # Extract (name, version) pairs from uv.lock
-        PACKAGES=$(python3 - <<'PYEOF'
-import re, sys
-with open(sys.argv[1]) as f:
-    content = f.read()
-pkgs = re.findall(r'name\s*=\s*"([^"]+)"\nversion\s*=\s*"([^"]+)"', content)
-for name, ver in pkgs:
-    print(f"{name} {ver}")
-PYEOF
-"${LOCKFILE}" 2>/dev/null || true)
-
-        if [[ -n "${PACKAGES}" ]]; then
-            AGE_FAILS=()
-            VULN_PKGS=()
-
-            # OSV batch check
-            if command -v curl &>/dev/null; then
-                OSV_PAYLOAD=$(python3 -c "
-import json, sys
-lines = sys.stdin.read().strip().split('\n')
-queries = []
-for line in lines:
-    parts = line.split(' ', 1)
-    if len(parts) == 2:
-        queries.append({'package': {'name': parts[0], 'ecosystem': 'PyPI'}, 'version': parts[1]})
-print(json.dumps({'queries': queries}))
-" <<< "${PACKAGES}" 2>/dev/null || echo '{"queries":[]}')
-
-                OSV_RESP=$(curl -sf --max-time 30 \
-                    -H "Content-Type: application/json" \
-                    -d "${OSV_PAYLOAD}" \
-                    "https://api.osv.dev/v1/querybatch" 2>/dev/null || echo "{}")
-
-                VULN_JSON=$(python3 -c "
-import json, sys
-resp = json.loads(sys.stdin.read())
-pkgs_input = '''${PACKAGES}'''.strip().split('\n')
-results = resp.get('results', [])
-for i, (line, result) in enumerate(zip(pkgs_input, results)):
-    vulns = result.get('vulns', [])
-    if vulns:
-        ids = ', '.join(v['id'] for v in vulns[:3])
-        print(f'{line}  VULNS:{ids}')
-" <<< "${OSV_RESP}" 2>/dev/null || true)
-
-                while IFS= read -r line; do
-                    [[ -n "${line}" ]] && VULN_PKGS+=("${line}")
-                done <<< "${VULN_JSON}"
-
-                if (( ${#VULN_PKGS[@]} > 0 )); then
-                    fail "OSV scan found vulnerabilities:"
-                    for v in "${VULN_PKGS[@]}"; do
-                        fail "  ${v}"
-                    done
-                    fail "Resolve vulnerabilities before installing. Use 'uv add <pkg>==<fixed_version>' and re-lock."
-                    exit 1
-                fi
-                ok "OSV scan: no known vulnerabilities in locked packages"
-            else
-                warn "curl not found — skipping OSV scan"
-            fi
-
-            # PyPI age check (sample first 5 packages to avoid rate limiting; full check on --dry-run)
-            CHECKED=0
-            while IFS=" " read -r PKG VER; do
-                [[ -z "${PKG}" ]] && continue
-                AGE_RESULT=$(curl -sf --max-time 10 \
-                    "https://pypi.org/pypi/${PKG}/${VER}/json" 2>/dev/null | \
-                    python3 -c "
-import json, sys
-from datetime import datetime, timezone
-data = json.load(sys.stdin)
-ver = '${VER}'
-files = data.get('releases', {}).get(ver, [])
-if not files:
-    print('NOT_FOUND')
-    sys.exit(0)
-earliest = min(f['upload_time_iso_8601'] for f in files)
-dt = datetime.fromisoformat(earliest.replace('Z', '+00:00'))
-age_h = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
-print(f'TOO_NEW:{age_h:.1f}h' if age_h < ${MIN_AGE_HOURS} else f'OK:{age_h:.1f}h')
-" 2>/dev/null || echo "SKIP")
-                if [[ "${AGE_RESULT}" == TOO_NEW* ]]; then
-                    AGE_FAILS+=("${PKG}==${VER} (${AGE_RESULT})")
-                fi
-                (( CHECKED++ )) || true
-                [[ $DRY_RUN -eq 0 && $CHECKED -ge 10 ]] && break  # sample check in non-dry-run
-            done <<< "${PACKAGES}"
-
-            if (( ${#AGE_FAILS[@]} > 0 )); then
-                fail "Package age check failed (min age: ${MIN_AGE_HOURS}h):"
-                for f in "${AGE_FAILS[@]}"; do fail "  ${f}"; done
-                fail "Wait until packages age through the hold window, or use --cve / --skip-strict."
-                exit 1
-            fi
-            ok "Package age check passed (${CHECKED} packages checked)"
-        fi
-    fi
+    # This used to check uv.lock (PyPI age + OSV) for V4's Python supply
+    # chain. There is no uv.lock, pyproject.toml, or Python package supply
+    # chain left in this repo since the 2026-07-28 TOML-decommission cutover
+    # — the v0.5 daemon is a single self-contained Go binary — so this step
+    # is a permanent no-op on every target now, not just "public".
+    step "Package verification (none required — v0.5 is a single Go binary)"
 }
 
 # ── Step 10: Install Python environment ───────────────────────────────────────
 
 setup_python_env() {
-    if [[ "$TARGET" != "dev" ]]; then
-        step "Python environment (dev-target only — skipped on public)"
-        info "The v0.5 daemon is a single Go binary; no host venv required."
-        return
-    fi
-
-    step "Python environment"
-
-    if [[ $DRY_RUN -eq 1 ]]; then
-        info "[dry-run] Would run: uv sync --frozen --require-hashes"
-    elif [[ -f "${SCRIPT_DIR}/uv.lock" ]]; then
-        cd "${SCRIPT_DIR}"
-        uv sync --frozen --require-hashes 2>&1 | tail -5
-        ok "uv sync complete"
-    else
-        warn "uv.lock not found — running uv pip install from venv instead"
-        uv pip install --python /opt/forge/venv/bin/python \
-            flask flask-login argon2-cffi tomlkit filelock \
-            gunicorn gevent cachetools pydantic \
-            mistune bleach pillow defusedxml gguf huggingface_hub \
-            2>&1 | tail -5
-        ok "pip install complete"
-    fi
+    # V4's Flask/gunicorn+gevent app (the only thing that ever needed this
+    # venv) was deleted from the repo in the 2026-07-28 TOML-decommission
+    # cutover — there is no rollback path and no pyproject.toml/uv.lock left
+    # in this repo to sync from. The v0.5 daemon is a single Go binary; this
+    # step is a no-op on every target now, not just "public". (It used to
+    # fall back to `uv pip install`-ing V4's Python stack — flask, gunicorn,
+    # gevent, tomlkit, etc — whenever uv.lock was absent, which is always
+    # true today; that branch is deleted, not patched, since nothing in this
+    # repo can use its output anymore.)
+    step "Python environment (none required — v0.5 is a single Go binary)"
 }
 
 # ── Step 11: System directories + user ────────────────────────────────────────
@@ -710,31 +618,57 @@ create_dirs() {
     fi
 }
 
-# ── Step 12: Deploy application files ────────────────────────────────────────
+# ── Step 12: Build & deploy the forge binary ──────────────────────────────────
+# v0.5 is a single Go binary serving the dashboard, a0 router, and MCP — the
+# React PWA is embedded into it via go:embed (go/internal/httpapi/pwa.go),
+# not read from disk. This step used to sync forge/templates + forge/static
+# instead of ever building/installing the actual binary: those directories
+# are leftover pre-Go-rewrite assets nothing in go/ reads at runtime (the
+# live dashboard is embedded web_dist), so a fresh install could complete
+# with no forge binary at /opt/forge/forge at all.
 
 deploy_app_files() {
-    step "Deploy application files"
+    step "Build & deploy forge binary"
 
-    FORGE_SRC="${SCRIPT_DIR}/forge"
-    FORGE_DEST="/opt/forge"
+    GO_SRC="${SCRIPT_DIR}/go"
+    PREBUILT="${SCRIPT_DIR}/forge"
+    DEST="/opt/forge/forge"
 
-    if [[ ! -d "${FORGE_SRC}" ]]; then
-        fail "forge/ source directory not found at ${FORGE_SRC}"; exit 1
-    fi
-
-    # v0.5 ships the dashboard/a0/MCP as the single Go binary (`forge`, deployed
-    # via scripts/deploy-forge.sh). This dir now only carries legacy web assets.
     if [[ $DRY_RUN -eq 1 ]]; then
-        info "[dry-run] Would sync ${FORGE_SRC}/templates → ${FORGE_DEST}/templates"
-        info "[dry-run] Would sync ${FORGE_SRC}/static → ${FORGE_DEST}/static"
-    else
-        rsync -a --delete "${FORGE_SRC}/templates/" "${FORGE_DEST}/templates/" 2>/dev/null || \
-            cp -r "${FORGE_SRC}/templates" "${FORGE_DEST}/"
-        rsync -a "${FORGE_SRC}/static/" "${FORGE_DEST}/static/" 2>/dev/null || \
-            cp -r "${FORGE_SRC}/static" "${FORGE_DEST}/"
-        chown -R testuser:testuser "${FORGE_DEST}"
-        ok "Web assets synced to ${FORGE_DEST}"
+        info "[dry-run] Would build ${GO_SRC}/cmd/forge (or use ${PREBUILT} if go/ is absent) and atomically deploy to ${DEST}"
+        return
     fi
+
+    VERSION="$(git -C "${SCRIPT_DIR}" describe --tags --always --dirty 2>/dev/null || echo dev)"
+
+    if [[ -d "${GO_SRC}" ]]; then
+        if ! command -v go &>/dev/null; then
+            fail "go toolchain not found on PATH — required to build ${GO_SRC}/cmd/forge"
+            fail "Install Go, or remove ${GO_SRC} and place a pre-built binary at ${PREBUILT} instead."
+            exit 1
+        fi
+        info "Building forge binary (version ${VERSION}) ..."
+        ( cd "${GO_SRC}" && go build -ldflags "-X main.version=${VERSION}" -o "${SCRIPT_DIR}/forge" ./cmd/forge )
+        ok "Build complete"
+    elif [[ -x "${PREBUILT}" ]]; then
+        info "go/ module not present — using pre-built binary at ${PREBUILT}"
+    else
+        fail "Neither ${GO_SRC} (Go module) nor a pre-built ${PREBUILT} binary found — nothing to deploy."
+        exit 1
+    fi
+
+    # Atomic same-fs copy → chmod 755 → chcon bin_t → mv. A fresh `install`/
+    # `cp`-created file lands 0644 with the default (non-bin_t) SELinux
+    # context; systemd then refuses to exec it (status=203/EXEC), and
+    # overwriting a running binary in place risks ETXTBSY. Both were hit
+    # live against this exact deploy path (2026-07-29/07-30) — see
+    # CLAUDE.md's "Deploy" section.
+    TMP_BIN="/opt/forge/forge.new"
+    install -m 0755 "${SCRIPT_DIR}/forge" "${TMP_BIN}"
+    chcon -u system_u -r object_r -t bin_t "${TMP_BIN}" 2>/dev/null || restorecon -F "${TMP_BIN}" 2>/dev/null || true
+    mv -f "${TMP_BIN}" "${DEST}"
+    chown testuser:testuser "${DEST}"
+    ok "forge binary deployed to ${DEST} (${VERSION})"
 }
 
 # ── Step 13: Config ────────────────────────────────────────────────────────────
@@ -753,11 +687,48 @@ install_systemd_units() {
     step "Systemd units"
 
     SYSTEMD_SRC="${SCRIPT_DIR}/systemd"
+    # This list is ground-truthed against `systemctl list-unit-files
+    # 'forge-*'` on the live reference host (ForgeHost), not guessed from
+    # systemd/*.service's file listing — that directory also still carries
+    # dead units from before the primary/secondary→a1/a2 rename and the
+    # dashboard/a0/MCP single-binary merge (forge-dashboard.service,
+    # forge-primary.service, forge-secondary.service, forge-mcp.service,
+    # forge-router.service). forge-dashboard.service in particular execs a
+    # gunicorn+V4 Flask app deleted from the repo in the 2026-07-28
+    # TOML-decommission cutover — installing and enabling it, as this
+    # script used to, would crash-loop on first boot. forge-daemon.service
+    # is the real v0.5 binary (dashboard + a0 router + MCP, one process).
     UNITS=(
-        forge-dashboard.service
+        forge-daemon.service
+        forge-a1.service
+        forge-a2.service
+        forge-a3.service
+        forge-a4.service
+        forge-aligner.service
+        forge-embedding.service
+        forge-stt.service
+        forge-tts.service
+        forge-tts-base.service
+        forge-tts-custom.service
+        forge-tts-backup.service
+        forge-tts-backup.timer
+        forge-compress@.service
     )
-    # NOTE: boot-to-default-mode was retired several major versions ago — no
-    # forge-boot.service exists anymore; models load on demand via the a0 scheduler.
+    # Enabled (WantedBy=multi-user.target, starts on boot): the always-on
+    # core + infra services. a1-a4 are scheduler-managed (the a0 on-demand
+    # loader starts/stops them, not systemd at boot) and forge-compress@ is
+    # a template — instances are provisioned per-provider at runtime by
+    # internal/headroom.Provisioner, never enabled directly. Neither is
+    # started here, matching live ForgeHost (`static`/`disabled` respectively).
+    ENABLE_UNITS=(
+        forge-daemon.service
+        forge-aligner.service
+        forge-embedding.service
+        forge-stt.service
+        forge-tts.service
+        forge-tts-base.service
+        forge-tts-custom.service
+    )
 
     for UNIT in "${UNITS[@]}"; do
         SRC="${SYSTEMD_SRC}/${UNIT}"
@@ -773,9 +744,23 @@ install_systemd_units() {
         fi
     done
 
+    POLKIT_SRC="${SCRIPT_DIR}/polkit/50-forge.rules"
+    if [[ -f "${POLKIT_SRC}" ]]; then
+        if [[ $DRY_RUN -eq 0 ]]; then
+            cp "${POLKIT_SRC}" /etc/polkit-1/rules.d/50-forge.rules
+            ok "Installed: polkit/50-forge.rules (passwordless forge-* restart for testuser/forge)"
+        else
+            info "[dry-run] Would install: /etc/polkit-1/rules.d/50-forge.rules"
+        fi
+    else
+        warn "Polkit rule not found: ${POLKIT_SRC} — restart/reconfigure actions will prompt for a password"
+    fi
+
     if [[ $DRY_RUN -eq 0 ]]; then
         systemctl daemon-reload
-        systemctl enable forge-dashboard.service 2>/dev/null || true
+        for UNIT in "${ENABLE_UNITS[@]}"; do
+            systemctl enable "${UNIT}" 2>/dev/null || true
+        done
         ok "systemd units reloaded and enabled"
     fi
 
@@ -833,13 +818,83 @@ offer_provisioning() {
     fi
 }
 
+# ── Tailscale service exposure ─────────────────────────────────────────────────
+# Only offered when check_prereqs already confirmed the host is joined to a
+# tailnet (TS_OK=1). Runs as a sub-action of the final step, not its own
+# numbered step, matching run_kgc_match/offer_provisioning's pattern.
+
+configure_tailscale_serve() {
+    [[ ${TS_OK:-0} -eq 1 ]] || return 0
+
+    # Only the ports this script can state with certainty at install time:
+    # ops/a0/a1-a4 are config.go's compiled-in defaults, tts is
+    # forge-tts.service's own hardcoded FORGE_TTS_LISTEN (systemd/forge-
+    # tts.service). embedding/stt/aligner bind to whatever port the operator
+    # points infra.ports at post-install (Settings → Infrastructure) — this
+    # script cannot know that value yet, so they're deliberately left out.
+    # See docs/infrastructure.md for adding those once configured, and for
+    # the tailnet-policy step some tailnets require before --service=svc:x
+    # will actually bind.
+    # Parallel indexed arrays (not associative) — matches this script's
+    # existing array style everywhere else and stays portable to bash 3.2
+    # (macOS's shipped /bin/bash, used to develop/test this script, has no
+    # declare -A at all).
+    local NAMES=(ops a0 a1 a2 a3 a4 tts)
+    local PORTS=(5000 8085 8080 8081 8087 8088 8082)
+
+    echo -e "\n    ${BOLD}Tailscale service exposure${NC}"
+    info "Host is on tailnet (${TAILNET:-unknown}). This can expose Forge's core"
+    info "services as named tailnet services (HTTPS, tailnet-only):"
+    local i
+    for i in "${!NAMES[@]}"; do
+        info "  sudo tailscale serve --bg --service=svc:${NAMES[$i]} --https=443 localhost:${PORTS[$i]}"
+    done
+    info "embedding/stt/aligner aren't included — their real ports depend on your own"
+    info "STT/embedding/aligner setup. See docs/infrastructure.md for adding those once"
+    info "infra.ports is configured (Settings → Infrastructure)."
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        info "[dry-run] Would offer to configure the ${#NAMES[@]} services above"
+        return 0
+    fi
+
+    echo -en "\n  Configure these ${#NAMES[@]} Tailscale services now? [y/N]: "
+    if [[ $YES -ne 1 ]]; then
+        read -r ANSWER || ANSWER="n"
+    else
+        ANSWER="n"   # --yes must never silently expose new public hostnames
+    fi
+    if [[ "${ANSWER,,}" != "y" ]]; then
+        info "Skipping. Run the commands above manually whenever you're ready."
+        return 0
+    fi
+
+    # install.sh already runs as root (its own usage header requires sudo),
+    # so tailscale is invoked directly here — the printed commands above
+    # carry their own sudo for anyone copying them into a non-root shell.
+    local ANY_FAILED=0
+    for i in "${!NAMES[@]}"; do
+        if tailscale serve --bg --service="svc:${NAMES[$i]}" --https=443 "localhost:${PORTS[$i]}" 2>/dev/null; then
+            ok "svc:${NAMES[$i]} → localhost:${PORTS[$i]}"
+        else
+            warn "svc:${NAMES[$i]} failed — some tailnets require declaring the service in the admin console's policy file first (docs/infrastructure.md)"
+            ANY_FAILED=1
+        fi
+    done
+    if [[ $ANY_FAILED -eq 0 ]]; then
+        ok "All Tailscale services configured"
+    fi
+}
+
 # ── Step 15/16: SELinux + health check + summary ──────────────────────────────
 
 finish_selinux_health_summary() {
     step "SELinux labels + service start + summary"
 
     if command -v chcon &>/dev/null && [[ $DRY_RUN -eq 0 ]]; then
-        chcon -R -t bin_t /opt/forge/venv/bin/ 2>/dev/null || true
+        # /opt/forge/forge itself is already labeled bin_t by
+        # deploy_app_files' atomic install — this is only the llama.cpp
+        # inference binaries, which live outside that path.
         for BIN in "${LLAMA_VULKAN_BIN}" "${LLAMA_ROCM_BIN}"; do
             [[ -f "${BIN}" ]] && chcon -t bin_t "${BIN}" 2>/dev/null || true
         done
@@ -847,8 +902,8 @@ finish_selinux_health_summary() {
     fi
 
     if [[ $DRY_RUN -eq 0 ]]; then
-        info "Starting forge-dashboard.service ..."
-        systemctl restart forge-dashboard.service 2>/dev/null || true
+        info "Starting forge-daemon.service ..."
+        systemctl restart forge-daemon.service 2>/dev/null || true
 
         # Wait for health endpoint
         HEALTH_OK=0
@@ -861,12 +916,14 @@ finish_selinux_health_summary() {
         done
 
         if [[ $HEALTH_OK -eq 1 ]]; then
-            ok "forge-dashboard.service running — /api/v1/health responded"
+            ok "forge-daemon.service running — /api/v1/health responded"
         else
-            warn "forge-dashboard.service did not respond on /api/v1/health within 30s"
-            info "Check: journalctl -u forge-dashboard.service -n 50"
+            warn "forge-daemon.service did not respond on /api/v1/health within 30s"
+            info "Check: journalctl -u forge-daemon.service -n 50"
         fi
     fi
+
+    configure_tailscale_serve
 
     # ── Final summary ──
     echo -e "\n${BOLD}${C}══════════════════════════════════════════════${NC}"
@@ -895,7 +952,9 @@ finish_selinux_health_summary() {
         fi
         echo -e "Dashboard${TAILNET_MSG}"
         if [[ -n "${TAILNET:-}" ]]; then
-            echo -e "Inference: https://a1.${TAILNET} (primary slot)"
+            echo -e "Agent API (a0 router, tracked/compressed): https://a0.${TAILNET}"
+            echo -e "Direct slot access (untracked, tailnet-gated only): https://a1.${TAILNET}, a2, a3, a4"
+            echo -e "${DIM}  --help-hermes for the full agent connection guide${NC}"
         fi
         echo -e "\n${DIM}BIOS checklist and kernel parameters: docs/bios-setup.md${NC}"
         echo -e "${DIM}Adding models: docs/adding-a-model.md${NC}"
@@ -904,7 +963,11 @@ finish_selinux_health_summary() {
         echo -e "\n${BOLD}Next steps:${NC}"
         echo -e "  1. Provision mandatory models (if not done above):"
         echo -e "     ${DIM}sudo python3 ${SCRIPT_DIR}/installer/provision.py --mandatory --root $(dirname "${MODELS_DIR}")${NC}"
-        echo -e "  2. Open the dashboard: ${DIM}http://localhost:5000${NC} (first visit creates the admin account)"
+        if [[ -n "${TAILNET:-}" ]]; then
+            echo -e "  2. Open the dashboard: ${DIM}https://ops.${TAILNET}${NC} (first visit creates the admin account)"
+        else
+            echo -e "  2. Open the dashboard: ${DIM}http://localhost:5000${NC} (first visit creates the admin account)"
+        fi
         echo -e "  3. Mint keys for agents/MCP consumers:"
         echo -e "     ${DIM}/opt/forge/forge mint-key -db /var/lib/forge/forge.db -kind mcp -name <agent>${NC}"
         echo -e "     (token prints once — store it immediately)"
@@ -912,8 +975,14 @@ finish_selinux_health_summary() {
         if [[ -f /etc/sysconfig/forge-kgc ]]; then
             echo -e "  5. Hardware profile pinned: ${DIM}$(cat /etc/sysconfig/forge-kgc)${NC}"
         fi
+        if [[ -n "${TAILNET:-}" ]]; then
+            echo -e "\n${DIM}Agent API (a0 router, tracked/compressed): https://a0.${TAILNET}${NC}"
+            echo -e "${DIM}  --help-hermes for the full agent connection guide${NC}"
+        fi
         echo -e "\n${DIM}Full flow: installer/README.md${NC}"
     fi
+
+    echo -e "${DIM}Tailscale networking/ports reference: docs/infrastructure.md${NC}"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════

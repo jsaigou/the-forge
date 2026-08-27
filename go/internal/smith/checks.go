@@ -68,6 +68,15 @@ type Check struct {
 	// persisted or proposed against.
 	Skip func(env *CheckEnv) bool
 	Run  func(ctx context.Context, env *CheckEnv) Finding
+	// ManualOnly excludes this check from every scheduled sweep (quick AND
+	// deep) — it only ever runs when explicitly selected by ID
+	// (selectChecks' checkIDs branch, which is checked before scope and so
+	// bypasses this entirely). comfyui_prune is the first user: proposing a
+	// file deletion is not something that should happen unprompted in a
+	// background sweep the operator never asked for (S7-followup smith UX
+	// sprint, 2026-08-26) — detection now only runs from a dedicated
+	// operator-triggered "check for unused files" action.
+	ManualOnly bool
 }
 
 // CheckEnv carries everything checks may read. Built once per sweep by
@@ -97,6 +106,16 @@ type CheckEnv struct {
 	// GitAhead is the Deps seam of the same name (git rev-list --count) —
 	// binary_versions' upstream-drift probe.
 	GitAhead func(ctx context.Context, root, ref string) (int, error)
+
+	// GitBehindLog is the Deps seam of the same name (git log --format=%s)
+	// — binary_versions' watchlist-match commit-subject source (S6 phase 2).
+	GitBehindLog func(ctx context.Context, root, ref string, maxN int) ([]string, error)
+
+	// BuildRefreshWatchlist is the resolved smith.build_refresh.watchlist
+	// setting — keywords binary_versions matches against GitBehindLog's
+	// fetched subjects. Empty when unset; the check then fetches nothing
+	// (no reason to pay the extra git-log call with nothing to match).
+	BuildRefreshWatchlist []string
 
 	// GitLsRemote is the Deps seam of the same name (git ls-remote <url>
 	// HEAD) — binary_versions' upstream-NIGHTLY drift probe (P3smith).
@@ -152,6 +171,16 @@ type CheckEnv struct {
 	// BuildMap inputs.
 	ComfyUIModelRoots   []string
 	ComfyUIWorkflowDirs []string
+	// ComfyUIKeepFiles is the resolved smith.comfyui.keep_files setting —
+	// full paths proposeComfyUIDelete excludes from any delete proposal.
+	ComfyUIKeepFiles []string
+
+	// Logf is the shared diagnostic logger (Smith.logf, copied through
+	// unchanged) — lets the free-function propose* helpers in propose.go
+	// surface a swallowed error instead of silently dropping a proposal.
+	// nil in every test literal; logf below is nil-safe for exactly that
+	// reason.
+	Logf func(format string, args ...any)
 }
 
 // cfg returns the infra config or nil when no Cfg func is wired.
@@ -160,6 +189,16 @@ func (e *CheckEnv) cfg() *config.Config {
 		return nil
 	}
 	return e.Cfg()
+}
+
+// logf is a nil-safe wrapper around Logf — every propose* free function can
+// call e.logf(...) unconditionally, including in tests that build a bare
+// &CheckEnv{}.
+func (e *CheckEnv) logf(format string, args ...any) {
+	if e == nil || e.Logf == nil {
+		return
+	}
+	e.Logf(format, args...)
 }
 
 // registry is the check catalog (docs/v5-smith.md §4.2). Registry is
@@ -175,8 +214,16 @@ var registry = []Check{
 		Run: runDiskSpace,
 	},
 	{
+		ID: "binary_paths", Name: "Configured/catalog binary paths exist", Category: CategoryStorage, Fast: true,
+		Run: runBinaryPaths,
+	},
+	{
 		ID: "slot_agreement", Name: "Slot unit vs scheduler agreement", Category: CategorySlots, Fast: true,
 		Run: runSlotAgreement,
+	},
+	{
+		ID: "slot_model_identity", Name: "Configured vs actually-running model identity", Category: CategorySlots, Fast: true,
+		Run: runSlotModelIdentity,
 	},
 	{
 		ID: "n_ctx_actual", Name: "Configured vs actual n_ctx", Category: CategoryConfig, Fast: true,
@@ -211,6 +258,10 @@ var registry = []Check{
 		Run: runCompressorHealth,
 	},
 	{
+		ID: "compressor_failopen", Name: "Compressor fail-open rate", Category: CategoryServices, Fast: false,
+		Run: runCompressorFailOpen,
+	},
+	{
 		ID: "brain_resolvable", Name: "smith brain resolvable", Category: CategoryConfig, Fast: false,
 		Run: runBrainResolvable,
 	},
@@ -237,8 +288,9 @@ var registry = []Check{
 	},
 	{
 		ID: "comfyui_prune", Name: "ComfyUI unreferenced model files", Category: CategoryStorage, Fast: false,
-		Skip: func(env *CheckEnv) bool { return !env.ComfyUIEnabled },
-		Run:  runComfyUIPrune,
+		Skip:       func(env *CheckEnv) bool { return !env.ComfyUIEnabled },
+		Run:        runComfyUIPrune,
+		ManualOnly: true,
 	},
 }
 
@@ -276,15 +328,19 @@ func (s *Smith) checkEnv(ctx context.Context) *CheckEnv {
 		BinaryVersion:   s.d.BinaryVersion,
 		BinariesEnabled: s.BinariesEnabled(ctx),
 
-		JournalErrors: s.d.JournalErrors,
-		KernelJournal: s.d.KernelJournal,
-		GitAhead:      s.d.GitAhead,
-		GitLsRemote:   s.d.GitLsRemote,
+		JournalErrors:         s.d.JournalErrors,
+		KernelJournal:         s.d.KernelJournal,
+		GitAhead:              s.d.GitAhead,
+		GitBehindLog:          s.d.GitBehindLog,
+		BuildRefreshWatchlist: s.BuildRefreshWatchlist(ctx),
+		GitLsRemote:           s.d.GitLsRemote,
 
 		ComfyUI:        s.d.ComfyUI,
 		ComfyUIEnabled: s.ComfyUIEnabled(ctx),
 		ComfyUIUnit:    s.ComfyUIUnit(ctx),
 		ComfyUIPort:    urlPort(s.ComfyUIURL(ctx)),
+
+		Logf: s.logf,
 	}
 	if env.BinariesEnabled {
 		env.TrackedBinaries = s.TrackedBinaries(ctx)
@@ -300,6 +356,7 @@ func (s *Smith) checkEnv(ctx context.Context) *CheckEnv {
 	if env.ComfyUIEnabled {
 		env.ComfyUIModelRoots = s.ComfyUIModelRoots(ctx)
 		env.ComfyUIWorkflowDirs = s.ComfyUIWorkflowDirs(ctx)
+		env.ComfyUIKeepFiles = s.ComfyUIKeepFiles(ctx)
 	}
 	return env
 }
@@ -477,8 +534,13 @@ func selectChecks(scope string, checkIDs []string) ([]Check, error) {
 		}
 		return out, nil
 	case ScopeDeep:
-		out := make([]Check, len(registry))
-		copy(out, registry)
+		out := make([]Check, 0, len(registry))
+		for _, c := range registry {
+			if c.ManualOnly {
+				continue
+			}
+			out = append(out, c)
+		}
 		return out, nil
 	default:
 		return nil, fmt.Errorf("smith: unknown scope %q (want quick|deep)", scope)
@@ -1185,6 +1247,70 @@ func runCompressorHealth(ctx context.Context, env *CheckEnv) Finding {
 	return Finding{CheckID: id, Severity: SeverityOK,
 		Summary:  fmt.Sprintf("all %d compressor(s) resource-healthy over %.0fh", len(results), windowHours),
 		Evidence: ev}
+}
+
+// runCompressorFailOpen computes the per-proxy fail-open rate over a 1-hour
+// rolling window. Fail-open rate = fail_open_total / (requests + timeout +
+// canceled). When the rate crosses the CompressorFailOpenWarnPct threshold,
+// the check emits a warn finding — the proposer then proposes raising the
+// fail-open budget (proposeFailOpenBudgetIncrease in propose.go).
+func runCompressorFailOpen(ctx context.Context, env *CheckEnv) Finding {
+	const id = "compressor_failopen"
+	if env.Store == nil {
+		return skipFinding(id, "no store")
+	}
+
+	threshold := env.Thresholds.CompressorFailOpenWarnPct
+	if threshold <= 0 {
+		threshold = DefaultThresholds().CompressorFailOpenWarnPct
+	}
+
+	pctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	summaries, err := env.Store.Routing().SavingsSummary(pctx, time.Now().Add(-time.Hour))
+	if err != nil {
+		return Finding{CheckID: id, Severity: SeverityInfo,
+			Summary: "failed to read savings: " + err.Error()}
+	}
+
+	type proxyResult struct {
+		Service     string  `json:"service"`
+		FailOpenPct float64 `json:"fail_open_pct"`
+		FailOpens   int64   `json:"fail_opens"`
+		Requests    int64   `json:"requests"`
+	}
+	var warn []proxyResult
+	var ok []proxyResult
+
+	for svc, s := range summaries {
+		total := s.Requests + s.RequestsTimeout + s.RequestsCanceled
+		if total == 0 {
+			continue // no traffic — skip
+		}
+		pct := float64(s.FailOpenTotal) / float64(total) * 100
+		result := proxyResult{Service: svc, FailOpenPct: pct, FailOpens: s.FailOpenTotal, Requests: total}
+		if pct >= threshold {
+			warn = append(warn, result)
+		} else {
+			ok = append(ok, result)
+		}
+	}
+
+	if len(warn) > 0 {
+		ev := map[string]any{"warn": warn, "ok": ok, "threshold_pct": threshold}
+		return Finding{CheckID: id, Severity: SeverityWarn,
+			Summary:  fmt.Sprintf("%d of %d compressor(s) exceed %.0f%% fail-open rate over 1h", len(warn), len(warn)+len(ok), threshold),
+			Evidence: ev}
+	}
+
+	n := len(ok)
+	if n == 0 {
+		return Finding{CheckID: id, Severity: SeverityOK,
+			Summary: "no compressor proxies with traffic in the last hour"}
+	}
+	return Finding{CheckID: id, Severity: SeverityOK,
+		Summary:  fmt.Sprintf("all %d compressor(s) below %.0f%% fail-open rate over 1h", n, threshold),
+		Evidence: map[string]any{"ok": ok, "threshold_pct": threshold}}
 }
 
 // runBrainResolvable confirms smith.model currently resolves to a local

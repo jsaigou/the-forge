@@ -60,7 +60,7 @@ type stubAuth struct {
 func (s *stubAuth) VerifySession(string) (authz.Identity, error) {
 	return s.identity, nil
 }
-func (s *stubAuth) VerifyBearer(token string, _ authz.KeyKind) (authz.Identity, error) {
+func (s *stubAuth) VerifyBearerFrom(_ context.Context, _, token string, _ authz.KeyKind) (authz.Identity, error) {
 	if _, _, _, err := authz.ParseToken(token); err != nil {
 		return authz.Identity{}, err
 	}
@@ -471,6 +471,15 @@ func TestSSEEmitsUnderscoreEventNames(t *testing.T) {
 		"profile:progress":  true,
 		"profile:done":      true,
 		"profile:failed":    true,
+		// HF model-acquisition track (Contract 1 amendment, go/internal/
+		// hfdownload/events.go) — not exercised by this test's switch/
+		// load/unload flow, registered here anyway per this file's own
+		// "Contract 1 §4 names are frozen" convention.
+		"download:progress":      true,
+		"download:state_changed": true,
+		"download:done":          true,
+		"download:failed":        true,
+		"download:deleted":       true,
 	}
 
 	// Kick a switch to generate switch_started + switch_complete.

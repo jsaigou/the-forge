@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/jsaigou/the-forge/internal/activity"
 )
 
 // handleStatus returns the full dashboard status payload (Contract 1 §2
@@ -231,6 +233,30 @@ func (s *Server) buildStatusResponse() statusResponse {
 	if runner, ok := s.profileRunner(); ok {
 		if mode, running := runner.RunningMode(); running {
 			resp.Profiling = &profilingStatus{Running: true, Mode: mode}
+		}
+	}
+
+	// slot_consumers (per-slot consumer attribution): the shared registry's
+	// fresh labels for every slot we know about. Only non-empty labels are
+	// included; stale entries (past activity.ConsumerFreshness) read "" and
+	// are dropped.
+	if s.deps.Activity != nil {
+		names := map[string]struct{}{}
+		for name := range resp.Slots {
+			names[name] = struct{}{}
+		}
+		if cfg != nil {
+			for name := range cfg.Slots {
+				names[name] = struct{}{}
+			}
+		}
+		for name := range names {
+			if label := s.deps.Activity.Label(name, activity.ConsumerFreshness); label != "" {
+				if resp.SlotConsumers == nil {
+					resp.SlotConsumers = map[string]string{}
+				}
+				resp.SlotConsumers[name] = label
+			}
 		}
 	}
 

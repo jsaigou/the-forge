@@ -1,137 +1,200 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { CopyButton } from "../components/CopyButton";
-import type { ReactNode } from "react";
+import { SpotlightCutout, useTrackedRect, type Rect } from "./Spotlight";
 import { useOnboarding } from "./useOnboarding";
 
-// Guided first-run tour (P4) — a stepped modal card, not a full wizard
-// page: the operator can dismiss at any point and the dashboard underneath
-// stays exactly as it was. Chrome reuses the app's existing modal pair
-// (.modal-backdrop / .modal, same as LoadConfirmModal/DetailModal —
-// portaled to document.body for the same transformed-ancestor reasons).
+// Guided first-run tour (Sprint 6, 2026-08-27 — replaces the P4 static
+// six-step prose modal). That version never pointed at anything real: no
+// DOM targeting, no highlighting, CTAs were plain hash links that dropped
+// the operator on a page with no further guidance. This version highlights
+// the actual live element for each of the three things worth knowing on
+// day one — loading a config, using smith, adding a model — and advances
+// only when the operator clicks Next, never by simulating a click itself.
 //
-// Escape closes = dismisses (sets the done flag), matching DetailModal's
-// Esc convention. Backdrop clicks intentionally do NOT dismiss — a stray
-// click shouldn't silently skip an operator's only introduction to Smith,
-// reservations, and provider keys; there are explicit Skip/Done buttons.
+// Steps resolve a target via `data-tour-id` (or an existing element id,
+// for #model-gallery). Resolution is a short rAF poll, not a single
+// synchronous query, because routes are lazy-loaded (App.tsx) and some
+// targets depend on react-query data. `targets` is an ordered fallback
+// list, not padding: `.load-btn` (data-tour-id="bay-load") only exists in
+// the DOM for a bay that is empty, unreserved, and operator-viewed — on a
+// box with all four bays loaded it genuinely isn't there, so that step
+// falls back to highlighting the bays section as a whole rather than
+// showing an empty spotlight.
 //
-// CTAs are plain hash anchors (#models, #help/smith, …) so the existing
-// tab router handles navigation with zero new plumbing; clicking one also
-// completes the tour.
+// Escape closes = dismisses (sets the done flag). There is no backdrop click
+// to dismiss (the spotlight's dim layer is pointer-events: none by design,
+// so the underlying page stays clickable) — Skip (✕) is the explicit escape
+// hatch instead.
 
-interface Step {
+interface TourStep {
   title: string;
   body: ReactNode;
-  cta?: { label: string; href: string };
+  hash?: string;
+  targets?: string[];
 }
 
-const A0_BASE_URL = "http://<host>:8085/v1";
-
-const STEPS: Step[] = [
+const STEPS: TourStep[] = [
   {
-    title: "Welcome to The Forge",
+    title: "Load bays",
+    hash: "console",
+    targets: ['[data-tour-id="bays"]'],
     body: (
-      <>
-        <p>
-          The Forge runs a local inference fleet from a <b>single Go binary</b>: it loads models onto this
-          box's GPU on demand, routes to remote providers through the same OpenAI-compatible interface,
-          and serves one dashboard for all of it.
-        </p>
-        <p>This short tour covers the four things worth knowing on day one.</p>
-      </>
-    ),
-    cta: { label: "Explore now →", href: "#models" },
-  },
-  {
-    title: "Models & slots",
-    body: (
-      <>
-        <p>
-          Models load <b>on demand</b> across four load bays (a1–a4) — request a model through a0 and the
-          scheduler places it, evicting something else if memory is tight. You never load by hand unless
-          you want to.
-        </p>
-        <p>
-          The <a href="#models">Models</a> tab is the full catalog. On the host, <code>forge tui</code>{" "}
-          gives you a full-screen ops console for the same machinery.
-        </p>
-      </>
-    ),
-    cta: { label: "Open Models →", href: "#models" },
-  },
-  {
-    title: "Smith, your maintenance agent",
-    body: (
-      <>
-        <p>
-          <b>Smith</b> is the built-in maintenance agent: it runs checks hourly/daily, watches for drift
-          and failures, and proposes fixes. You can also just ask it things in plain language.
-        </p>
-        <p>Find it under Help → “Ask the smith”, and its automation settings under Settings → Smith.</p>
-      </>
-    ),
-    cta: { label: "Ask the smith →", href: "#help/smith" },
-  },
-  {
-    title: "One endpoint: a0",
-    body: (
-      <>
-        <p>
-          Agents and apps talk to <b>a0</b> — a single OpenAI-compatible endpoint that reaches every
-          configured model, local or remote. Point any OpenAI client at it:
-        </p>
-        <div className="onboarding-endpoint">
-          <code>{A0_BASE_URL}</code>
-          <CopyButton text={A0_BASE_URL} title="Copy base URL" />
-        </div>
-        <p>
-          Requests made from inside the tailnet need no API key; external callers use an{" "}
-          <code>sk-router-*</code> key from Settings → Security.
-        </p>
-      </>
+      <p>
+        The Forge loads models onto this box's GPU across four load bays (A1–A4). Request a model through a0
+        and the scheduler places it here automatically — you don't normally need to load anything by hand.
+      </p>
     ),
   },
   {
-    title: "Scheduling & reservations",
+    title: "Loading one by hand",
+    hash: "console",
+    targets: ['[data-tour-id="bay-load"]', '[data-tour-id="bays"]'],
     body: (
-      <>
-        <p>
-          The <a href="#scheduling">Scheduling</a> tab holds two ideas: <b>reservations</b>, which pin a
-          bay for a window (yours or another agent's), and <b>scheduled jobs</b>, which force-load models
-          off-peak so daytime requests never pay the cold-start cost.
-        </p>
-      </>
+      <p>
+        A free bay shows a <b>+ Load model</b> button. Clicking it doesn't load anything by itself — it scrolls
+        down to the config picker below, where the real Load button lives.
+      </p>
     ),
-    cta: { label: "Open Scheduling →", href: "#scheduling" },
   },
   {
-    title: "Provider keys & Compressor",
+    title: "Pick a config",
+    hash: "console",
+    targets: ["#model-gallery"],
     body: (
-      <>
-        <p>
-          Add remote providers (and their keys) under{" "}
-          <a href="#settings/providers">Settings → Providers</a>; they then appear alongside local models
-          behind a0 automatically.
-        </p>
-        <p>
-          Before anything leaves the box, <b>Compressor</b> token-compresses prompts against remote
-          providers — check its realized savings on the Dashboard's Cost tab.
-        </p>
-      </>
+      <p>
+        This carousel is the config picker — one card per loadable model configuration. Each card's own{" "}
+        <b>Load</b> button opens a confirm dialog and picks (or lets you choose) which bay it lands in.
+      </p>
+    ),
+  },
+  {
+    title: "Ask smith",
+    hash: "console",
+    targets: ['[data-tour-id="smith-tray"]'],
+    body: (
+      <p>
+        <b>Smith</b> is the built-in maintenance agent: it runs checks on a schedule, watches for drift and
+        failures, and proposes fixes. Click here to expand the chat and ask it anything in plain language.
+      </p>
+    ),
+  },
+  {
+    title: "Add a model",
+    hash: "models",
+    targets: ['[data-tour-id="models-add-tab"]'],
+    body: (
+      <p>
+        On the Models page, <b>Add Model</b> searches Hugging Face directly, runs a pre-flight check against
+        this hardware, and downloads + auto-registers the result into the catalog.
+      </p>
     ),
   },
 ];
 
+const RESOLVE_TIMEOUT_MS = 2000;
+const CARD_MARGIN = 12;
+const CARD_WIDTH = 300;
+
+function currentHashTab(): string {
+  const raw = location.hash.slice(1);
+  const slash = raw.indexOf("/");
+  return slash === -1 ? raw : raw.slice(0, slash);
+}
+
+function resolveTarget(selectors: string[] | undefined): HTMLElement | null {
+  if (!selectors) return null;
+  for (const sel of selectors) {
+    const el = document.querySelector<HTMLElement>(sel);
+    // offsetParent is null for display:none (or unmounted) elements — the
+    // one heuristic we need, since none of these targets use fixed
+    // positioning themselves.
+    if (el && el.offsetParent !== null) return el;
+  }
+  return null;
+}
+
+// Resolves the current step's target, navigating to its hash first if
+// needed and polling briefly for the element to appear post-navigation.
+//
+// Gated on `open`: this must NOT run while the tour is closed. App.tsx's
+// own one-time mount effect tags the landing history entry
+// (`history.replaceState({app:true,...})`) using a `initial` hash it
+// captured at first render, and child effects fire before parent effects
+// in the same commit — so an unconditional hash assignment here at mount
+// would race that tagging effect and get silently stomped back to
+// whatever the original hash was (found live: Replay did nothing because
+// this had already "fired" once, uselessly, before the tour ever opened,
+// and its dependency never changed again after that). Gating on `open`
+// means navigation only ever happens well after that one-time mount
+// effect has already run, so there's nothing left to race.
+function useStepTarget(step: TourStep, open: boolean): HTMLElement | null {
+  const [target, setTarget] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setTarget(null);
+      return;
+    }
+    setTarget(null); // clear immediately so a stale cutout never lingers mid-transition
+
+    if (step.hash && currentHashTab() !== step.hash) {
+      location.hash = step.hash;
+    }
+
+    let cancelled = false;
+    let raf = 0;
+    const start = performance.now();
+    function tick() {
+      if (cancelled) return;
+      const el = resolveTarget(step.targets);
+      if (el) {
+        setTarget(el);
+        return;
+      }
+      if (performance.now() - start < RESOLVE_TIMEOUT_MS) {
+        raf = requestAnimationFrame(tick);
+      }
+    }
+    tick();
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, open]);
+
+  return target;
+}
+
+function cardStyle(rect: Rect | null, cardSize: { width: number; height: number }): CSSProperties {
+  if (!rect) {
+    return { position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: CARD_WIDTH };
+  }
+  const spaceBelow = window.innerHeight - (rect.y + rect.height);
+  const placeBelow = spaceBelow >= cardSize.height + CARD_MARGIN || spaceBelow >= rect.y;
+  let top = placeBelow ? rect.y + rect.height + CARD_MARGIN : rect.y - cardSize.height - CARD_MARGIN;
+  top = Math.max(CARD_MARGIN, Math.min(top, window.innerHeight - cardSize.height - CARD_MARGIN));
+  let left = rect.x + rect.width / 2 - cardSize.width / 2;
+  left = Math.max(CARD_MARGIN, Math.min(left, window.innerWidth - cardSize.width - CARD_MARGIN));
+  return { position: "fixed", top, left, width: CARD_WIDTH };
+}
+
 export function OnboardingTour() {
   const { open, dismiss } = useOnboarding();
   const [stepIdx, setStepIdx] = useState(0);
-  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [cardSize, setCardSize] = useState({ width: CARD_WIDTH, height: 140 });
+
+  // Always start at step 1 on open, including on replay — a partial first
+  // run used to leave stepIdx wherever it stopped (a real bug: the tour
+  // used to just resume mid-way on replay).
+  useEffect(() => {
+    if (open) setStepIdx(0);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
-    // Basic focus management: move focus into the dialog on open so Escape
-    // and Enter land here rather than on whatever tab was last focused.
-    dialogRef.current?.focus();
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -142,32 +205,46 @@ export function OnboardingTour() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, dismiss]);
 
-  if (!open) return null;
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (box) setCardSize({ width: box.width, height: box.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const clampedIdx = Math.min(stepIdx, STEPS.length - 1);
   const step = STEPS[clampedIdx];
   const isFinal = clampedIdx === STEPS.length - 1;
 
+  const targetEl = useStepTarget(step, open);
+  const rect = useTrackedRect(targetEl);
+
+  if (!open) return null;
+
   return createPortal(
-    <div className="modal-backdrop">
+    <>
+      {rect && <SpotlightCutout rect={rect} />}
       <div
-        ref={dialogRef}
-        className="modal"
+        ref={cardRef}
+        className="tour-card"
         role="dialog"
         aria-modal="true"
         aria-labelledby="onboarding-title"
-        tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 460 }}
+        data-placement={rect ? "anchored" : "center"}
+        style={cardStyle(rect, cardSize)}
       >
         <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 6 }}>
           Getting started · {clampedIdx + 1} of {STEPS.length}
         </div>
-        <h3 id="onboarding-title">{step.title}</h3>
+        <h3 id="onboarding-title" style={{ marginBottom: 8 }}>{step.title}</h3>
         <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.6 }}>{step.body}</div>
-        <div className="form-actions" style={{ marginTop: 18 }}>
-          {!isFinal && (
-            <button className="btn" disabled={clampedIdx === 0} onClick={() => setStepIdx(clampedIdx - 1)}>
+        <div className="form-actions" style={{ marginTop: 14 }}>
+          {clampedIdx > 0 && (
+            <button className="btn" onClick={() => setStepIdx(clampedIdx - 1)}>
               Back
             </button>
           )}
@@ -181,21 +258,20 @@ export function OnboardingTour() {
               Done
             </button>
           )}
-          <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-            {step.cta && (
-              <a className="btn" href={step.cta.href} onClick={dismiss}>
-                {step.cta.label}
-              </a>
-            )}
-            {!isFinal && (
-              <button className="icon-btn" title="Skip tour" aria-label="Skip tour" onClick={dismiss}>
-                ✕
-              </button>
-            )}
-          </span>
+          {!isFinal && (
+            <button
+              className="icon-btn"
+              title="Skip tour"
+              aria-label="Skip tour"
+              style={{ marginLeft: "auto" }}
+              onClick={dismiss}
+            >
+              ✕
+            </button>
+          )}
         </div>
       </div>
-    </div>,
+    </>,
     document.body,
   );
 }

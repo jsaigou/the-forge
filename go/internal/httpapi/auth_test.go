@@ -51,26 +51,26 @@ func newAuthTestServer(t *testing.T) (*Server, *authz.Authorizer, *store.DB) {
 	})
 
 	s := New(Deps{
-		Snapshots:        collector.NewStatic(nil),
-		Auth:             auth,
-		AuthSetup:        auth,
-		Events:           events,
-		Publish:          events,
-		Engine:           &engine.Stub{},
-		Config:           func() *config.Config { return cfg },
-		Hostname:         "test-host",
-		Sessions:         db.Sessions(),
-		Settings:         db.Settings(),
-		Audit:            db.Audit(),
-		IdentityLinks:    db.IdentityLinks(),
-		TOTPStore:        db.TOTP(),
-		Keys:             db.Keys(),
-		PolicyStore:      policyStore,
-		StepUpTTL:        authz.DefaultStepUpTTL,
+		Snapshots:          collector.NewStatic(nil),
+		Auth:               auth,
+		AuthSetup:          auth,
+		Events:             events,
+		Publish:            events,
+		Engine:             &engine.Stub{},
+		Config:             func() *config.Config { return cfg },
+		Hostname:           "test-host",
+		Sessions:           db.Sessions(),
+		Settings:           db.Settings(),
+		Audit:              db.Audit(),
+		IdentityLinks:      db.IdentityLinks(),
+		TOTPStore:          db.TOTP(),
+		Keys:               db.Keys(),
+		PolicyStore:        policyStore,
+		StepUpTTL:          authz.DefaultStepUpTTL,
 		NetworkDefaultRole: authz.RoleViewer,
-		StepUpVerifier:   auth,
-		KeyManager:       auth,
-		NetworkIdentity:  authz.NoNetworkIdentity{},
+		StepUpVerifier:     auth,
+		KeyManager:         auth,
+		NetworkIdentity:    authz.NoNetworkIdentity{},
 	})
 	t.Cleanup(func() { s.Close() })
 	return s, auth, db
@@ -341,6 +341,253 @@ func TestKeyRevoke(t *testing.T) {
 	}
 	if listResp.Keys[0].RevokedAt == nil {
 		t.Error("revoked_at should be set")
+	}
+}
+
+// TestKeyCreateBoundIPAndExpiry is the regression test for issues #34/#36:
+// bind_to_requester binds the minted key to the mint request's own resolved
+// client IP, and ttl_seconds sets a real expiry — both enforced end-to-end
+// through a subsequent bearer request, not just reflected in the response.
+func TestKeyCreateBoundIPAndExpiry(t *testing.T) {
+	s, auth, _ := newAuthTestServer(t)
+	cookie := loginAndCookie(t, s, auth, "testuser", "hunter2hunter2")
+	cookie = performStepUp(t, s, cookie, "password", "hunter2hunter2", "")
+	csrf := getCSRFToken(t, s, cookie)
+
+	body := bytes.NewBufferString(`{"kind":"forge","name":"laptop-cli","role":"operator","bind_to_requester":true,"ttl_seconds":3600}`)
+	req := authedReqWithCookie("POST", "/api/v1/keys", body, cookie, csrf)
+	req.RemoteAddr = "203.0.113.9:54321"
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("mint = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var createResp apiKeyCreateResponse
+	json.NewDecoder(rec.Body).Decode(&createResp)
+	if createResp.Key.BoundIP != "203.0.113.9" {
+		t.Errorf("bound_ip = %q, want 203.0.113.9", createResp.Key.BoundIP)
+	}
+	if createResp.Key.ExpiresAt == nil {
+		t.Fatal("expires_at should be set")
+	}
+
+	// The minted key verifies from the bound IP...
+	statusReq := func(remoteAddr string) *http.Request {
+		req := httptest.NewRequest("GET", "/api/v1/status", nil)
+		req.Header.Set("Authorization", "Bearer "+createResp.Token)
+		req.RemoteAddr = remoteAddr
+		return req
+	}
+	rec = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, statusReq("203.0.113.9:1111"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bound IP request = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	// ...and not from a different one.
+	rec = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, statusReq("198.51.100.7:2222"))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("different IP request = %d, want 401", rec.Code)
+	}
+}
+
+// TestKeyCreateDefaultUnboundNoExpiry confirms bind_to_requester/ttl_seconds
+// stay opt-in: a key minted without them is unbound and never expires, same
+// as before #34/#36.
+func TestKeyCreateDefaultUnboundNoExpiry(t *testing.T) {
+	s, auth, _ := newAuthTestServer(t)
+	cookie := loginAndCookie(t, s, auth, "testuser", "hunter2hunter2")
+	cookie = performStepUp(t, s, cookie, "password", "hunter2hunter2", "")
+	csrf := getCSRFToken(t, s, cookie)
+
+	body := bytes.NewBufferString(`{"kind":"router","name":"opencode"}`)
+	req := authedReqWithCookie("POST", "/api/v1/keys", body, cookie, csrf)
+	req.RemoteAddr = "203.0.113.9:54321"
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("mint = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var createResp apiKeyCreateResponse
+	json.NewDecoder(rec.Body).Decode(&createResp)
+	if createResp.Key.BoundIP != "" {
+		t.Errorf("bound_ip = %q, want unbound", createResp.Key.BoundIP)
+	}
+	if createResp.Key.ExpiresAt != nil {
+		t.Errorf("expires_at = %v, want nil (never expires)", *createResp.Key.ExpiresAt)
+	}
+}
+
+// TestBearerKeyCannotManageKeysWithoutStepUp is the regression test for
+// issue #37: a bearer forge key — even an admin-role one, which passes
+// requireRole — must not be able to reach POST/DELETE /api/v1/keys. Before
+// the fix, requireAssurance's blanket "bearer paths skip the policy matrix"
+// short-circuit let a leaked admin bearer key mint or revoke arbitrary keys
+// with no human step-up at all.
+func TestBearerKeyCannotManageKeysWithoutStepUp(t *testing.T) {
+	s, auth, _ := newAuthTestServer(t)
+	token, err := auth.MintKey(t.Context(), authz.KindForge, "admin-bot", "", authz.RoleAdmin, "", time.Time{})
+	if err != nil {
+		t.Fatalf("MintKey: %v", err)
+	}
+
+	body := bytes.NewBufferString(`{"kind":"router","name":"should-not-mint"}`)
+	req := httptest.NewRequest("POST", "/api/v1/keys", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("bearer key mint = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	var errResp map[string]string
+	json.NewDecoder(rec.Body).Decode(&errResp)
+	if errResp["error"] != "step_up_required" {
+		t.Errorf("error = %q, want step_up_required", errResp["error"])
+	}
+
+	// Same posture for a resource this fix must NOT touch: bearer paths still
+	// skip the policy matrix everywhere else (a0/MCP consumers can't step up).
+	req2 := httptest.NewRequest("GET", "/api/v1/billing/settings", nil)
+	req2.Header.Set("Authorization", "Bearer "+token)
+	rec2 := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec2, req2)
+	if rec2.Code == http.StatusForbidden {
+		var e2 map[string]string
+		json.NewDecoder(rec2.Body).Decode(&e2)
+		if e2["error"] == "step_up_required" {
+			t.Fatalf("bearer key should still bypass requireAssurance for other resources")
+		}
+	}
+}
+
+// TestBearerKeySelfRotationAllowed covers the self-rotation carve-out to
+// #37: a bearer forge key MAY re-mint a new key under its own exact
+// kind+name at no more than its own role — this is how `forge keys-export`
+// refreshes its own CLI key, and MintKey's pre-existing "revoke any active
+// key of this name first" semantics make it a rotation, not a fresh grant.
+// POST /api/v1/keys is requireRole(RoleAdmin) independent of #37 (an
+// unrelated, pre-existing RBAC gate — minting ANY key needs an admin
+// caller), so the calling key here is admin-role even though the
+// self-rotated key itself only requests operator.
+func TestBearerKeySelfRotationAllowed(t *testing.T) {
+	s, auth, _ := newAuthTestServer(t)
+	token, err := auth.MintKey(t.Context(), authz.KindForge, "cli-tui", "", authz.RoleAdmin, "", time.Time{})
+	if err != nil {
+		t.Fatalf("MintKey: %v", err)
+	}
+
+	body := bytes.NewBufferString(`{"kind":"forge","name":"cli-tui","role":"operator"}`)
+	req := httptest.NewRequest("POST", "/api/v1/keys", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("self-rotation = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var createResp apiKeyCreateResponse
+	json.NewDecoder(rec.Body).Decode(&createResp)
+	if createResp.Key.Name != "cli-tui" || createResp.Key.Role != "operator" {
+		t.Errorf("minted key = %+v, want name=cli-tui role=operator", createResp.Key)
+	}
+
+	// The old token was revoked as part of the rotation (MintKey's
+	// same-name semantics) — it must no longer verify.
+	if _, err := auth.VerifyBearer(token, authz.KindForge); err == nil {
+		t.Error("old token should be revoked by self-rotation")
+	}
+}
+
+// TestBearerKeySelfRotationDeniedOnEscalationOrDifferentTarget confirms the
+// carve-out is exactly as narrow as intended: same name but a HIGHER role,
+// or any different name/kind, still needs a real step-up.
+func TestBearerKeySelfRotationDeniedOnEscalationOrDifferentTarget(t *testing.T) {
+	s, auth, _ := newAuthTestServer(t)
+	token, err := auth.MintKey(t.Context(), authz.KindForge, "cli-tui", "", authz.RoleOperator, "", time.Time{})
+	if err != nil {
+		t.Fatalf("MintKey: %v", err)
+	}
+	post := func(body string) int {
+		req := httptest.NewRequest("POST", "/api/v1/keys", bytes.NewBufferString(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		return rec.Code
+	}
+	cases := map[string]string{
+		"escalate to admin": `{"kind":"forge","name":"cli-tui","role":"admin"}`,
+		"different name":    `{"kind":"forge","name":"someone-else","role":"operator"}`,
+		"different kind":    `{"kind":"router","name":"cli-tui"}`,
+	}
+	for label, body := range cases {
+		if code := post(body); code != http.StatusForbidden {
+			t.Errorf("%s: code = %d, want 403", label, code)
+		}
+	}
+}
+
+// TestBearerKeyDeleteAlwaysDeniedNoSelfException confirms DELETE gets no
+// self-rotation carve-out — a bearer key can never revoke any key,
+// including its own, without a real session step-up.
+func TestBearerKeyDeleteAlwaysDeniedNoSelfException(t *testing.T) {
+	s, auth, _ := newAuthTestServer(t)
+	token, err := auth.MintKey(t.Context(), authz.KindForge, "cli-tui", "", authz.RoleAdmin, "", time.Time{})
+	if err != nil {
+		t.Fatalf("MintKey: %v", err)
+	}
+	_, keyid, _, _ := authz.ParseToken(token)
+
+	req := httptest.NewRequest("DELETE", "/api/v1/keys/"+keyid, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("bearer self-delete = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestWithAuthBearerRateLimit is the regression test for issue #35:
+// withAuth's bearer-key path must go through VerifyBearerFrom (rate
+// limited), not the unlimited VerifyBearer, or a bad-token burst from one
+// IP would never trip the same 10-fails/60s limit the login path enforces.
+func TestWithAuthBearerRateLimit(t *testing.T) {
+	s, auth, _ := newAuthTestServer(t)
+	token, err := auth.MintKey(t.Context(), authz.KindForge, "burst-victim", "", authz.RoleViewer, "", time.Time{})
+	if err != nil {
+		t.Fatalf("MintKey: %v", err)
+	}
+	bad := authz.FormatToken(authz.KindForge, "000000000000", "aaaaaaaaaaaaaaaaaaaaaaaa")
+
+	statusReq := func(bearer, remoteAddr string) *http.Request {
+		req := httptest.NewRequest("GET", "/api/v1/status", nil)
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		req.RemoteAddr = remoteAddr
+		return req
+	}
+
+	// 10 bad attempts from the same IP exhausts the limit (same threshold
+	// authz.TestBearerRateLimit exercises directly on the Authorizer).
+	for i := 0; i < 10; i++ {
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, statusReq(bad, "203.0.113.9:5555"))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("bad attempt %d = %d, want 401", i, rec.Code)
+		}
+	}
+	// The 11th attempt, even with a genuinely valid token, must still be
+	// rejected — proves the limiter (not just token validity) is wired in.
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, statusReq(token, "203.0.113.9:5555"))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("valid token after burst = %d, want 401 (rate limited)", rec.Code)
+	}
+	// A different IP is unaffected.
+	rec = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, statusReq(token, "198.51.100.7:6666"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valid token from a clean IP = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
 }
 
