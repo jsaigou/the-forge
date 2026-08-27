@@ -1534,10 +1534,19 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
 .foot a { color: var(--text-mute); text-decoration: underline; text-underline-offset: 2px; }
 .foot a:hover, .foot a:focus-visible { color: var(--text-dim); }
 .foot a.active { color: var(--tab-active); font-weight: 600; text-decoration: none; }
-/* Buy Me a Coffee button — self-hosted 545×153 asset; 30% smaller than
-   the nominal 217×60 and pushed to the right edge of the footer row. */
-.foot a.bmc { display: inline-flex; text-decoration: none; line-height: 0; margin-left: auto; }
-.foot a.bmc img { display: block; width: 152px; max-width: 100%; height: auto; }
+/* Buy Me a Coffee button — styled to match the BMC profile colors
+   (#40DCA5 bg, #fff text, #000 border, Cookie font). Self-contained
+   CSS rather than the BMC widget JS (CSP blocks external scripts). */
+.foot a.bmc {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-left: auto; padding: 5px 14px; border-radius: 8px;
+  background: #40DCA5; color: #fff; border: 1px solid #000;
+  font-family: 'Cookie', 'Snell Roundhand', cursive;
+  font-size: 15px; font-weight: 600; text-decoration: none; line-height: 1;
+  transition: filter 0.15s;
+}
+.foot a.bmc:hover, .foot a.bmc:focus-visible { filter: brightness(0.92); color: #fff; }
+.foot a.bmc .bmc-emoji { font-size: 17px; }
 
 @media (max-width: 900px) {
   .bays, .gallery, .sys { grid-template-columns: repeat(2, minmax(0, 1fr)); }
