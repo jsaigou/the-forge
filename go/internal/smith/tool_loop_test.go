@@ -3,9 +3,9 @@
 package smith
 
 import (
-	"fmt"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jsaigou/the-forge/internal/collector"
 	"github.com/jsaigou/the-forge/internal/smith/web"
 )
 
@@ -702,4 +703,180 @@ func TestRunToolLoop_LocalBrainCapsCallsPerRound(t *testing.T) {
 
 	// Verify the round still completed and the turn produced an answer.
 	_ = rec.all()
+}
+
+// ── Tier 1 Sprint 4: deterministic pre-check before the LLM auditor ────────
+
+// TestRunToolLoop_PrecheckConfirmsSkipsAuditor: a run_check-only round
+// followed by a confident answer must be accepted WITHOUT the adversarial
+// auditor round firing at all — the pre-check's own re-run of run_check
+// (against unchanged state — no Source wired, so gtt_ceiling stably
+// skip-finds both times) already confirms it. Exactly 2 HTTP rounds, not
+// the usual 4-script verify pattern, and no unverified marker (the answer
+// IS verified, just not via an LLM call).
+func TestRunToolLoop_PrecheckConfirmsSkipsAuditor(t *testing.T) {
+	ts, rec := fakeA0Rounds(t, [][]string{
+		nativeToolCallFrames("call_1", "run_check", `{"check_ids":["gtt_ceiling"]}`), // round 1: investigate
+		contentFrames("gtt looks fine"),                                              // round 2: confident answer
+	})
+	defer ts.Close()
+
+	s, convID, msgID := setupToolLoopConv(t, ts)
+	ctx := context.Background()
+	batcher := s.newTokenBatcher(convID, msgID)
+	tools := []Tool{mustFindTool(t, "run_check")}
+
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "is gtt ok?", "test-model", toolModeNative, tools, batcher, true, "")
+	batcher.flush()
+	if err != nil {
+		t.Fatalf("runToolLoop: %v", err)
+	}
+	if result.content != "gtt looks fine" {
+		t.Errorf("content = %q, want the model's own answer verbatim", result.content)
+	}
+	if strings.Contains(result.content, unverifiedMarker) {
+		t.Errorf("content should NOT carry the unverified marker — the pre-check confirmed it, got: %q", result.content)
+	}
+	if n := len(rec.all()); n != 2 {
+		t.Fatalf("HTTP rounds = %d, want exactly 2 (no auditor round spent)", n)
+	}
+}
+
+// TestRunToolLoop_PrecheckContradictionAsksForReconciliation: live state
+// changes between the model's run_check call and the pre-check's re-run of
+// it — a real, load-bearing discrepancy. This must NOT silently accept the
+// stale answer, but also must NOT swap in the full adversarial audit.md
+// persona (smith already knows what changed); it gets a direct
+// reconciliation nudge instead, naming the check that changed.
+func TestRunToolLoop_PrecheckContradictionAsksForReconciliation(t *testing.T) {
+	total := int64(120 << 30)
+	okSnap := snapWith(collector.Metrics{
+		GTTUsedBytes: int64p(int64(float64(total) * 0.10)), GTTTotalBytes: int64p(total),
+	})
+	src := collector.NewStatic(okSnap)
+
+	var reqN int
+	var mu sync.Mutex
+	rec := &roundRecorder{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(body, &parsed)
+		rec.record(parsed)
+
+		mu.Lock()
+		idx := reqN
+		reqN++
+		mu.Unlock()
+
+		var frames []string
+		switch idx {
+		case 0:
+			frames = nativeToolCallFrames("call_1", "run_check", `{"check_ids":["gtt_ceiling"]}`)
+		case 1:
+			// State changes to CRIT right before this response — the
+			// pre-check's re-run (which happens synchronously once this
+			// round's content is parsed) will see a different severity
+			// than the model saw in round 1.
+			src.Set(snapWith(collector.Metrics{
+				GTTUsedBytes: int64p(int64(float64(total) * 0.99)), GTTTotalBytes: int64p(total),
+			}))
+			frames = contentFrames("gtt looks fine")
+		default:
+			frames = contentFrames("acknowledged the change")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		for _, f := range frames {
+			w.Write([]byte(f))
+			flusher.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	db := openDB(t)
+	s := New(Deps{Store: db, Settings: db.Settings(), Cfg: cfgFor(portOf(t, srv.URL)), Source: src})
+	ctx := context.Background()
+	convID, err := s.CreateConversation(ctx, "")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+	tierVal := TierReasoning
+	msgID, err := s.appendMessage(ctx, convID, MsgKindReasoning, "", nil, nil, &tierVal, nil, nil)
+	if err != nil {
+		t.Fatalf("appendMessage: %v", err)
+	}
+	batcher := s.newTokenBatcher(convID, msgID)
+	tools := []Tool{mustFindTool(t, "run_check")}
+
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "is gtt ok?", "test-model", toolModeNative, tools, batcher, true, "")
+	batcher.flush()
+	if err != nil {
+		t.Fatalf("runToolLoop: %v", err)
+	}
+	if result.content != "acknowledged the change" {
+		t.Errorf("content = %q, want the model's post-reconciliation answer", result.content)
+	}
+	reqs := rec.all()
+	if len(reqs) != 3 {
+		t.Fatalf("HTTP rounds = %d, want exactly 3 (investigate, confident-but-stale answer, reconciled answer)", len(reqs))
+	}
+	round3Body, _ := json.Marshal(reqs[2])
+	if strings.Contains(string(round3Body), "auditor") {
+		t.Error("round 3 must NOT be the adversarial audit.md persona swap — smith already knows what changed")
+	}
+	if !strings.Contains(string(round3Body), "gtt_ceiling") {
+		t.Errorf("round 3 request should name the check that changed, body: %s", round3Body)
+	}
+}
+
+// TestRunToolLoop_MixedRoundStillUsesFullAuditor: a round mixing run_check
+// with a different tool must NOT take the pre-check fast path — the
+// deterministic pre-check only applies when a round is run_check-only.
+// Mixed/partial rounds fall through to the unchanged full LLM-auditor swap,
+// same as before this sprint (never LESS thorough than the pre-existing
+// behavior, only skips it in the unambiguous run_check-only case).
+func TestRunToolLoop_MixedRoundStillUsesFullAuditor(t *testing.T) {
+	mixedCalls := []string{
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"run_check","arguments":""}}]}}]}` + "\n\n",
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":` + jsonStr(`{"check_ids":["gtt_ceiling"]}`) + `}}]}}]}` + "\n\n",
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"c2","function":{"name":"kb_search","arguments":""}}]}}]}` + "\n\n",
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":` + jsonStr(`{"query":"gtt"}`) + `}}]}}]}` + "\n\n",
+		"data: [DONE]\n\n",
+	}
+	ts, rec := fakeA0Rounds(t, [][]string{
+		mixedCalls,              // round 1: run_check + kb_search in one round
+		contentFrames("answer"), // round 2: confident answer -> full-auditor gate
+		nativeToolCallFrames("c3", "kb_search", `{"query":"verify"}`), // round 3: auditor verifies
+		contentFrames("answer"), // round 4: final verified answer
+	})
+	defer ts.Close()
+
+	s, convID, msgID := setupToolLoopConv(t, ts)
+	ctx := context.Background()
+	batcher := s.newTokenBatcher(convID, msgID)
+	tools := []Tool{mustFindTool(t, "run_check"), mustFindTool(t, "kb_search")}
+
+	// brainLocal=false so callsPerRound allows both calls in round 1.
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "is gtt ok?", "test-model", toolModeNative, tools, batcher, false, "")
+	batcher.flush()
+	if err != nil {
+		t.Fatalf("runToolLoop: %v", err)
+	}
+	if result.content != "answer" {
+		t.Errorf("content = %q, want %q", result.content, "answer")
+	}
+	reqs := rec.all()
+	if len(reqs) != 4 {
+		t.Fatalf("HTTP rounds = %d, want exactly 4 (mixed round disqualifies the pre-check fast path)", len(reqs))
+	}
+	round3Body, _ := json.Marshal(reqs[2])
+	if !strings.Contains(string(round3Body), "auditor") {
+		t.Error("round 3 should be the full adversarial audit.md persona swap — a mixed round must not take the pre-check shortcut")
+	}
 }

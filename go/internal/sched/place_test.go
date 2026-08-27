@@ -330,6 +330,88 @@ func TestPlaceTerminalWhenModelCannotFit(t *testing.T) {
 	}
 }
 
+// TestPlaceRefusalReasons locks down the RefusalReason code on a
+// representative sample of place()'s refusal paths — a future consumer
+// (e.g. an a0 load-status surface) will switch on these codes, so a code
+// silently drifting off its documented meaning should fail a test, not
+// just look different in a log line.
+func TestPlaceRefusalReasons(t *testing.T) {
+	t.Run("model too large", func(t *testing.T) {
+		eng := newFakeEngine()
+		eng.plan = engine.Plan{Fits: false, NeedBytes: 200000 * 1024 * 1024, FreeBytes: 100000 * 1024 * 1024,
+			Message: "Won't fit even after evicting every loaded slot"}
+		c := placeCore(t, eng, eng.Slots(), nil)
+
+		pl := c.place(context.Background(), "huge", "", DefaultConfig(), nil, 30*time.Second)
+		if pl.reason != ReasonModelTooLarge {
+			t.Fatalf("reason = %q, want %q", pl.reason, ReasonModelTooLarge)
+		}
+	})
+
+	t.Run("no evictable idle slot", func(t *testing.T) {
+		eng := newFakeEngine()
+		occupyAll(eng, map[string]string{
+			"a1": "m1", "a2": "m2", "a3": "m3", "a4": "m4",
+		})
+		idle := map[string]time.Duration{
+			"a1": 10 * time.Second, "a2": 179 * time.Second,
+			"a3": 10 * time.Second, "a4": 20 * time.Second,
+		}
+		c := placeCore(t, eng, eng.Slots(), idle)
+
+		pl := c.place(context.Background(), "llama", "", DefaultConfig(), nil, 30*time.Second)
+		if pl.reason != ReasonNoEvictableIdle {
+			t.Fatalf("reason = %q, want %q", pl.reason, ReasonNoEvictableIdle)
+		}
+	})
+
+	t.Run("activity unknown", func(t *testing.T) {
+		eng := newFakeEngine()
+		occupyAll(eng, map[string]string{
+			"a1": "m1", "a2": "m2", "a3": "m3", "a4": "m4",
+		})
+		idle := map[string]time.Duration{
+			"a1": 10 * time.Second, "a3": 10 * time.Second, "a4": 20 * time.Second,
+			// a2 absent — unknown activity. FitPlan needs it evicted so the
+			// activity-unknown branch (not the plain idle-threshold one) fires.
+		}
+		eng.plan = engine.Plan{Fits: false, Evict: []string{"a2"}, NeedBytes: 90000 * 1024 * 1024, FreeBytes: 10000 * 1024 * 1024,
+			Message: "Needs [a2] evicted to fit"}
+		c := placeCore(t, eng, eng.Slots(), idle)
+
+		pl := c.place(context.Background(), "llama", "", DefaultConfig(), nil, 30*time.Second)
+		if pl.reason != ReasonActivityUnknown {
+			t.Fatalf("reason = %q, want %q", pl.reason, ReasonActivityUnknown)
+		}
+		if !pl.terminal {
+			t.Fatal("activity-unknown must be terminal — it will never auto-clear")
+		}
+	})
+
+	t.Run("no evictable slot — all reserved", func(t *testing.T) {
+		eng := newFakeEngine()
+		occupyAll(eng, map[string]string{
+			"a1": "m1", "a2": "m2", "a3": "m3", "a4": "m4",
+		})
+		idle := map[string]time.Duration{
+			"a1": 5 * time.Second, "a2": 5 * time.Second,
+			"a3": 5 * time.Second, "a4": 5 * time.Second,
+		}
+		c := placeCore(t, eng, eng.Slots(), idle)
+		res := []Reservation{mustReservation("batch", "llama", "whole_box", "", "agent-x",
+			testNow.Add(-time.Minute), testNow.Add(time.Hour))}
+		for _, m := range []string{"m1", "m2", "m3", "m4"} {
+			res = append(res, mustReservation("hold-"+m, m, "whole_box", "", HumanIdentity,
+				testNow.Add(-time.Minute), testNow.Add(time.Hour)))
+		}
+
+		pl := c.place(context.Background(), "llama", "", DefaultConfig(), res, 30*time.Second)
+		if pl.reason != ReasonNoEvictableReserved {
+			t.Fatalf("reason = %q, want %q", pl.reason, ReasonNoEvictableReserved)
+		}
+	})
+}
+
 func TestPlacePinnedTargetSlot(t *testing.T) {
 	activeRes := func(model string) Reservation {
 		return mustReservation("r-"+model, model, "whole_box", "", HumanIdentity,

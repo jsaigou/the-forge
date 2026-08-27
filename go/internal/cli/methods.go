@@ -120,10 +120,12 @@ func (c *Client) Keys() (*KeysResponse, error) {
 	return &k, nil
 }
 
-// KeyCreate mints a new key; the token is returned once.
-func (c *Client) KeyCreate(kind, name, role string) (*KeyCreateResponse, error) {
+// KeyCreate mints a new key; the token is returned once. bindToRequester
+// binds the key to this request's own resolved client IP (#34); ttlSeconds
+// expires it that many seconds from now (0 = never, #36).
+func (c *Client) KeyCreate(kind, name, role string, bindToRequester bool, ttlSeconds int64) (*KeyCreateResponse, error) {
 	var r KeyCreateResponse
-	req := KeyCreateRequest{Kind: kind, Name: name}
+	req := KeyCreateRequest{Kind: kind, Name: name, BindToRequester: bindToRequester, TTLSeconds: ttlSeconds}
 	if role != "" {
 		req.Role = role
 	}

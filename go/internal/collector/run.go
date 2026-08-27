@@ -51,6 +51,17 @@ type Options struct {
 	// config schema; Phase 9 wires them).
 	ExtraUnits []string
 
+	// TTSEngineUnits returns every currently-configured tts.engines unit
+	// (Tier 1 Sprint 2, Voice & Speech settings) — a closure, not a static
+	// list like ExtraUnits, so an operator wiring up a new resident engine
+	// unit via Settings is watched on the very next collector cycle, not
+	// only after a daemon restart (same live-discovery shape as
+	// CompressorUnits just below, for the same reason: this is exactly the
+	// mechanism meant to close the blind spot where forge-tts-custom/-base
+	// crash-looped for 5 days undetected because nothing probed them). Nil
+	// = no TTS engine units watched.
+	TTSEngineUnits func() []string
+
 	// Bookmarks supplies server-side-health bookmarks (store-backed).
 	Bookmarks func() []BookmarkProbe
 
@@ -129,15 +140,16 @@ type Collector struct {
 
 	// mu serializes cycles (the Run loop vs ProbeNow) and guards the
 	// mutable probe state below.
-	mu                   sync.Mutex
-	hang                 *hangDetector
-	lastActivity         map[string]time.Time
-	lastTokenTotals      map[string][2]float64
-	lastPrefillSeconds   map[string]float64
+	mu                     sync.Mutex
+	hang                   *hangDetector
+	lastActivity           map[string]time.Time
+	lastTokenTotals        map[string][2]float64
+	lastPrefillSeconds     map[string]float64
 	lastCompressorCounters map[string]*compressorCounters
-	nctxCache            map[string]int // slot → verified NCtx for the current slot session
-	prevUnits            map[string]UnitState
-	rings                map[string][]float64 // gpu / ram / temp, 120 samples
+	nctxCache              map[string]int   // slot → verified NCtx for the current slot session
+	identityCache          map[string]Props // slot → verified ModelAlias/ModelPath for the current slot session
+	prevUnits              map[string]UnitState
+	rings                  map[string][]float64 // gpu / ram / temp, 120 samples
 
 	// lastBusy backs OnSlotActivity's edge detection (Sprint K). Absent key
 	// == never reported, same "unseen" convention as lastActivity.
@@ -199,17 +211,18 @@ func New(o Options) *Collector {
 			time.Duration(cfg.Monitor.HangSustainS)*time.Second,
 			time.Duration(cfg.Monitor.SwitchCooldownS)*time.Second,
 		),
-		lastActivity:         map[string]time.Time{},
-		lastTokenTotals:      map[string][2]float64{},
-		lastPrefillSeconds:   map[string]float64{},
+		lastActivity:           map[string]time.Time{},
+		lastTokenTotals:        map[string][2]float64{},
+		lastPrefillSeconds:     map[string]float64{},
 		lastCompressorCounters: map[string]*compressorCounters{},
-		nctxCache:            map[string]int{},
-		prevUnits:            map[string]UnitState{},
-		rings:                map[string][]float64{"gpu": {}, "ram": {}, "temp": {}, "power": {}},
-		lastNRestarts:        map[string]uint32{},
-		lastBusy:             map[string]bool{},
-		prevPorts:            map[int]bool{},
-		prevBookmarkHealth:   map[string]bool{},
+		nctxCache:              map[string]int{},
+		identityCache:          map[string]Props{},
+		prevUnits:              map[string]UnitState{},
+		rings:                  map[string][]float64{"gpu": {}, "ram": {}, "temp": {}, "power": {}},
+		lastNRestarts:          map[string]uint32{},
+		lastBusy:               map[string]bool{},
+		prevPorts:              map[int]bool{},
+		prevBookmarkHealth:     map[string]bool{},
 	}
 	return c
 }
@@ -383,6 +396,11 @@ func (c *Collector) unitNames(cfg *config.Config) []string {
 	for _, u := range c.o.ExtraUnits {
 		add(u)
 	}
+	if c.o.TTSEngineUnits != nil {
+		for _, u := range c.o.TTSEngineUnits() {
+			add(u)
+		}
+	}
 	// Compressor proxy units are dynamic (created/removed at runtime via
 	// POST/teardown, Phase 9b) rather than config-derived, so they're
 	// discovered from the same store-backed source CompressorTargets already
@@ -538,18 +556,26 @@ func (c *Collector) scrapeInference(
 		}
 		c.reportSlotActivity(slot, m.RequestsProcessing > 0)
 
-		// NCtx: verified once per slot session via /props, cached until
-		// the slot goes inactive (crown jewels: actual context recorded).
+		// NCtx + ModelAlias/ModelPath: verified once per slot session via a
+		// single /props fetch, cached until the slot goes inactive (crown
+		// jewels: actual context recorded; ModelAlias/ModelPath are the
+		// ground truth smith's slot_model_identity check compares against
+		// the engine's own configured belief).
 		nctx, ok := c.nctxCache[slot]
+		identity := c.identityCache[slot]
 		if !ok {
-			if v, err := c.llama.NCtx(ctx, port); err == nil {
-				nctx = v
-				c.nctxCache[slot] = v
+			if p, err := c.llama.PropsInfo(ctx, port); err == nil {
+				nctx = p.NCtx
+				c.nctxCache[slot] = p.NCtx
+				identity = p
+				c.identityCache[slot] = p
 			}
 		}
 
 		inference[slot] = SlotInference{
 			NCtx:                 nctx,
+			ModelAlias:           identity.ModelAlias,
+			ModelPath:            identity.ModelPath,
 			RequestsProcessing:   int(m.RequestsProcessing),
 			PromptTokensTotal:    totalOrZero(m.PromptTotal),
 			PredictedTokensTotal: totalOrZero(m.PredictedTotal),
@@ -574,6 +600,11 @@ func (c *Collector) scrapeInference(
 	for slot := range c.nctxCache {
 		if _, ok := active[slot]; !ok {
 			delete(c.nctxCache, slot)
+		}
+	}
+	for slot := range c.identityCache {
+		if _, ok := active[slot]; !ok {
+			delete(c.identityCache, slot)
 		}
 	}
 	for slot := range c.lastBusy {
@@ -1082,6 +1113,7 @@ func (c *Collector) recordCompressorSavings(ctx context.Context) {
 			RequestsRateLimitedDelta:      delta(cur.RequestsRateLimited, prev.RequestsRateLimited),
 			RequestsTimeoutDelta:          delta(cur.RequestsTimeout, prev.RequestsTimeout),
 			RequestsCanceledDelta:         delta(cur.RequestsCanceled, prev.RequestsCanceled),
+			FailOpenDelta:                 delta(sumLabelValues(cur.FailOpenByReason), sumLabelValues(prev.FailOpenByReason)),
 			TTFBCountDelta:                delta(cur.TTFBCount, prev.TTFBCount),
 			TTFBSumMsDelta:                deltaF(cur.TTFBSum, prev.TTFBSum),
 			LatencyCountDelta:             delta(cur.LatencyCount, prev.LatencyCount),
@@ -1139,6 +1171,17 @@ func deltaF(current, prev float64) float64 {
 		return current - prev
 	}
 	return current // counter reset: restarted from 0, re-accumulated
+}
+
+// sumLabelValues sums all values in a label map into a single float64 —
+// used to collapse a labelled counter (e.g. compress_failopen_total{reason})
+// into one scalar for delta computation.
+func sumLabelValues(m map[string]float64) float64 {
+	var s float64
+	for _, v := range m {
+		s += v
+	}
+	return s
 }
 
 // diffLabelMap computes per-key reset-safe deltas between two labelled

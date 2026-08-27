@@ -327,9 +327,16 @@ func (s *Server) handlePostLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-// setSessionCookie sets the forge_session cookie. Secure=false to match
-// V4's Flask cookie config (forge/app.py): tailscale serve terminates
-// TLS in front of this process, which itself only ever speaks plain HTTP.
+// setSessionCookie sets the forge_session cookie. Secure defaults true
+// (config.Server.CookieSecure, issue #27) — V4's Flask config (forge/app.py)
+// hardcoded false on the theory that tailscale serve always terminates TLS
+// in front of this process, but the a0 router's own docs describe a second,
+// legitimate direct-HTTP reachability path, and a public self-hoster behind
+// their own reverse proxy or a bare LAN exposure gets no defense-in-depth
+// from a hardcoded-insecure cookie. The tailscale-serve-only deployment
+// model (this process speaking plain HTTP behind a TLS-terminating proxy on
+// the same host) opts out via Settings → Danger Zone (infra.server's
+// cookie_secure=false), same as ForgeHost's own current setup needs to.
 func (s *Server) setSessionCookie(w http.ResponseWriter, sess store.Session) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "forge_session",
@@ -337,7 +344,7 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, sess store.Session) {
 		Path:     "/",
 		Expires:  sess.ExpiresAt,
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   s.cookieSecure(),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -350,7 +357,7 @@ func (s *Server) clearSessionCookie(w http.ResponseWriter) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   s.cookieSecure(),
 		SameSite: http.SameSiteLaxMode,
 	})
 }

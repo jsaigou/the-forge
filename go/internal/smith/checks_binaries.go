@@ -31,6 +31,10 @@ import (
 // unmeasurable result is visible evidence, never worth stalling the sweep.
 const nightlyLsRemoteTimeout = 15 * time.Second
 
+// gitBehindLogMaxN bounds GitBehindLog's fetch — a keyword match needs a
+// screenful of subjects, not a full changelog.
+const gitBehindLogMaxN = 50
+
 // binaryStatus is one tracked binary's resolved state — the finding's
 // evidence shape.
 type binaryStatus struct {
@@ -58,10 +62,46 @@ type binaryStatus struct {
 	// read-only, timeout-bounded), LastBuiltSha what build_refresh last
 	// recorded building from (migration 0066), and NightlyDrift true when
 	// the two shas disagree — i.e. upstream moved past the last build.
-	NightlyURL    string `json:"upstream_nightly_url,omitempty"`
+	NightlyURL     string `json:"upstream_nightly_url,omitempty"`
 	NightlyHeadSha string `json:"upstream_head_sha,omitempty"`
-	LastBuiltSha  string `json:"last_built_upstream_sha,omitempty"`
-	NightlyDrift  bool   `json:"nightly_drift"`
+	LastBuiltSha   string `json:"last_built_upstream_sha,omitempty"`
+	NightlyDrift   bool   `json:"nightly_drift"`
+	// UpstreamSubjects/WatchlistMatches: S6 phase 2 (feedback F1's
+	// commit-subject-fetching half). Subjects are the HEAD..UpstreamRef
+	// commit subject lines (Deps.GitBehindLog, same range UpstreamAhead
+	// counts) — only fetched when there IS measurable drift and an operator
+	// watchlist to match against, so a quiet host pays nothing extra.
+	// WatchlistMatches is visibility only: it does not itself widen
+	// proposeRebuildRunbook's threshold gate (see SettingBuildRefreshWatchlist's
+	// doc comment) — an operator-flagged keyword surfaces even below-threshold
+	// drift as worth a look, without smith auto-proposing anything wider.
+	UpstreamSubjects []string `json:"upstream_subjects,omitempty"`
+	WatchlistMatches []string `json:"watchlist_matches,omitempty"`
+}
+
+// matchWatchlist returns, for each subject line containing (case-
+// insensitive substring) any watchlist keyword, "<keyword>: <subject>" —
+// paired so the evidence/summary shows WHY a subject matched, not just that
+// one did.
+func matchWatchlist(subjects, watchlist []string) []string {
+	if len(subjects) == 0 || len(watchlist) == 0 {
+		return nil
+	}
+	var out []string
+	for _, subj := range subjects {
+		lower := strings.ToLower(subj)
+		for _, kw := range watchlist {
+			kw = strings.TrimSpace(kw)
+			if kw == "" {
+				continue
+			}
+			if strings.Contains(lower, strings.ToLower(kw)) {
+				out = append(out, kw+": "+subj)
+				break // one match per subject is enough evidence
+			}
+		}
+	}
+	return out
 }
 
 // runBinaryVersions is the check registered in registry (checks.go).
@@ -80,6 +120,7 @@ func runBinaryVersions(ctx context.Context, env *CheckEnv) Finding {
 	var stale []string
 	var behind []string
 	var driftBelow []string
+	var watchlistHits []string
 	// Nightly-tracked fork state by source_ref (P3smith).
 	trackedByRef := map[string]forkUpstreamTrack{}
 	for _, fu := range env.ForkUpstreams {
@@ -126,6 +167,20 @@ func runBinaryVersions(ctx context.Context, env *CheckEnv) Finding {
 				} else if n > 0 {
 					driftBelow = append(driftBelow, fmt.Sprintf("%s (%d)", tb.Name, n))
 				}
+				// Commit-subject watchlist match (S6 phase 2): only worth the
+				// extra git-log call when there's measurable drift AND an
+				// operator watchlist to match against.
+				if n > 0 && env.GitBehindLog != nil && len(env.BuildRefreshWatchlist) > 0 {
+					if subjects, logErr := env.GitBehindLog(ctx, tb.SourceRef, tb.UpstreamRef, gitBehindLogMaxN); logErr == nil {
+						st.UpstreamSubjects = subjects
+						if matches := matchWatchlist(subjects, env.BuildRefreshWatchlist); len(matches) > 0 {
+							st.WatchlistMatches = matches
+							watchlistHits = append(watchlistHits, fmt.Sprintf("%s (%d match(es))", tb.Name, len(matches)))
+						}
+					}
+					// Unmeasurable (git log failed) is silent, same posture as
+					// GitAhead/GitLsRemote — a bonus signal, never a failure.
+				}
 			}
 		}
 		// Upstream-NIGHTLY drift mode (P3smith): for forks with tracking
@@ -167,6 +222,7 @@ func runBinaryVersions(ctx context.Context, env *CheckEnv) Finding {
 		statuses = append(statuses, st)
 	}
 
+	confidence, confidenceNote := binaryVersionsConfidence(statuses)
 	ev := map[string]any{"binaries": statuses}
 	if len(stale) > 0 || len(behind) > 0 || len(nightlyDrift) > 0 {
 		parts := []string{}
@@ -180,21 +236,33 @@ func runBinaryVersions(ctx context.Context, env *CheckEnv) Finding {
 			parts = append(parts, fmt.Sprintf("%d nightly-tracked fork(s) whose recorded build sha differs from upstream HEAD: %s",
 				len(nightlyDrift), strings.Join(nightlyDrift, ", ")))
 		}
+		if len(watchlistHits) > 0 {
+			parts = append(parts, fmt.Sprintf("%d build(s) drifted with a commit subject matching the watchlist: %s",
+				len(watchlistHits), strings.Join(watchlistHits, ", ")))
+		}
 		refs := []string{"research:llamacpp-build-status"}
 		if len(behind) > 0 || len(nightlyDrift) > 0 {
 			refs = append(refs, "runbook:build-refresh")
 		}
 		return Finding{CheckID: id, Severity: SeverityInfo,
 			Summary:  strings.Join(parts, "; "),
-			Evidence: ev, KBRefs: refs}
+			Evidence: ev, KBRefs: refs,
+			Confidence: confidence, ConfidenceNote: confidenceNote}
 	}
 	if len(driftBelow) > 0 {
 		// S6: below-threshold drift stays visible — info only, NO runbook
-		// ref (nothing proposes a rebuild off this).
+		// ref (nothing proposes a rebuild off this). A watchlist hit still
+		// gets its own clause even here — the point of the watchlist is
+		// surfacing a flagged keyword regardless of raw commit count.
+		summary := fmt.Sprintf("%d build(s) drifted from upstream but below the %d-commit refresh threshold: %s",
+			len(driftBelow), env.Thresholds.BuildRefreshBehindN, strings.Join(driftBelow, ", "))
+		if len(watchlistHits) > 0 {
+			summary += fmt.Sprintf("; %d matched the watchlist despite being below threshold: %s",
+				len(watchlistHits), strings.Join(watchlistHits, ", "))
+		}
 		return Finding{CheckID: id, Severity: SeverityInfo,
-			Summary: fmt.Sprintf("%d build(s) drifted from upstream but below the %d-commit refresh threshold: %s",
-				len(driftBelow), env.Thresholds.BuildRefreshBehindN, strings.Join(driftBelow, ", ")),
-			Evidence: ev}
+			Summary: summary, Evidence: ev,
+			Confidence: confidence, ConfidenceNote: confidenceNote}
 	}
 	if len(nightlyUnrecorded) > 0 {
 		// Tracking enabled but no build recorded yet (P3smith) — visible,
@@ -202,8 +270,34 @@ func runBinaryVersions(ctx context.Context, env *CheckEnv) Finding {
 		return Finding{CheckID: id, Severity: SeverityInfo,
 			Summary: fmt.Sprintf("%d nightly-tracked fork(s) have no recorded upstream build sha yet: %s",
 				len(nightlyUnrecorded), strings.Join(nightlyUnrecorded, ", ")),
-			Evidence: ev}
+			Evidence:   ev,
+			Confidence: confidence, ConfidenceNote: confidenceNote}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary: fmt.Sprintf("%d tracked binaries checked; source tree matches (or is unmeasurable against) the installed build for all", len(tracked)), Evidence: ev}
+		Summary: fmt.Sprintf("%d tracked binaries checked; source tree matches (or is unmeasurable against) the installed build for all", len(tracked)), Evidence: ev,
+		Confidence: confidence, ConfidenceNote: confidenceNote}
+}
+
+// binaryVersionsConfidence derives Confidence from how many tracked
+// binaries the check could actually read both sides of (installed version
+// + source tree version) — Tier 1 Sprint 4. A binary neither side measured
+// for can't be judged stale/fresh at all; without this, such a binary
+// silently reads as "no drift" indistinguishably from one genuinely
+// confirmed fresh.
+func binaryVersionsConfidence(statuses []binaryStatus) (Confidence, string) {
+	var unmeasured []string
+	for _, st := range statuses {
+		if !st.InstalledKnown || !st.SourceKnown {
+			unmeasured = append(unmeasured, st.Name)
+		}
+	}
+	if len(unmeasured) == 0 {
+		return ConfidenceHigh, ""
+	}
+	note := fmt.Sprintf("%d of %d tracked binaries unmeasurable (installed or source version unreadable): %s",
+		len(unmeasured), len(statuses), strings.Join(unmeasured, ", "))
+	if len(unmeasured) == len(statuses) {
+		return ConfidenceLow, note
+	}
+	return ConfidenceMedium, note
 }

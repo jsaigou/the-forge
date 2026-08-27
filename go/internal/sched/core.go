@@ -160,6 +160,11 @@ type Core struct {
 	queue        []*ticket
 	reservations []Reservation
 	loadBusy     bool
+
+	// outcomes remembers each model's last terminal EnsureLoaded outcome
+	// for a short window after the ticket is gone (Sprint 1, a0 load
+	// visibility) — has its own internal lock, independent of mu.
+	outcomes *outcomeRing
 }
 
 var _ Scheduler = (*Core)(nil)
@@ -188,7 +193,7 @@ func New(deps Deps) (*Core, error) {
 		deps.Logf = func(string, ...any) {}
 	}
 
-	c := &Core{d: deps}
+	c := &Core{d: deps, outcomes: newOutcomeRing()}
 	c.cfg = deps.Fallback
 	if c.cfg == (Config{}) {
 		c.cfg = DefaultConfig()
@@ -265,6 +270,7 @@ func (c *Core) EnsureLoaded(ctx context.Context, req EnsureRequest) (Ticket, err
 	}
 
 	if slot := c.findLoaded(req.Model, req.TargetSlot); slot != "" {
+		c.outcomes.clear(req.Model)
 		return Ticket{
 			TicketID:    newTicketID(),
 			Model:       req.Model,
@@ -305,12 +311,13 @@ func (c *Core) EnsureLoaded(ctx context.Context, req EnsureRequest) (Ticket, err
 	c.persistTicket(snapshot, t.priority)
 	defer c.dequeue(t.TicketID)
 
-	// lastRefusal carries the most recent retryable blocker ("a3 must be
-	// evicted for memory but is not idle", …) so a poll that runs out of
-	// deadline reports WHY it never proceeded instead of a bare timeout —
-	// the 2026-08-22 incident class, where silent refusals burned 320s and
-	// surfaced nothing actionable.
+	// lastRefusal/lastReason carry the most recent retryable blocker ("a3
+	// must be evicted for memory but is not idle", …) so a poll that runs
+	// out of deadline reports WHY it never proceeded instead of a bare
+	// timeout — the 2026-08-22 incident class, where silent refusals
+	// burned 320s and surfaced nothing actionable.
 	lastRefusal := ""
+	var lastReason RefusalReason
 	deadline := func() time.Time {
 		d, _ := ctx.Deadline()
 		if d.IsZero() {
@@ -328,6 +335,9 @@ func (c *Core) EnsureLoaded(ctx context.Context, req EnsureRequest) (Ticket, err
 			if lastRefusal != "" {
 				base += " (last blocker: " + lastRefusal + ")"
 			}
+			c.outcomes.record(req.Model, outcomeRecord{
+				status: StatusFailed, reason: lastReason, message: base, at: c.d.Now(),
+			})
 			return out, fmt.Errorf("%s: %w", base, ctx.Err())
 		}
 
@@ -340,6 +350,7 @@ func (c *Core) EnsureLoaded(ctx context.Context, req EnsureRequest) (Ticket, err
 			t.TargetSlot = slot
 			out := t.Ticket
 			c.mu.Unlock()
+			c.outcomes.clear(req.Model)
 			return out, nil
 		}
 
@@ -372,19 +383,26 @@ func (c *Core) EnsureLoaded(ctx context.Context, req EnsureRequest) (Ticket, err
 				if outcome.success {
 					t.Status = StatusLoaded
 					t.TargetSlot = outcome.slot
+					t.Reason, t.Message = "", ""
 				} else {
 					t.Status = StatusFailed
+					t.Reason, t.Message = outcome.reason, outcome.message
 				}
 			} else {
 				t.Status = StatusQueued
+				t.Reason, t.Message = outcome.reason, outcome.message
 			}
 			snapshot = t.Ticket
 			c.mu.Unlock()
 
 			if outcome.terminal {
 				if outcome.success {
+					c.outcomes.clear(req.Model)
 					return snapshot, nil
 				}
+				c.outcomes.record(req.Model, outcomeRecord{
+					status: StatusFailed, reason: outcome.reason, message: outcome.message, at: c.d.Now(),
+				})
 				return snapshot, fmt.Errorf("sched: load %s: %s", req.Model, outcome.message)
 			}
 			// Retryable: nothing evictable *yet* — an idle threshold
@@ -392,6 +410,7 @@ func (c *Core) EnsureLoaded(ctx context.Context, req EnsureRequest) (Ticket, err
 			// draining can still change conditions before our deadline
 			// (V4 parity: sleep and re-poll, never give up early).
 			lastRefusal = outcome.message
+			lastReason = outcome.reason
 			c.persistTicket(snapshot, t.priority)
 		}
 
@@ -412,6 +431,10 @@ type loadOutcome struct {
 	success  bool
 	slot     string
 	message  string
+	// reason is only set when the outcome came directly from a place()
+	// refusal (see RefusalReason's doc comment) — evict/stop/load execution
+	// failures below place() leave it "".
+	reason RefusalReason
 }
 
 // attemptLoad runs one placement + eviction + load cycle. Called with the
@@ -427,7 +450,7 @@ func (c *Core) attemptLoad(ctx context.Context, req EnsureRequest, cfg Config, r
 
 	pl := c.place(ctx, req.Model, req.TargetSlot, cfg, reservations, horizon)
 	if pl.slot == "" && !pl.evictComfy {
-		return loadOutcome{terminal: pl.terminal, message: pl.message}
+		return loadOutcome{terminal: pl.terminal, message: pl.message, reason: pl.reason}
 	}
 
 	for _, evictSlot := range pl.evict {

@@ -40,7 +40,34 @@ type placement struct {
 	evictComfy bool
 	message   string
 	terminal  bool
+	reason    RefusalReason
 }
+
+// RefusalReason classifies why place() could not place a model right now,
+// giving callers (a future a0 load-status surface, smith, tests) a stable
+// code to switch on instead of parsing prose out of message. "" means no
+// refusal happened (a slot was found) — it is never used as a distinct
+// "unknown reason" value. Execution failures that happen *after* place()
+// succeeds (an evict/stop/load call itself failing) are a different
+// failure class and deliberately leave this empty; only place()'s own
+// refusal-to-choose-a-slot decisions get a reason.
+type RefusalReason string
+
+const (
+	ReasonFitProbeFailed         RefusalReason = "fit_probe_failed"
+	ReasonModelTooLarge          RefusalReason = "model_too_large"
+	ReasonReservationActive      RefusalReason = "reservation_active"
+	ReasonReservationSoon        RefusalReason = "reservation_soon"
+	ReasonIdleThresholdNotMet    RefusalReason = "idle_threshold_not_met"
+	ReasonActivityUnknown        RefusalReason = "activity_unknown"
+	ReasonComfyEvictionDisabled  RefusalReason = "comfyui_eviction_disabled"
+	ReasonComfyReservationActive RefusalReason = "comfyui_reservation_active"
+	ReasonComfyReservationSoon   RefusalReason = "comfyui_reservation_soon"
+	ReasonComfyNotConfigured     RefusalReason = "comfyui_not_configured"
+	ReasonComfyBusy              RefusalReason = "comfyui_busy"
+	ReasonNoEvictableReserved    RefusalReason = "no_evictable_slot_reserved"
+	ReasonNoEvictableIdle        RefusalReason = "no_evictable_slot_idle"
+)
 
 // occupancy is the engine's authoritative in-memory slot reconciliation,
 // fed the latest collector snapshot's unit states (one probe per cycle —
@@ -116,7 +143,7 @@ func (c *Core) place(ctx context.Context, model, target string, cfg Config, rese
 	plan, err := c.d.Engine.FitPlan(model)
 	if err != nil {
 		// Budget probe failure — transient, retry.
-		return placement{message: fmt.Sprintf("fit check failed: %v", err)}
+		return placement{message: fmt.Sprintf("fit check failed: %v", err), reason: ReasonFitProbeFailed}
 	}
 
 	now := c.d.Now()
@@ -145,7 +172,7 @@ func (c *Core) place(ctx context.Context, model, target string, cfg Config, rese
 	var memEvict []string
 	if !plan.Fits {
 		if len(plan.Evict) == 0 && !plan.EvictComfyUI {
-			return placement{message: plan.Message, terminal: true}
+			return placement{message: plan.Message, terminal: true, reason: ReasonModelTooLarge}
 		}
 		for _, s := range plan.Evict {
 			if s == target {
@@ -153,16 +180,16 @@ func (c *Core) place(ctx context.Context, model, target string, cfg Config, rese
 			}
 			if activeProtected(s) {
 				end := activeReservationEnd(reservations, occ[s].Mode, now)
-				return c.structuralRefusal(horizon, end,
+				return c.structuralRefusal(horizon, end, ReasonReservationActive,
 					fmt.Sprintf("not enough VRAM to load %s: %s must be evicted to free memory but is protected by an active reservation", model, s))
 			}
 			if !forced {
-				if msg, terminal, eligible := c.idleHorizonRefusal(s, cfg.IdleUnloadS, horizon); !eligible {
-					return placement{message: msg, terminal: terminal}
+				if msg, terminal, eligible, reason := c.idleHorizonRefusal(s, cfg.IdleUnloadS, horizon); !eligible {
+					return placement{message: msg, terminal: terminal, reason: reason}
 				}
 				if soonProtected(s) {
 					end := soonReservationStart(reservations, occ[s].Mode, now, soon)
-					return c.structuralRefusal(horizon, end,
+					return c.structuralRefusal(horizon, end, ReasonReservationSoon,
 						fmt.Sprintf("not enough VRAM to load %s: %s must be evicted to free memory but is protected by an upcoming reservation", model, s))
 				}
 			}
@@ -177,24 +204,24 @@ func (c *Core) place(ctx context.Context, model, target string, cfg Config, rese
 	if plan.EvictComfyUI {
 		switch {
 		case !cfg.ComfyEvictable():
-			return placement{terminal: true, message: fmt.Sprintf(
+			return placement{terminal: true, reason: ReasonComfyEvictionDisabled, message: fmt.Sprintf(
 				"not enough VRAM to load %s: stopping ComfyUI would free the needed memory (%.1f GiB) but ComfyUI eviction is disabled in the scheduler config",
 				model, plan.ComfyUIBytes/(1<<30))}
 		case activeComfyReservation(reservations, now):
 			end := activeComfyReservationEnd(reservations, now)
-			return c.structuralRefusal(horizon, end, fmt.Sprintf(
+			return c.structuralRefusal(horizon, end, ReasonComfyReservationActive, fmt.Sprintf(
 				"not enough VRAM to load %s: stopping ComfyUI would free the needed memory but a comfyui reservation is active", model))
 		case soonComfyReservation(reservations, now, soon):
-			return placement{terminal: true, message: fmt.Sprintf(
+			return placement{terminal: true, reason: ReasonComfyReservationSoon, message: fmt.Sprintf(
 				"not enough VRAM to load %s: stopping ComfyUI would free the needed memory but a comfyui reservation starts soon", model)}
 		default:
 			if c.d.ComfyUI == nil || c.d.ComfyUI.Idle == nil || c.d.ComfyUI.Stop == nil || c.d.ComfyUI.Unit == nil {
-				return placement{terminal: true, message: fmt.Sprintf(
+				return placement{terminal: true, reason: ReasonComfyNotConfigured, message: fmt.Sprintf(
 					"not enough VRAM to load %s: stopping ComfyUI would free the needed memory but no ComfyUI service is configured for this deployment", model)}
 			}
 			if ok, reason := c.d.ComfyUI.Idle(ctx); !ok {
 				// Transient — workflows drain. Retryable within the horizon.
-				return placement{message: fmt.Sprintf(
+				return placement{reason: ReasonComfyBusy, message: fmt.Sprintf(
 					"not enough VRAM to load %s yet: ComfyUI must stop to free memory (%.1f GiB) but is not idle — %s",
 					model, plan.ComfyUIBytes/(1<<30), reason)}
 			}
@@ -211,16 +238,16 @@ func (c *Core) place(ctx context.Context, model, target string, cfg Config, rese
 		}
 		if activeProtected(target) {
 			end := activeReservationEnd(reservations, occ[target].Mode, now)
-			return c.structuralRefusal(horizon, end, fmt.Sprintf(
+			return c.structuralRefusal(horizon, end, ReasonReservationActive, fmt.Sprintf(
 				"not enough room on %s: %s is protected by an active reservation", target, occ[target].Mode))
 		}
 		if !forced {
-			if msg, terminal, eligible := c.idleHorizonRefusal(target, cfg.IdleUnloadS, horizon); !eligible {
-				return placement{message: msg, terminal: terminal}
+			if msg, terminal, eligible, reason := c.idleHorizonRefusal(target, cfg.IdleUnloadS, horizon); !eligible {
+				return placement{message: msg, terminal: terminal, reason: reason}
 			}
 			if soonProtected(target) {
 				end := soonReservationStart(reservations, occ[target].Mode, now, soon)
-				return c.structuralRefusal(horizon, end, fmt.Sprintf(
+				return c.structuralRefusal(horizon, end, ReasonReservationSoon, fmt.Sprintf(
 					"%s must be evicted but is protected by an upcoming reservation", target))
 			}
 		}
@@ -257,7 +284,7 @@ func (c *Core) place(ctx context.Context, model, target string, cfg Config, rese
 			}
 		}
 		if len(candidates) == 0 {
-			return placement{message: "No evictable slot — all protected by active reservations"}
+			return placement{message: "No evictable slot — all protected by active reservations", reason: ReasonNoEvictableReserved}
 		}
 		c.sortByFootprint(candidates, plan)
 		sort.SliceStable(candidates, func(i, j int) bool {
@@ -282,7 +309,7 @@ func (c *Core) place(ctx context.Context, model, target string, cfg Config, rese
 		evictable = append(evictable, s)
 	}
 	if len(evictable) == 0 {
-		return placement{message: "No idle, unreserved slot available to evict"}
+		return placement{message: "No idle, unreserved slot available to evict", reason: ReasonNoEvictableIdle}
 	}
 	c.sortByFootprint(evictable, plan)
 	return placement{slot: evictable[0], evict: []string{evictable[0]}, evictComfy: evictComfy}
@@ -291,38 +318,41 @@ func (c *Core) place(ctx context.Context, model, target string, cfg Config, rese
 // structuralRefusal turns a blocker with a known clearance time into a
 // terminal refusal when clearance lies beyond the caller's horizon, or a
 // retryable one carrying the ETA. base must already carry the memory-explicit
-// phrasing ("not enough VRAM to load X because …").
-func (c *Core) structuralRefusal(horizon time.Duration, clearsAt time.Time, base string) placement {
+// phrasing ("not enough VRAM to load X because …"). reason is the same
+// regardless of which branch fires below — only terminality and the ETA
+// wording change with timing, not why the slot is blocked.
+func (c *Core) structuralRefusal(horizon time.Duration, clearsAt time.Time, reason RefusalReason, base string) placement {
 	if clearsAt.IsZero() {
-		return placement{terminal: true, message: base + "; the protection has no end — free memory manually or cancel the reservation"}
+		return placement{terminal: true, reason: reason, message: base + "; the protection has no end — free memory manually or cancel the reservation"}
 	}
 	eta := clearsAt.Sub(c.d.Now())
 	if eta > horizon {
-		return placement{terminal: true, message: fmt.Sprintf(
+		return placement{terminal: true, reason: reason, message: fmt.Sprintf(
 			"%s; the protection lifts in %s, beyond this request's remaining %.0fs wait budget — free memory manually or adjust reservations",
 			base, eta.Round(time.Second), horizon.Seconds())}
 	}
-	return placement{message: fmt.Sprintf("%s (eligible in %s)", base, eta.Round(time.Second))}
+	return placement{reason: reason, message: fmt.Sprintf("%s (eligible in %s)", base, eta.Round(time.Second))}
 }
 
 // idleHorizonRefusal checks slot against the idle threshold with the
-// caller's horizon in mind. eligible=true → the caller proceeds; otherwise
-// it returns the composed refusal message and whether it is terminal.
-func (c *Core) idleHorizonRefusal(slot string, idleUnloadS int, horizon time.Duration) (message string, terminal, eligible bool) {
+// caller's horizon in mind. eligible=true → the caller proceeds (reason is
+// "" in that case — no refusal happened); otherwise it returns the composed
+// refusal message, whether it is terminal, and why.
+func (c *Core) idleHorizonRefusal(slot string, idleUnloadS int, horizon time.Duration) (message string, terminal, eligible bool, reason RefusalReason) {
 	idle, known := c.idleSeconds(slot)
 	if !known {
-		return fmt.Sprintf("not enough VRAM: %s is using memory and must be evicted, but its activity state is unknown — it will never be auto-evicted; free it manually", slot), true, false
+		return fmt.Sprintf("not enough VRAM: %s is using memory and must be evicted, but its activity state is unknown — it will never be auto-evicted; free it manually", slot), true, false, ReasonActivityUnknown
 	}
 	if idle >= float64(idleUnloadS) {
-		return "", false, true
+		return "", false, true, ""
 	}
 	wait := time.Duration(float64(idleUnloadS)-idle) * time.Second
 	base := fmt.Sprintf("not enough VRAM yet: %s is using memory but has been idle only %.0fs of the required %ds", slot, idle, idleUnloadS)
 	if wait > horizon {
 		return fmt.Sprintf("%s; it becomes evictable in %s, beyond this request's remaining %.0fs wait budget",
-			base, wait.Round(time.Second), horizon.Seconds()), true, false
+			base, wait.Round(time.Second), horizon.Seconds()), true, false, ReasonIdleThresholdNotMet
 	}
-	return fmt.Sprintf("%s (evictable in ~%s)", base, wait.Round(time.Second)), false, false
+	return fmt.Sprintf("%s (evictable in ~%s)", base, wait.Round(time.Second)), false, false, ReasonIdleThresholdNotMet
 }
 
 // sortByFootprint orders slots smallest-footprint-first. When the engine

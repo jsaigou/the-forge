@@ -91,7 +91,7 @@ func TestDualEngineRoutesByNamespace(t *testing.T) {
 	fb := &fakeBackend{}
 	reg := NewRegistry(t.TempDir())
 	reg.Put(VoiceEntry{ID: "billie", Name: "Billie", Type: "design", Design: &DesignSpec{Instruct: "warm"}})
-	qwen := NewQwenTTS(fb, reg)
+	qwen := NewQwenTTS(fb, reg, nil)
 
 	dual := NewDualEngine(qwen, kokoro, "billie", "af_heart")
 
@@ -137,7 +137,7 @@ func TestDualEngineListMerge(t *testing.T) {
 
 	reg := NewRegistry(t.TempDir())
 	reg.Put(VoiceEntry{ID: "billie", Name: "Billie", Type: "design", Design: &DesignSpec{Instruct: "warm"}})
-	qwen := NewQwenTTS(&fakeBackend{}, reg)
+	qwen := NewQwenTTS(&fakeBackend{}, reg, nil)
 
 	dual := NewDualEngine(qwen, kokoro, "billie", "af_heart")
 	voices, err := dual.ListVoices(context.Background())

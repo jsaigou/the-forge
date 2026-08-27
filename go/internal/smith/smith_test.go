@@ -218,6 +218,79 @@ func TestDiskSpaceSeverity(t *testing.T) {
 	}
 }
 
+func TestBinaryPathsSeverity(t *testing.T) {
+	t.Run("ok when every configured/catalog path exists", func(t *testing.T) {
+		dir := t.TempDir()
+		bin := filepath.Join(dir, "llama-server")
+		if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &config.Config{Paths: config.Paths{VulkanBin: bin, RocmBin: bin}}
+		s := newSmith(snapWith(collector.Metrics{}), nil, func(d *Deps) {
+			d.Cfg = func() *config.Config { return cfg }
+		})
+		f := runOne(context.Background(), findCheck(t, "binary_paths"), s.checkEnv(context.Background()))
+		if f.Severity != SeverityOK {
+			t.Errorf("severity = %s, want ok (summary %q)", f.Severity, f.Summary)
+		}
+	})
+	t.Run("warn when infra.paths.rocm_bin is stale", func(t *testing.T) {
+		dir := t.TempDir()
+		vulkan := filepath.Join(dir, "llama-server")
+		if err := os.WriteFile(vulkan, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cfg := &config.Config{Paths: config.Paths{
+			VulkanBin: vulkan,
+			RocmBin:   filepath.Join(dir, "does-not-exist", "llama-server"), // sprint-4 finding #1
+		}}
+		s := newSmith(snapWith(collector.Metrics{}), nil, func(d *Deps) {
+			d.Cfg = func() *config.Config { return cfg }
+		})
+		f := runOne(context.Background(), findCheck(t, "binary_paths"), s.checkEnv(context.Background()))
+		if f.Severity != SeverityWarn {
+			t.Errorf("severity = %s, want warn (summary %q)", f.Severity, f.Summary)
+		}
+	})
+	t.Run("warn when a catalog build's binary_path is missing", func(t *testing.T) {
+		db, err := store.Open(":memory:")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		ctx := context.Background()
+		if _, err := db.Catalog().CreateBuild(ctx, store.Build{
+			EngineID: 1, Name: "llama.cpp-kintsugi/build-rocm-new",
+			BinaryPath: "/opt/forge/llama.cpp-kintsugi/build-rocm-new/bin/llama-server", Backend: "rocm",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		s := newSmith(snapWith(collector.Metrics{}), db, func(d *Deps) { d.Catalog = db.Catalog() })
+		f := runOne(context.Background(), findCheck(t, "binary_paths"), s.checkEnv(context.Background()))
+		if f.Severity != SeverityWarn {
+			t.Errorf("severity = %s, want warn (summary %q)", f.Severity, f.Summary)
+		}
+	})
+	t.Run("empty binary_path on a retired build is not flagged", func(t *testing.T) {
+		db, err := store.Open(":memory:")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		ctx := context.Background()
+		if _, err := db.Catalog().CreateBuild(ctx, store.Build{
+			EngineID: 1, Name: "(retired) standard-rocm", BinaryPath: "", Backend: "rocm",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		s := newSmith(snapWith(collector.Metrics{}), db, func(d *Deps) { d.Catalog = db.Catalog() })
+		f := runOne(context.Background(), findCheck(t, "binary_paths"), s.checkEnv(context.Background()))
+		if f.Severity != SeverityInfo {
+			t.Errorf("severity = %s, want info/skipped for an all-empty-path catalog (summary %q)", f.Severity, f.Summary)
+		}
+	})
+}
+
 func TestGPUHangSeverity(t *testing.T) {
 	t.Run("crit on INFERENCE_HANG alert", func(t *testing.T) {
 		snap := snapWith(collector.Metrics{})
@@ -366,6 +439,47 @@ func TestSlotAgreementSeverity(t *testing.T) {
 		f := runOne(context.Background(), findCheck(t, "slot_agreement"), s.checkEnv(context.Background()))
 		if f.Severity != SeverityOK {
 			t.Errorf("severity = %s, want ok for unload transient (summary %q)", f.Severity, f.Summary)
+		}
+	})
+}
+
+func TestSlotModelIdentitySeverity(t *testing.T) {
+	cfg := &config.Config{Modes: map[string]config.Mode{
+		"gemma4-26b-a4b-nothink": {Services: []config.Service{{Alias: "gemma4-26b-a4b-nothink"}}},
+	}}
+	withCfg := func(d *Deps) { d.Cfg = func() *config.Config { return cfg } }
+
+	t.Run("crit when the running process reports a different alias", func(t *testing.T) {
+		// The real a4 incident (sprint-4 follow-up, docs/pitfalls.md): engine
+		// believes the -nothink sibling is loaded; the actually-running
+		// process (frozen FOUNDRY_MODEL_ALIAS) reports the base sibling.
+		snap := snapWith(collector.Metrics{})
+		snap.Slots["a4"] = collector.SlotState{Slot: "a4", Mode: "gemma4-26b-a4b-nothink"}
+		snap.Inference["a4"] = collector.SlotInference{ModelAlias: "gemma4-26b-a4b"}
+		s := newSmith(snap, nil, withCfg)
+		f := runOne(context.Background(), findCheck(t, "slot_model_identity"), s.checkEnv(context.Background()))
+		if f.Severity != SeverityCrit {
+			t.Errorf("severity = %s, want crit (summary %q)", f.Severity, f.Summary)
+		}
+	})
+	t.Run("ok when the running process agrees", func(t *testing.T) {
+		snap := snapWith(collector.Metrics{})
+		snap.Slots["a1"] = collector.SlotState{Slot: "a1", Mode: "gemma4-26b-a4b-nothink"}
+		snap.Inference["a1"] = collector.SlotInference{ModelAlias: "gemma4-26b-a4b-nothink"}
+		s := newSmith(snap, nil, withCfg)
+		f := runOne(context.Background(), findCheck(t, "slot_model_identity"), s.checkEnv(context.Background()))
+		if f.Severity != SeverityOK {
+			t.Errorf("severity = %s, want ok (summary %q)", f.Severity, f.Summary)
+		}
+	})
+	t.Run("skipped when the slot has no live /props scrape yet", func(t *testing.T) {
+		snap := snapWith(collector.Metrics{})
+		snap.Slots["a1"] = collector.SlotState{Slot: "a1", Mode: "gemma4-26b-a4b-nothink"}
+		// No snap.Inference["a1"] entry at all — not scraped.
+		s := newSmith(snap, nil, withCfg)
+		f := runOne(context.Background(), findCheck(t, "slot_model_identity"), s.checkEnv(context.Background()))
+		if f.Severity != SeverityInfo {
+			t.Errorf("severity = %s, want info/skipped (summary %q)", f.Severity, f.Summary)
 		}
 	})
 }
@@ -751,13 +865,23 @@ func TestSweepSelection(t *testing.T) {
 	s := New(Deps{Store: db, Source: collector.NewStatic(snapWith(collector.Metrics{}))})
 	ctx := context.Background()
 
-	t.Run("deep runs every check", func(t *testing.T) {
+	t.Run("deep runs every check except ManualOnly ones", func(t *testing.T) {
+		// comfyui_prune is ManualOnly (S7-followup smith UX sprint) — a
+		// delete-file proposal must never come from a background sweep the
+		// operator never asked for, only from an explicit selection (the
+		// "explicit check ids" subtest below covers that path).
+		var manualOnly int
+		for _, c := range registry {
+			if c.ManualOnly {
+				manualOnly++
+			}
+		}
 		findings, err := s.RunChecks(ctx, ScopeDeep, nil, SweepManual)
 		if err != nil {
 			t.Fatalf("RunChecks(deep): %v", err)
 		}
-		if len(findings) != len(registry) {
-			t.Errorf("deep sweep ran %d checks, want %d", len(findings), len(registry))
+		if want := len(registry) - manualOnly; len(findings) != want {
+			t.Errorf("deep sweep ran %d checks, want %d (registry minus %d ManualOnly)", len(findings), want, manualOnly)
 		}
 	})
 	t.Run("explicit check ids", func(t *testing.T) {
@@ -810,7 +934,7 @@ func TestThresholdsParsing(t *testing.T) {
 	want := Thresholds{
 		GTTWarnPct: 70, GTTCritPct: 95, DiskWarnPct: 85, DiskCritPct: 99, DeviceLostWindowMinutes: 15,
 		CompressorRSSWindowHours: 6, CompressorRSSGrowthWarnPct: 40, CompressorRestartsWarnPerHour: 3,
-		BuildRefreshBehindN: 500,
+		BuildRefreshBehindN: 500, CompressorFailOpenWarnPct: 10,
 	}
 	if got != want {
 		t.Errorf("thresholds = %+v, want %+v (partial override + defaults)", got, want)

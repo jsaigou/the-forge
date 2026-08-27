@@ -301,4 +301,61 @@ func TestLoadFromStorePopulated(t *testing.T) {
 		t.Errorf("old-shaped infra.cost (no overhead_w/psu_efficiency) must still default them: got overhead_w=%v psu_efficiency=%v",
 			cfg.Cost.OverheadW, cfg.Cost.PSUEfficiency)
 	}
+	// cfg here came from an infra.server value with no cookie_secure key at
+	// all (the "old shape" every real infra.server row written before
+	// sprint 4 looks like) — must still default true, not silently read as
+	// false. See TestCookieSecureDefaultAndOverride for the explicit-value
+	// cases.
+	if cfg.Server.CookieSecure == nil || !*cfg.Server.CookieSecure {
+		t.Errorf("old-shaped infra.server (no cookie_secure) must default CookieSecure=true, got %v", cfg.Server.CookieSecure)
+	}
+}
+
+// TestCookieSecureDefaultAndOverride pins issue #27's tri-state semantics:
+// an absent infra.server.cookie_secure resolves to the safe default (true),
+// and an operator's explicit false (the tailscale-serve-only opt-out) is
+// never silently overridden back to true.
+func TestCookieSecureDefaultAndOverride(t *testing.T) {
+	// New() with a bare zero-value Config (no store involved at all) —
+	// mirrors a from-scratch New() caller the same way TestLoadFromStoreEmpty
+	// mirrors LoadFromStore's.
+	def, err := New(Config{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if def.Server.CookieSecure == nil || !*def.Server.CookieSecure {
+		t.Errorf("New(Config{}) CookieSecure = %v, want true", def.Server.CookieSecure)
+	}
+
+	falseVal := false
+	off, err := New(Config{Server: Server{CookieSecure: &falseVal}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if off.Server.CookieSecure == nil || *off.Server.CookieSecure {
+		t.Errorf("explicit CookieSecure=false was not preserved, got %v", off.Server.CookieSecure)
+	}
+
+	// Round-trip through the store, the real production path: an operator
+	// who explicitly opted out must stay opted out across a reload.
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	raw, err := json.Marshal(Server{Listen: ":5001", CookieSecure: &falseVal})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := db.Settings().Set(ctx, "infra.server", raw); err != nil {
+		t.Fatalf("Set infra.server: %v", err)
+	}
+	stored, err := LoadFromStore(ctx, db)
+	if err != nil {
+		t.Fatalf("LoadFromStore: %v", err)
+	}
+	if stored.Server.CookieSecure == nil || *stored.Server.CookieSecure {
+		t.Errorf("stored explicit CookieSecure=false was not preserved through LoadFromStore, got %v", stored.Server.CookieSecure)
+	}
 }

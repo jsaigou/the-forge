@@ -57,6 +57,9 @@ type metrics struct {
 	latency  histogram
 	overhead histogram
 
+	failOpenTimeout counter
+	failOpenError   counter
+
 	requestsByProvider labelCounter
 	requestsByModel    labelCounter
 }
@@ -88,6 +91,8 @@ func (m *metrics) WriteTo(w io.Writer) (int64, error) {
 	write("compress_requests_failed_total %d\n", m.requestsFailed.load())
 	write("compress_requests_timeout_total %d\n", m.requestsTimeout.load())
 	write("compress_requests_canceled_total %d\n", m.requestsCanceled.load())
+	write("compress_failopen_total{reason=\"timeout\"} %d\n", m.failOpenTimeout.load())
+	write("compress_failopen_total{reason=\"error\"} %d\n", m.failOpenError.load())
 	write("compress_cache_bust_total %d\n", m.cacheBust.load())
 	// S3 hardening: a live RSS gauge so the collector's compressor scrape
 	// (and any human reading /metrics during an incident) sees this

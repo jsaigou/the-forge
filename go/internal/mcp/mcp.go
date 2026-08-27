@@ -27,6 +27,7 @@ package mcp
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strings"
 
@@ -131,11 +132,21 @@ func (s *Server) authenticate(r *http.Request) (agentName string, ok bool) {
 		return "", false
 	}
 	token := strings.TrimPrefix(header, "Bearer ")
-	id, err := s.deps.Auth.VerifyBearer(token, authz.KindMCP)
+	id, err := s.deps.Auth.VerifyBearerFrom(r.Context(), clientIP(r), token, authz.KindMCP)
 	if err != nil {
 		return "", false
 	}
 	return id.Name, true
+}
+
+// clientIP strips the port from r.RemoteAddr for use as a rate-limit key.
+// Falls back to the raw value if it isn't in host:port form.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // callTool authenticates, resolves the tool name, and dispatches. Auth is

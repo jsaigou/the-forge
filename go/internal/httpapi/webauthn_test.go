@@ -293,6 +293,35 @@ func TestWebAuthnCredentialDelete(t *testing.T) {
 	}
 }
 
+// TestWebAuthnCredentialDeleteOtherUserForbidden is the regression test for
+// issue #39 (IDOR): a non-admin, non-owning session must not be able to
+// delete another user's passkey, and the credential must survive the
+// attempt.
+func TestWebAuthnCredentialDeleteOtherUserForbidden(t *testing.T) {
+	s, auth, db, _ := newWebAuthnTestServer(t)
+	ownerID := getUserIDFromDB(t, db, "testuser")
+	db.WebAuthnCredentials().Save(context.Background(), store.WebAuthnCredential{
+		ID: "cred-1", UserID: ownerID, PublicKey: []byte{0x04}, CreatedAt: time.Now(),
+	})
+
+	if err := auth.CreateUser(t.Context(), "mallory", "hunter2hunter2", authz.RoleViewer); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	cookie := loginAndGetCookie(t, s, "mallory", "hunter2hunter2")
+
+	req := httptest.NewRequest("DELETE", "/api/v1/auth/webauthn/credentials/cred-1", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", getCSRFTokenFromSession(t, s, cookie))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("cross-user delete = %d, want 404", rec.Code)
+	}
+	if _, err := db.WebAuthnCredentials().Get(context.Background(), "cred-1"); err != nil {
+		t.Errorf("credential should still exist after a rejected cross-user delete, got err=%v", err)
+	}
+}
+
 func TestWebAuthnCredentialDeleteNotFound(t *testing.T) {
 	s, _, _, _ := newWebAuthnTestServer(t)
 	cookie := loginAndGetCookie(t, s, "testuser", "hunter2hunter2")

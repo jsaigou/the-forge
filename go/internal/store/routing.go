@@ -19,15 +19,16 @@ func (d *DB) Routing() Routing { return routingView{d} }
 func (v routingView) SaveProxy(ctx context.Context, p ProxyRow) error {
 	_, err := v.d.sql.ExecContext(ctx,
 		`INSERT INTO compressor_proxies (service, label, port, target_url, unit,
-		   provider_id, token, passthrough, orphaned_at, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   provider_id, token, passthrough, fail_open_budget_ms, orphaned_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(service) DO UPDATE SET
 		   label = excluded.label, port = excluded.port,
 		   target_url = excluded.target_url, unit = excluded.unit,
 		   provider_id = excluded.provider_id, token = excluded.token,
-		   passthrough = excluded.passthrough, orphaned_at = excluded.orphaned_at`,
+		   passthrough = excluded.passthrough, fail_open_budget_ms = excluded.fail_open_budget_ms,
+		   orphaned_at = excluded.orphaned_at`,
 		p.Service, p.Label, p.Port, p.TargetURL, p.Unit, intPtrArg(p.ProviderID),
-		nullStr(p.Token), boolInt(p.Passthrough), nullUnix(p.OrphanedAt),
+		nullStr(p.Token), boolInt(p.Passthrough), p.FailOpenBudgetMS, nullUnix(p.OrphanedAt),
 		unixOf(orNow(p.CreatedAt)),
 	)
 	if err != nil {
@@ -52,7 +53,7 @@ func (v routingView) Proxies(ctx context.Context) ([]ProxyRow, error) {
 	rows, err := v.d.sql.QueryContext(ctx,
 		`SELECT hp.id, hp.service, hp.label, hp.port, hp.target_url, hp.unit,
 		        hp.provider_id, rp.name, hp.token,
-		        hp.passthrough, hp.orphaned_at, hp.created_at
+		        hp.passthrough, hp.fail_open_budget_ms, hp.orphaned_at, hp.created_at
 		 FROM compressor_proxies hp
 		 LEFT JOIN router_providers rp ON rp.id = hp.provider_id
 		 ORDER BY hp.service`)
@@ -68,7 +69,7 @@ func (v routingView) Proxies(ctx context.Context) ([]ProxyRow, error) {
 		var passthrough, created int64
 		var orphaned sql.NullInt64
 		if err := rows.Scan(&p.ID, &p.Service, &p.Label, &p.Port, &p.TargetURL, &p.Unit,
-			&providerID, &providerName, &token, &passthrough, &orphaned, &created); err != nil {
+			&providerID, &providerName, &token, &passthrough, &p.FailOpenBudgetMS, &orphaned, &created); err != nil {
 			return nil, fmt.Errorf("store: routing.proxies: %w", err)
 		}
 		if providerID.Valid {
@@ -337,15 +338,15 @@ func (v routingView) RecordSavingsSample(ctx context.Context, s CompressorSaving
 		`INSERT INTO compressor_savings_samples (
 		   ts, proxy_id, tokens_in, tokens_out, cache_read_tokens, uncached_tokens, compressed_saved_tokens,
 		   requests, requests_cached, requests_failed, requests_rate_limited,
-		   requests_timeout, requests_canceled,
+		   requests_timeout, requests_canceled, fail_open_total,
 		   cache_busts, cache_bust_tokens_lost,
 		   ttfb_count, ttfb_sum_ms, ttfb_min_ms, ttfb_max_ms,
 		   latency_count, latency_sum_ms, latency_min_ms, latency_max_ms,
 		   overhead_count, overhead_sum_ms, overhead_min_ms, overhead_max_ms
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts, s.ProxyID, s.TokensIn, s.TokensOut, s.CacheReadTokens, s.UncachedTokens, s.TokensSaved,
 		s.Requests, s.RequestsCached, s.RequestsFailed, s.RequestsRateLimited,
-		s.RequestsTimeout, s.RequestsCanceled,
+		s.RequestsTimeout, s.RequestsCanceled, s.FailOpenTotal,
 		s.CacheBusts, s.CacheBustTokensLost,
 		s.TTFBCount, s.TTFBSumMs, floatPtrArg(s.TTFBMinMs), floatPtrArg(s.TTFBMaxMs),
 		s.LatencyCount, s.LatencySumMs, floatPtrArg(s.LatencyMinMs), floatPtrArg(s.LatencyMaxMs),
@@ -379,7 +380,7 @@ func (v routingView) SavingsSummary(ctx context.Context, since time.Time) (map[s
 	rows, err := v.d.sql.QueryContext(ctx,
 		`SELECT hp.service, hs.tokens_in, hs.tokens_out, hs.compressed_saved_tokens,
 		        hs.requests, hs.requests_cached, hs.requests_failed, hs.requests_rate_limited,
-		        hs.requests_timeout, hs.requests_canceled,
+		        hs.requests_timeout, hs.requests_canceled, hs.fail_open_total,
 		        hs.cache_read_tokens, hs.uncached_tokens, hs.cache_busts, hs.cache_bust_tokens_lost,
 		        hs.ttfb_count, hs.ttfb_sum_ms, hs.ttfb_min_ms, hs.ttfb_max_ms,
 		        hs.latency_count, hs.latency_sum_ms, hs.latency_min_ms, hs.latency_max_ms,
@@ -399,14 +400,14 @@ func (v routingView) SavingsSummary(ctx context.Context, since time.Time) (map[s
 		var tokensIn, tokensSaved int64
 		var tokensOut sql.NullInt64
 		var requests, requestsCached, requestsFailed, requestsRateLimited int64
-		var requestsTimeout, requestsCanceled int64
+		var requestsTimeout, requestsCanceled, failOpenTotal int64
 		var cacheReadTokens, uncachedTokens, cacheBusts, cacheBustTokensLost int64
 		var ttfbCount, latencyCount, overheadCount int64
 		var ttfbSum, latencySum, overheadSum float64
 		var ttfbMin, ttfbMax, latencyMin, latencyMax, overheadMin, overheadMax sql.NullFloat64
 		if err := rows.Scan(&proxy, &tokensIn, &tokensOut, &tokensSaved,
 			&requests, &requestsCached, &requestsFailed, &requestsRateLimited,
-			&requestsTimeout, &requestsCanceled,
+			&requestsTimeout, &requestsCanceled, &failOpenTotal,
 			&cacheReadTokens, &uncachedTokens, &cacheBusts, &cacheBustTokensLost,
 			&ttfbCount, &ttfbSum, &ttfbMin, &ttfbMax,
 			&latencyCount, &latencySum, &latencyMin, &latencyMax,
@@ -425,6 +426,7 @@ func (v routingView) SavingsSummary(ctx context.Context, since time.Time) (map[s
 		p.RequestsRateLimited += requestsRateLimited
 		p.RequestsTimeout += requestsTimeout
 		p.RequestsCanceled += requestsCanceled
+		p.FailOpenTotal += failOpenTotal
 		p.CacheReadTokens += cacheReadTokens
 		p.UncachedTokens += uncachedTokens
 		p.CacheBusts += cacheBusts

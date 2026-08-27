@@ -12,10 +12,13 @@
 //	FORGE_TTS_BACKEND         GGML backend                 (default Vulkan0)
 //	FORGE_TTS_REGISTRY        voices registry dir          (default /opt/forge/tts_voices)
 //	FORGE_TTS_INTERNAL_TOKEN  shared secret for /v1/voices*(default "")
+//	FORGE_TTS_KOKORO_ENABLED  fast-tier (Kokoro) on/off     (default true)
 //	FORGE_TTS_KOKORO_URL      fast-tier (Kokoro) service    (default http://127.0.0.1:8880)
 //	FORGE_TTS_KOKORO_TOKEN    optional Bearer token for Kokoro
 //	FORGE_TTS_DEFAULT_VOICE   default premium voice id      (default billie)
 //	FORGE_TTS_DEFAULT_FAST    default fast voice id         (default af_heart)
+//	FORGE_TTS_DISABLED_MODES  comma-separated VoiceMode list refused outright
+//	                          (e.g. "voicedesign,base" — default none)
 //
 // Inference backend selection (FORGE_TTS_INFERENCE, default "cli"):
 //
@@ -24,13 +27,22 @@
 //	         FORGE_TTS_SERVER_CUSTOM / _DESIGN / _BASE (http://host:port)
 //
 // Dual-model: the premium engine (above) is fronted by a dualEngine that also
-// routes Kokoro-namespaced voices (af_*, am_*, ...) to the fast Kokoro service.
+// routes Kokoro-namespaced voices (af_*, am_*, ...) to the fast Kokoro
+// service — unless FORGE_TTS_KOKORO_ENABLED=false, in which case no Kokoro
+// backend is constructed at all and dualEngine treats it as absent.
+//
+// As of Sprint 2 (Voice & Speech settings), every var above this line is
+// written by the forge daemon's ttsctl.Provisioner into
+// /var/lib/forge/tts/forge-tts.env from the tts.engines setting — the
+// baked Environment= lines in systemd/forge-tts.service are now only the
+// bootstrap defaults for a fresh install, not the operator's live config.
 package main
 
 import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/jsaigou/the-forge/internal/tts"
 )
@@ -40,6 +52,25 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func envBool(key string, def bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	return v != "false" && v != "0"
+}
+
+func parseDisabledModes(v string) map[tts.VoiceMode]bool {
+	out := map[tts.VoiceMode]bool{}
+	for _, m := range strings.Split(v, ",") {
+		m = strings.TrimSpace(m)
+		if m != "" {
+			out[tts.VoiceMode(m)] = true
+		}
+	}
+	return out
 }
 
 func main() {
@@ -73,23 +104,34 @@ func main() {
 		engineDesc = "qwen-tts CLI"
 	}
 
-	engine := tts.NewQwenTTS(backend, reg)
+	disabled := parseDisabledModes(env("FORGE_TTS_DISABLED_MODES", ""))
+	engine := tts.NewQwenTTS(backend, reg, disabled)
 
-	kokoro := tts.NewKokoroBackend(
-		env("FORGE_TTS_KOKORO_URL", "http://127.0.0.1:8880"),
-		os.Getenv("FORGE_TTS_KOKORO_TOKEN"),
-	)
-	dual := tts.NewDualEngine(
-		engine,
-		kokoro,
-		env("FORGE_TTS_DEFAULT_VOICE", "af_heart"),
-		env("FORGE_TTS_DEFAULT_FAST", "af_heart"),
-	)
+	kokoroEnabled := envBool("FORGE_TTS_KOKORO_ENABLED", true)
+	kokoroURL := env("FORGE_TTS_KOKORO_URL", "http://127.0.0.1:8880")
+	defaultVoice := env("FORGE_TTS_DEFAULT_VOICE", "billie") // Sprint 2 fix: see doc comment
+	defaultFast := env("FORGE_TTS_DEFAULT_FAST", "af_heart")
+
+	// dualEngine's concrete type is unexported, so kokoro's construction
+	// (also unexported) has to happen entirely inside each branch and be
+	// assigned to the exported tts.Engine interface here, rather than
+	// declared as a typed nil-or-not variable beforehand.
+	var dual tts.Engine
+	if kokoroEnabled {
+		kokoro := tts.NewKokoroBackend(kokoroURL, os.Getenv("FORGE_TTS_KOKORO_TOKEN"))
+		dual = tts.NewDualEngine(engine, kokoro, defaultVoice, defaultFast)
+	} else {
+		dual = tts.NewDualEngine(engine, nil, defaultVoice, defaultFast)
+	}
 
 	srv := tts.NewServer(dual, os.Getenv("FORGE_TTS_INTERNAL_TOKEN"), reg.AudioDir())
 
 	listen := env("FORGE_TTS_LISTEN", "127.0.0.1:8082")
-	log.Printf("forge-tts listening on %s (inference %s; fast=Kokoro %s)", listen, engineDesc, env("FORGE_TTS_KOKORO_URL", "http://127.0.0.1:8880"))
+	fastDesc := "disabled"
+	if kokoroEnabled {
+		fastDesc = "Kokoro " + kokoroURL
+	}
+	log.Printf("forge-tts listening on %s (inference %s; fast=%s)", listen, engineDesc, fastDesc)
 	if err := http.ListenAndServe(listen, srv.Handler()); err != nil {
 		log.Fatalf("forge-tts: %v", err)
 	}

@@ -13,6 +13,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,13 +65,13 @@ func (s *Server) handleInfraServices(w http.ResponseWriter, r *http.Request) {
 		detail = "compressor down: " + strings.Join(deadOnPath, ", ")
 	}
 	services = append(services, infraService{
-		Name:                "LLM Router (A0)",
-		Unit:                ptrString("forge-daemon"),
-		Port:                &routerPort,
-		Active:              active,
-		Kind:                "systemd",
-		ModeKey:             nil,
-		Detail:              ptrString(detail),
+		Name:                  "LLM Router (A0)",
+		Unit:                  ptrString("forge-daemon"),
+		Port:                  &routerPort,
+		Active:                active,
+		Kind:                  "systemd",
+		ModeKey:               nil,
+		Detail:                ptrString(detail),
 		CompressorPassthrough: &passthroughAll,
 	})
 
@@ -127,6 +129,22 @@ func (s *Server) handleInfraServices(w http.ResponseWriter, r *http.Request) {
 	// own catalog-backed services.icon (config.Mode.Icon, plumbed through by
 	// merged_config.go) — these are catalog rows, unlike the fixed services
 	// above, so no literal map is needed here.
+	//
+	// Operator feedback 2026-08-25: service-mode rows now carry their Port
+	// when known, so the Console add-on chip can offer an ↗ open-in-new-window
+	// link (same shape as the fixed rows). ComfyUI's canonical URL lives in
+	// smith.comfyui.url (smith.go ComfyUIURL — same setting the health check
+	// uses); we surface just its port and the FE builds the host-relative URL.
+	var comfyPort *int
+	if s.deps.Smith != nil && r != nil {
+		if u := s.deps.Smith.ComfyUIURL(r.Context()); u != "" {
+			if parsed, err := url.Parse(u); err == nil && parsed.Port() != "" {
+				if p, err := strconv.Atoi(parsed.Port()); err == nil {
+					comfyPort = &p
+				}
+			}
+		}
+	}
 	if cfg != nil {
 		for name, m := range cfg.Modes {
 			if m.Type != "service" {
@@ -142,10 +160,15 @@ func (s *Server) handleInfraServices(w http.ResponseWriter, r *http.Request) {
 			if m.Icon != "" {
 				logo = ptrString(m.Icon)
 			}
+			port := comfyPort
+			if port != nil && !strings.EqualFold(name, "comfyui") &&
+				!strings.EqualFold(firstNonEmpty(m.Label, name), "ComfyUI") {
+				port = nil
+			}
 			services = append(services, infraService{
 				Name:    firstNonEmpty(m.Label, name),
 				Unit:    unit,
-				Port:    nil,
+				Port:    port,
 				Active:  unitActive(snap, deref(unit, "")),
 				Kind:    "service_mode",
 				ModeKey: &mk,
@@ -287,17 +310,17 @@ func (s *Server) compressorServiceRows(ctx context.Context, snap *collector.Snap
 		unit, port := p.Unit, p.Port
 		health, rssBytes, restarts := s.compressorHealth(ctx, p.Service)
 		rows = append(rows, infraService{
-			Name:             "Compressor (" + p.Service + ")",
-			Unit:             &unit,
-			Port:             &port,
-			Active:           active,
-			Kind:             "systemd",
-			ModeKey:          nil,
-			Detail:           ptrString(detail),
-			CompressorState:    state,
-			CompressorResourceHealth:   health,
-			CompressorRSSBytes: rssBytes,
-			CompressorRestarts: restarts,
+			Name:                     "Compressor (" + p.Service + ")",
+			Unit:                     &unit,
+			Port:                     &port,
+			Active:                   active,
+			Kind:                     "systemd",
+			ModeKey:                  nil,
+			Detail:                   ptrString(detail),
+			CompressorState:          state,
+			CompressorResourceHealth: health,
+			CompressorRSSBytes:       rssBytes,
+			CompressorRestarts:       restarts,
 		})
 	}
 	return rows, deadOnPath

@@ -69,6 +69,20 @@ function ReasoningCard({ canAdmin }: { canAdmin: boolean }) {
     [arr[i], arr[j]] = [arr[j], arr[i]];
     g.setField("handoff_offerings", arr);
   }
+  function toggleBrainChainMember(name: string) {
+    const next = active.brain_chain.includes(name)
+      ? active.brain_chain.filter((x) => x !== name)
+      : [...active.brain_chain, name];
+    g.setField("brain_chain", next);
+  }
+  function moveBrainChainMember(name: string, dir: -1 | 1) {
+    const arr = [...active.brain_chain];
+    const i = arr.indexOf(name);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= arr.length) return;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+    g.setField("brain_chain", arr);
+  }
 
   return (
     <>
@@ -148,6 +162,60 @@ function ReasoningCard({ canAdmin }: { canAdmin: boolean }) {
                       .map((o) => (
                         <button key={o.id} className="tab" onClick={() => toggleOffering(o.id)}>
                           + {o.wire_model}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div id="smith-brain-chain" style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{F["smith.brain_chain"].label}</div>
+          <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
+            {F["smith.brain_chain"].help}
+          </div>
+          {visibleConfigs.length === 0 ? (
+            <div className="empty-note">No local configs to choose from.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {active.brain_chain.length === 0 && (
+                <div style={{ fontSize: 11, color: "var(--text-mute)" }}>
+                  Empty — smith escalates straight to smith.model above, no chain.
+                </div>
+              )}
+              {active.brain_chain.map((name, i) => (
+                <div key={name} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5 }}>
+                  <span style={{ fontFamily: "var(--mono)", color: "var(--text-mute)" }}>{i + 1}.</span>
+                  <span>{name}</span>
+                  {canAdmin && (
+                    <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                      <button className="tab" style={{ padding: "1px 6px" }} onClick={() => moveBrainChainMember(name, -1)} disabled={i === 0}>
+                        ↑
+                      </button>
+                      <button
+                        className="tab" style={{ padding: "1px 6px" }} onClick={() => moveBrainChainMember(name, 1)}
+                        disabled={i === active.brain_chain.length - 1}
+                      >
+                        ↓
+                      </button>
+                      <button className="tab" style={{ padding: "1px 6px" }} onClick={() => toggleBrainChainMember(name)}>
+                        remove
+                      </button>
+                    </span>
+                  )}
+                </div>
+              ))}
+              {canAdmin && visibleConfigs.some((c) => !active.brain_chain.includes(c.name)) && (
+                <div style={{ marginTop: 6 }}>
+                  <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginBottom: 4 }}>Add:</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {visibleConfigs
+                      .filter((c) => !active.brain_chain.includes(c.name))
+                      .map((c) => (
+                        <button key={c.id} className="tab" onClick={() => toggleBrainChainMember(c.name)}>
+                          + {c.name}
                         </button>
                       ))}
                   </div>
@@ -240,7 +308,97 @@ function ThresholdsCard({ canAdmin }: { canAdmin: boolean }) {
             onChange={(v) => g.setField("thresholds", { ...active.thresholds, disk_warn_pct: Number(v) })} />
           <Field rec={F["smith.thresholds.disk_crit_pct"]} value={active.thresholds.disk_crit_pct} disabled={!canAdmin}
             onChange={(v) => g.setField("thresholds", { ...active.thresholds, disk_crit_pct: Number(v) })} />
+          <Field rec={F["smith.thresholds.device_lost_window_minutes"]} value={active.thresholds.device_lost_window_minutes} disabled={!canAdmin}
+            onChange={(v) => g.setField("thresholds", { ...active.thresholds, device_lost_window_minutes: Number(v) })} />
+          <Field rec={F["smith.thresholds.build_refresh_behind_n"]} value={active.thresholds.build_refresh_behind_n} disabled={!canAdmin}
+            onChange={(v) => g.setField("thresholds", { ...active.thresholds, build_refresh_behind_n: Number(v) })} />
+          <Field rec={F["smith.thresholds.compressor_failopen_warn_pct"]} value={active.thresholds.compressor_failopen_warn_pct} disabled={!canAdmin}
+            onChange={(v) => g.setField("thresholds", { ...active.thresholds, compressor_failopen_warn_pct: Number(v) })} />
         </div>
+        {canAdmin && g.dirty && (
+          <div className="form-actions" style={{ marginTop: 12 }}>
+            <button className="btn" onClick={g.reset}>Reset</button>
+            <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
+          </div>
+        )}
+      </div>
+      <StepUpModal open={g.gate.open} requiredFactor={g.gate.factor} onSuccess={g.gate.onSuccess} onClose={g.gate.onClose} />
+    </>
+  );
+}
+
+function WatchlistCard({ canAdmin }: { canAdmin: boolean }) {
+  const cfg = useSmithSettings();
+  const update = useUpdateSmithSettings();
+  const g = useSettingsGroup(cfg.data, update);
+  const [draft, setDraft] = useState("");
+
+  if (cfg.isError || !g.active) {
+    return (
+      <>
+        <div className="eyebrow">smith → Build-refresh watchlist</div>
+        <div className="card">
+          <div className="empty-note">{cfg.isError ? "Operator role required to view smith settings." : "Loading…"}</div>
+        </div>
+      </>
+    );
+  }
+  const active = g.active;
+
+  function addKeyword() {
+    const kw = draft.trim();
+    if (!kw || active!.build_refresh_watchlist.includes(kw)) return;
+    g.setField("build_refresh_watchlist", [...active!.build_refresh_watchlist, kw]);
+    setDraft("");
+  }
+  function removeKeyword(kw: string) {
+    g.setField("build_refresh_watchlist", active.build_refresh_watchlist.filter((x) => x !== kw));
+  }
+
+  return (
+    <>
+      <div className="eyebrow">smith → Build-refresh watchlist</div>
+      <div id="smith-build-refresh-watchlist" className="card">
+        {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
+        <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
+          {F["smith.build_refresh_watchlist"].help}
+        </div>
+        {active.build_refresh_watchlist.length === 0 ? (
+          <div className="empty-note">Empty — no commit-subject matching happens.</div>
+        ) : (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: canAdmin ? 10 : 0 }}>
+            {active.build_refresh_watchlist.map((kw) => (
+              <span
+                key={kw}
+                className="tab"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "var(--mono)", fontSize: 11.5 }}
+              >
+                {kw}
+                {canAdmin && (
+                  <button
+                    aria-label={`remove ${kw}`}
+                    onClick={() => removeKeyword(kw)}
+                    style={{ background: "none", border: "none", color: "var(--text-mute)", cursor: "pointer", padding: 0, fontSize: 13, lineHeight: 1 }}
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+        {canAdmin && (
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              placeholder="e.g. CVE, breaking, security"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addKeyword()}
+              style={{ flex: 1 }}
+            />
+            <button className="btn" disabled={!draft.trim()} onClick={addKeyword}>+ Add</button>
+          </div>
+        )}
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
             <button className="btn" onClick={g.reset}>Reset</button>
@@ -866,17 +1024,19 @@ function SourcingCard() {
           nothing is downloaded or added to the catalog.
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <input
-            className="input" style={{ flex: "1 1 260px" }}
-            placeholder="org/repo (e.g. Qwen/Qwen2.5-Coder-7B-Instruct-GGUF)"
-            value={repo} onChange={(e) => setRepo(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && repo.trim() && run()}
-          />
-          <input
-            className="input" style={{ width: 140 }}
-            placeholder="budget GB (auto)"
-            value={budgetGB} onChange={(e) => setBudgetGB(e.target.value)}
-          />
+          <label className="form-row" style={{ flex: "1 1 260px" }}>
+            <input
+              placeholder="org/repo (e.g. Qwen/Qwen2.5-Coder-7B-Instruct-GGUF)"
+              value={repo} onChange={(e) => setRepo(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && repo.trim() && run()}
+            />
+          </label>
+          <label className="form-row" style={{ width: 140 }}>
+            <input
+              placeholder="budget GB (auto)"
+              value={budgetGB} onChange={(e) => setBudgetGB(e.target.value)}
+            />
+          </label>
           <button className="btn primary" disabled={!repo.trim() || evaluate.isPending} onClick={run}>
             {evaluate.isPending ? "Evaluating…" : "Evaluate"}
           </button>
@@ -952,6 +1112,7 @@ export function Smith({ canAdmin }: { canAdmin: boolean }) {
       <ReasoningCard canAdmin={canAdmin} />
       <ScheduleCard canAdmin={canAdmin} />
       <ThresholdsCard canAdmin={canAdmin} />
+      <WatchlistCard canAdmin={canAdmin} />
       <WebResearchCard canAdmin={canAdmin} />
       <ToolsCard canAdmin={canAdmin} />
       <RetentionCard canAdmin={canAdmin} />

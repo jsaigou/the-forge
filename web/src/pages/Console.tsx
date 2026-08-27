@@ -4,7 +4,7 @@ import { Icon } from "../components/Icon";
 import { ServiceChip } from "../components/ServicesBar";
 import { UnifiedModelCarousel } from "../components/UnifiedModelCarousel";
 import { AskSmithButton } from "../components/smith/AskSmithButton";
-import { SuggestionsTray } from "../components/smith/SuggestionsTray";
+import { SmithChatTray } from "../components/smith/SmithChatTray";
 import { formatCurrency } from "../lib/format";
 import { sortConfigCards, type ConfigSortMode } from "../lib/modelSort";
 import { providerIconSlug } from "../lib/providerPresets";
@@ -176,9 +176,10 @@ export function Console() {
   return (
     <section className="page">
       <ResourceBar />
-      {/* Operator feedback 2026-08-14: smith's suggestions duplicated here,
-          collapsed to one row — click expands the full ActionCard list. */}
-      <SuggestionsTray />
+      {/* Operator feedback 2026-08-27: replaced the runbook-only suggestions
+          tray with a collapsible clone of the "Ask the smith" chat card,
+          collapsed by default. */}
+      <SmithChatTray />
       {/* Smith deep-link affordance: active collector alerts link to Diagnostics.
           Wave 2 §3 track W2-C — minimal edit, just the deep-link on alert rows.
           Sprint S3-Web adds the one-click "Ask smith" affordance (R5): the
@@ -213,7 +214,7 @@ export function Console() {
           the utilization picture now. */}
       <div className="bays-row">
         {status.data ? (
-          <div className="bays">
+          <div className="bays" data-tour-id="bays">
             {slotKeys.map((slotKey) => (
               <Bay
                 key={slotKey}

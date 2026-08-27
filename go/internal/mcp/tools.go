@@ -273,11 +273,21 @@ func (s *Server) toolEnsureLoaded(w http.ResponseWriter, r *http.Request, agent 
 		// and may be in flight, so the attempt is audited.
 		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "timed out") {
 			s.audit(r, agent, "mcp_ensure_loaded", body.Model, "status=timeout")
-			writeJSON(w, http.StatusOK, map[string]any{
+			resp := map[string]any{
 				"success": false,
 				"model":   body.Model,
 				"message": err.Error(),
-			})
+			}
+			// reason is a stable sched.RefusalReason code (Sprint 1, a0 load
+			// visibility) recovered from LoadStatus's outcome ring — freshly
+			// written by the EnsureLoaded call just above — so a caller can
+			// switch on it instead of parsing message's prose. "" when the
+			// timeout wasn't a placement refusal (e.g. still queued behind a
+			// busy load with no refusal recorded yet).
+			if reason := s.deps.Sched.LoadStatus(body.Model).Reason; reason != "" {
+				resp["reason"] = reason
+			}
+			writeJSON(w, http.StatusOK, resp)
 			return
 		}
 		writeSchedError(w, err)

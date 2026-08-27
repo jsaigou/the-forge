@@ -32,11 +32,16 @@ type RouterConfig struct {
 	// settings keys (see routing.go's busyMode/passthroughAll) and stay
 	// there unchanged. LoadFromStore leaves these at applyDefaults' zero
 	// value; they exist on this struct only for NewConfig()'s test callers.
-	BusyMode                    BusyMode `json:"-"`
+	BusyMode                      BusyMode `json:"-"`
 	CompressorPassthroughAll      bool     `json:"-"`
 	CompressorPassthroughServices []string `json:"-"`
-	EnsureLoadedTimeoutS        float64  `json:"ensure_loaded_timeout_s"`
-	EmbeddingURL                string   `json:"embedding_url"`
+	EnsureLoadedTimeoutS          float64  `json:"ensure_loaded_timeout_s"`
+	EmbeddingURL                  string   `json:"embedding_url"`
+	// TTSURL is the forge-tts upstream for the a0 TTS passthrough (Tier 1
+	// Sprint 3) — same shape as EmbeddingURL: a static single-upstream
+	// passthrough, no routing/failover/scheduling (forge-tts is an
+	// always-on service, not a slot).
+	TTSURL string `json:"tts_url"`
 	// Backends / Routes have no store-backed replacement (ADR-0007): local
 	// routing resolves by catalog Config name (routing.go's catalogChain),
 	// remote resolves via store.Offering — neither needs a declared
@@ -181,6 +186,12 @@ func (c *RouterConfig) validate() error {
 		u, err := url.Parse(c.EmbeddingURL)
 		if err != nil || u.Scheme == "" || u.Host == "" {
 			return fmt.Errorf("embedding_url %q: must be an absolute http(s) URL", c.EmbeddingURL)
+		}
+	}
+	if c.TTSURL != "" {
+		u, err := url.Parse(c.TTSURL)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("tts_url %q: must be an absolute http(s) URL", c.TTSURL)
 		}
 	}
 	for i := range c.Routes {

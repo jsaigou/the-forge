@@ -16,10 +16,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jsaigou/the-forge/internal/authz"
-	"github.com/jsaigou/the-forge/internal/store"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
+	"github.com/jsaigou/the-forge/internal/authz"
+	"github.com/jsaigou/the-forge/internal/store"
 )
 
 // ── Session / step-up ───────────────────────────────────────────────────────
@@ -196,6 +196,7 @@ func (s *Server) handleWebAuthnRegisterBegin(w http.ResponseWriter, r *http.Requ
 		Path:     "/",
 		MaxAge:   300, // 5 min
 		HttpOnly: true,
+		Secure:   s.cookieSecure(),
 		SameSite: http.SameSiteLaxMode,
 	})
 	writeJSON(w, http.StatusOK, webauthnBeginRegisterResponse{
@@ -248,7 +249,7 @@ func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Req
 	// Clear the challenge cookie.
 	http.SetCookie(w, &http.Cookie{
 		Name: challengeCookieName, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		HttpOnly: true, Secure: s.cookieSecure(), SameSite: http.SameSiteLaxMode,
 	})
 	s.audit(r, ident.Name, "webauthn_register", result.CredentialID, "")
 	writeJSON(w, http.StatusOK, webauthnFinishRegisterResponse{
@@ -346,7 +347,7 @@ func (s *Server) handleWebAuthnAssertFinish(w http.ResponseWriter, r *http.Reque
 	// Clear the challenge cookie.
 	http.SetCookie(w, &http.Cookie{
 		Name: challengeCookieName, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		HttpOnly: true, Secure: s.cookieSecure(), SameSite: http.SameSiteLaxMode,
 	})
 
 	// Elevate the session to passkey (L2).
@@ -425,6 +426,19 @@ func (s *Server) handleWebAuthnCredentialDelete(w http.ResponseWriter, r *http.R
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
+	cred, err := s.deps.WebAuthnService.GetCredential(ctx, credID)
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "credential not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "credential lookup failed")
+		return
+	}
+	if cred.UserID != sess.UserID && identity(r).Role != authz.RoleAdmin {
+		writeError(w, http.StatusNotFound, "credential not found")
+		return
+	}
 	if err := s.deps.WebAuthnService.DeleteCredential(ctx, credID); err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "credential not found")
@@ -727,9 +741,56 @@ func (s *Server) handleKeyCreate(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, map[string]string{"role": "is required for forge keys"})
 		return
 	}
+
+	// #37: gating lives here (not requireAssurance) because the
+	// self-rotation carve-out needs the decoded body. A session identity
+	// always falls through to the normal policy evaluation, unchanged from
+	// before #37. A bearer identity is allowed through WITHOUT a stepped-up
+	// session only when this request is safe self-rotation: re-minting the
+	// SAME kind+name as the calling key itself (exactly what MintKey's
+	// existing "revoke any existing active key of this name first"
+	// semantics already do — this is how `forge keys-export` refreshes its
+	// own CLI key), at no more than the calling key's own role. Minting any
+	// other key, or a higher role, via bearer still requires a session
+	// step-up — which a bearer identity can never satisfy, so it's a hard
+	// block in practice, same as DELETE (requireStrictAssurance).
+	ident := identity(r)
+	isSelfRotation := ident.KeyID != "" &&
+		ident.Kind == authz.KindForge &&
+		authz.KeyKind(b.Kind) == authz.KindForge &&
+		b.Name == ident.Name &&
+		ident.Role.Allows(role)
+	if !isSelfRotation {
+		allowed, decision, err := s.evaluateAssurance(r.Context(), ident, authz.ResourceAreaSettingsSecurity)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "policy load failed")
+			return
+		}
+		if !allowed {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error":    "step_up_required",
+				"required": string(decision.Required),
+				"resource": decision.Resource,
+			})
+			return
+		}
+	}
+
+	if b.TTLSeconds < 0 {
+		writeValidationError(w, map[string]string{"ttl_seconds": "must be >= 0"})
+		return
+	}
+	var boundIP string
+	if b.BindToRequester {
+		boundIP = effectiveClientIP(r)
+	}
+	var expiresAt time.Time
+	if b.TTLSeconds > 0 {
+		expiresAt = time.Now().Add(time.Duration(b.TTLSeconds) * time.Second)
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	token, err := s.deps.KeyManager.MintKey(ctx, authz.KeyKind(b.Kind), b.Name, role)
+	token, err := s.deps.KeyManager.MintKey(ctx, authz.KeyKind(b.Kind), b.Name, b.DisplayName, role, boundIP, expiresAt)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -1009,7 +1070,7 @@ func (s *Server) handleAuthConfigPut(w http.ResponseWriter, r *http.Request) {
 		if effectiveProvider == "forward_auth_header" {
 			if check := checkTrustedCIDRLockout(r.RemoteAddr, cidrs); check != nil && check.Level == "error" {
 				writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-					"error": "preflight_failed",
+					"error":  "preflight_failed",
 					"fields": map[string]string{"trusted_cidrs": check.Message},
 					"checks": []preflightCheck{*check},
 				})
@@ -1097,11 +1158,13 @@ func (s *Server) handleRecoveryCodesGenerate(w http.ResponseWriter, r *http.Requ
 // never the secret).
 func toAPIKeyResponse(k store.APIKey) apiKeyResponse {
 	resp := apiKeyResponse{
-		KeyID:     k.KeyID,
-		Kind:      k.Kind,
-		Name:      k.Name,
-		Role:      k.Role,
-		CreatedAt: unixSeconds(k.CreatedAt),
+		KeyID:       k.KeyID,
+		Kind:        k.Kind,
+		Name:        k.Name,
+		Role:        k.Role,
+		DisplayName: k.DisplayName,
+		BoundIP:     k.BoundIP,
+		CreatedAt:   unixSeconds(k.CreatedAt),
 	}
 	if !k.LastUsedAt.IsZero() {
 		t := unixSeconds(k.LastUsedAt)
@@ -1110,6 +1173,10 @@ func toAPIKeyResponse(k store.APIKey) apiKeyResponse {
 	if !k.RevokedAt.IsZero() {
 		t := unixSeconds(k.RevokedAt)
 		resp.RevokedAt = &t
+	}
+	if !k.ExpiresAt.IsZero() {
+		t := unixSeconds(k.ExpiresAt)
+		resp.ExpiresAt = &t
 	}
 	return resp
 }

@@ -409,6 +409,46 @@ type Catalog interface {
 	SetFamilyLogoDark(ctx context.Context, familyID int64, logo string) error
 	SetGenealogyLogoDark(ctx context.Context, genealogyID int64, logo string) error
 	SetConfigLogoDark(ctx context.Context, configID int64, logo string) error
+
+	// RegisterDownloadedModel (HF model-acquisition track) writes a full
+	// Model+Variant+Artifact(+mmproj)+Config row set atomically. The
+	// individual Create* methods above are each a standalone statement with
+	// no shared transaction seam — a partial failure partway through a
+	// multi-row write (e.g. Config creation failing after Model/Variant/
+	// Artifact already committed) would strand an orphaned Model with no
+	// Config to describe it. This method exists specifically to avoid that;
+	// every field in b is written inside one BeginTx or none of it is.
+	RegisterDownloadedModel(ctx context.Context, b ModelBundle) (ModelBundleResult, error)
+}
+
+// ModelBundle is the full row set one completed HF download registers
+// (RegisterDownloadedModel). IDs on Model/Variant/Artifact/Config are
+// ignored on input — they're assigned by the insert and returned in
+// ModelBundleResult. FK fields that only make sense once earlier rows in
+// the bundle exist (Variant.ModelID, Artifact.VariantID,
+// Config.VariantID/WeightArtifactID/MMProjArtifactID) are filled in by
+// RegisterDownloadedModel itself; any value the caller sets there is
+// overwritten.
+type ModelBundle struct {
+	Model    Model
+	Variant  Variant
+	Artifact Artifact  // the weight artifact (Config.WeightArtifactID points here)
+	MMProj   *Artifact // optional auxiliary artifact; nil = no mmproj
+	// ExtraArtifacts are trailing shards of a sharded weight file (same
+	// ShardSetID as Artifact, ArtifactType "weight"): un-flagged sibling
+	// rows nothing points a FK at, purely for catalog completeness.
+	ExtraArtifacts []Artifact
+	Config         Config
+}
+
+// ModelBundleResult is the id set RegisterDownloadedModel assigned.
+// MMProjArtifactID is 0 when the bundle had no MMProj.
+type ModelBundleResult struct {
+	ModelID          int64
+	VariantID        int64
+	ArtifactID       int64
+	MMProjArtifactID int64
+	ConfigID         int64
 }
 
 type catalogView struct{ d *DB }
@@ -2033,4 +2073,146 @@ func (v catalogView) SetConfigLogoDark(ctx context.Context, configID int64, logo
 		return fmt.Errorf("%w: config %d", ErrNotFound, configID)
 	}
 	return nil
+}
+
+// RegisterDownloadedModel writes b's full row set inside one transaction.
+// See ModelBundle's doc comment for why this exists rather than four
+// separate Create* calls. The SQL mirrors CreateModel/CreateVariant/
+// CreateArtifact/CreateConfig verbatim (same columns, same defaulting),
+// just issued against tx instead of v.d.sql.
+func (v catalogView) RegisterDownloadedModel(ctx context.Context, b ModelBundle) (ModelBundleResult, error) {
+	tx, err := v.d.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return ModelBundleResult{}, fmt.Errorf("store: catalog.register_downloaded_model: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	m := b.Model
+	if m.Visibility == "" {
+		m.Visibility = "visible"
+	}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO models (family_id, name, architecture, parameter_count,
+		description, creator, license_name, license_url, hf_repo, logo, logo_dark,
+		key_features, modalities, visibility)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		nullInt64(m.FamilyID), m.Name, m.Architecture, m.ParameterCount,
+		m.Description, m.Creator, m.LicenseName, m.LicenseURL, m.HFRepo, m.Logo, m.LogoDark,
+		jsonList(m.KeyFeatures), jsonList(m.Modalities), m.Visibility)
+	if err != nil {
+		return ModelBundleResult{}, fmt.Errorf("store: catalog.register_downloaded_model: create_model: %w", err)
+	}
+	var out ModelBundleResult
+	out.ModelID, _ = res.LastInsertId()
+
+	vt := b.Variant
+	vt.ModelID = out.ModelID
+	res, err = tx.ExecContext(ctx,
+		`INSERT INTO variants (model_id, name, derivation_type, source_variant_id,
+		   trained_ctx, is_abliterated, abliteration_quality)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		vt.ModelID, vt.Name, vt.DerivationType, nullInt64(vt.SourceVariantID),
+		vt.TrainedCtx, boolInt(vt.IsAbliterated), vt.AbliterationQuality)
+	if err != nil {
+		return ModelBundleResult{}, fmt.Errorf("store: catalog.register_downloaded_model: create_variant: %w", err)
+	}
+	out.VariantID, _ = res.LastInsertId()
+
+	a := b.Artifact
+	a.VariantID = out.VariantID
+	if a.ArtifactType == "" {
+		a.ArtifactType = "weight"
+	}
+	res, err = tx.ExecContext(ctx,
+		`INSERT INTO artifacts (variant_id, quantization_id, format_id, file_path,
+		   shard_set_id, is_auxiliary, artifact_type, missing, sha256,
+		   file_size_bytes, gguf_arch, gguf_trained_ctx, gguf_parameter_count,
+		   gguf_quant_type)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.VariantID, nullInt64(a.QuantizationID), a.FormatID, a.FilePath,
+		nullStr(a.ShardSetID), boolInt(a.IsAuxiliary), a.ArtifactType,
+		boolInt(a.Missing), nullStr(a.SHA256), a.FileSizeBytes,
+		a.GGUFArch, a.GGUFTrainedCtx, a.GGUFParameterCount, a.GGUFQuantType)
+	if err != nil {
+		return ModelBundleResult{}, fmt.Errorf("store: catalog.register_downloaded_model: create_artifact: %w", err)
+	}
+	out.ArtifactID, _ = res.LastInsertId()
+
+	for _, extra := range b.ExtraArtifacts {
+		extra.VariantID = out.VariantID
+		if extra.ArtifactType == "" {
+			extra.ArtifactType = "weight"
+		}
+		if _, err = tx.ExecContext(ctx,
+			`INSERT INTO artifacts (variant_id, quantization_id, format_id, file_path,
+			   shard_set_id, is_auxiliary, artifact_type, missing, sha256,
+			   file_size_bytes, gguf_arch, gguf_trained_ctx, gguf_parameter_count,
+			   gguf_quant_type)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			extra.VariantID, nullInt64(extra.QuantizationID), extra.FormatID, extra.FilePath,
+			nullStr(extra.ShardSetID), boolInt(extra.IsAuxiliary), extra.ArtifactType,
+			boolInt(extra.Missing), nullStr(extra.SHA256), extra.FileSizeBytes,
+			extra.GGUFArch, extra.GGUFTrainedCtx, extra.GGUFParameterCount, extra.GGUFQuantType); err != nil {
+			return ModelBundleResult{}, fmt.Errorf("store: catalog.register_downloaded_model: create_extra_artifact: %w", err)
+		}
+	}
+
+	if b.MMProj != nil {
+		mp := *b.MMProj
+		mp.VariantID = out.VariantID
+		mp.IsAuxiliary = true
+		if mp.ArtifactType == "" {
+			mp.ArtifactType = "mmproj"
+		}
+		res, err = tx.ExecContext(ctx,
+			`INSERT INTO artifacts (variant_id, quantization_id, format_id, file_path,
+			   shard_set_id, is_auxiliary, artifact_type, missing, sha256,
+			   file_size_bytes, gguf_arch, gguf_trained_ctx, gguf_parameter_count,
+			   gguf_quant_type)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			mp.VariantID, nullInt64(mp.QuantizationID), mp.FormatID, mp.FilePath,
+			nullStr(mp.ShardSetID), boolInt(mp.IsAuxiliary), mp.ArtifactType,
+			boolInt(mp.Missing), nullStr(mp.SHA256), mp.FileSizeBytes,
+			mp.GGUFArch, mp.GGUFTrainedCtx, mp.GGUFParameterCount, mp.GGUFQuantType)
+		if err != nil {
+			return ModelBundleResult{}, fmt.Errorf("store: catalog.register_downloaded_model: create_mmproj_artifact: %w", err)
+		}
+		out.MMProjArtifactID, _ = res.LastInsertId()
+
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO compatibilities (auxiliary_artifact_id, variant_id) VALUES (?, ?)`,
+			out.MMProjArtifactID, out.VariantID); err != nil {
+			return ModelBundleResult{}, fmt.Errorf("store: catalog.register_downloaded_model: create_compatibility: %w", err)
+		}
+	}
+
+	c := b.Config
+	c.VariantID = out.VariantID
+	c.WeightArtifactID = out.ArtifactID
+	c.MMProjArtifactID = out.MMProjArtifactID
+	if c.Status == "" {
+		c.Status = "unverified"
+	}
+	if c.Visibility == "" {
+		c.Visibility = "hidden"
+	}
+	res, err = tx.ExecContext(ctx,
+		`INSERT INTO configs (name, variant_id, weight_artifact_id, engine_id,
+		   build_id, mmproj_artifact_id, n_ctx, parallel, extra_args, status,
+		   visibility, is_default, fingerprint, created_at, logo, logo_dark, modalities)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.Name, c.VariantID, c.WeightArtifactID, c.EngineID,
+		nullInt64(c.BuildID), nullInt64(c.MMProjArtifactID),
+		c.NCtx, c.Parallel, jsonList(c.ExtraArgs), c.Status, c.Visibility,
+		boolInt(c.IsDefault), c.Fingerprint, unixOf(orNow(c.CreatedAt)), c.Logo, c.LogoDark,
+		nullJSONList(c.Modalities))
+	if err != nil {
+		return ModelBundleResult{}, fmt.Errorf("store: catalog.register_downloaded_model: create_config: %w", err)
+	}
+	out.ConfigID, _ = res.LastInsertId()
+
+	if err := tx.Commit(); err != nil {
+		return ModelBundleResult{}, fmt.Errorf("store: catalog.register_downloaded_model: commit: %w", err)
+	}
+	return out, nil
 }

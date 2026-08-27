@@ -48,11 +48,16 @@ func (s *Smith) persistFindings(ctx context.Context, findings []Finding, sweepKi
 		if err != nil {
 			kbRefsJSON = []byte("[]") // never block a finding's own persistence over this
 		}
+		confidence := f.Confidence
+		if confidence == "" {
+			confidence = ConfidenceHigh
+		}
 		res, err := s.d.Store.SQL().ExecContext(ctx,
 			`INSERT INTO smith_findings
-				(investigation_id, check_id, severity, summary, evidence, sweep_kind, created_at, kb_refs)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			invID, f.CheckID, string(f.Severity), f.Summary, evidenceJSON(f.Evidence), sweepKind, at.Unix(), string(kbRefsJSON))
+				(investigation_id, check_id, severity, summary, evidence, sweep_kind, created_at, kb_refs, confidence, confidence_note)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			invID, f.CheckID, string(f.Severity), f.Summary, evidenceJSON(f.Evidence), sweepKind, at.Unix(), string(kbRefsJSON),
+			string(confidence), f.ConfidenceNote)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("insert finding %s: %w", f.CheckID, err)
@@ -77,7 +82,7 @@ func (s *Smith) ListFindings(ctx context.Context, since time.Time, severity stri
 		limit = defaultFindingsLimit
 	}
 
-	query := `SELECT id, investigation_id, check_id, severity, summary, evidence, sweep_kind, created_at, kb_refs, repeat_count
+	query := `SELECT id, investigation_id, check_id, severity, summary, evidence, sweep_kind, created_at, kb_refs, repeat_count, confidence, confidence_note
 	          FROM smith_findings`
 	args := []any{}
 	wheres := []string{}
@@ -114,7 +119,7 @@ func (s *Smith) ListFindings(ctx context.Context, since time.Time, severity stri
 		var createdAt int64
 		var kbRefsJSON string
 		if err := rows.Scan(&sf.ID, &invID, &sf.CheckID, &sf.Severity, &sf.Summary,
-			&sf.Evidence, &sf.SweepKind, &createdAt, &kbRefsJSON, &sf.RepeatCount); err != nil {
+			&sf.Evidence, &sf.SweepKind, &createdAt, &kbRefsJSON, &sf.RepeatCount, &sf.Confidence, &sf.ConfidenceNote); err != nil {
 			return nil, fmt.Errorf("smith: scan finding: %w", err)
 		}
 		if invID.Valid {

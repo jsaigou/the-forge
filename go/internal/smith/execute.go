@@ -460,10 +460,14 @@ type restartUnitDetail struct {
 	Unit string `json:"unit"`
 }
 
-// settingsChangeDetail is KindSettingsChange's detail shape.
+// settingsChangeDetail is KindSettingsChange's detail shape. Reason is
+// optional and purely explanatory (ActionCard surfaces it verbatim,
+// docs/v5-smith.md §4.6.1) — dispatchSettingsChange never reads it, so an
+// older proposal minted before a Reason was added still applies fine.
 type settingsChangeDetail struct {
-	Key   string          `json:"key"`
-	Value json.RawMessage `json:"value"`
+	Key    string          `json:"key"`
+	Value  json.RawMessage `json:"value"`
+	Reason string          `json:"reason,omitempty"`
 }
 
 // deleteFileEntry is one file in a delete_files proposal — copied from the
@@ -645,7 +649,45 @@ func (s *Smith) dispatchSettingsChange(ctx context.Context, a *Action) error {
 			s.logf("audit write failed: %v", err)
 		}
 	}
+
+	// Some settings are env vars read at forge-compress startup — applying
+	// them requires updating the proxy's ProxyRow and restarting the unit
+	// via the provisioner.
+	if d.Key == SettingFailOpenBudgetMS && s.d.CompressorProvisioner != nil {
+		var budgetMS int
+		if err := json.Unmarshal(d.Value, &budgetMS); err == nil && budgetMS > 0 {
+			s.applyFailOpenBudget(ctx, budgetMS)
+		}
+	}
+
 	return nil
+}
+
+// applyFailOpenBudget writes the new fail-open budget to every active
+// compressor proxy and reconciles (restarts) each one so forge-compress
+// picks up the new env var.
+func (s *Smith) applyFailOpenBudget(ctx context.Context, budgetMS int) {
+	proxies, err := s.d.Store.Routing().Proxies(ctx)
+	if err != nil {
+		s.logf("apply_failopen_budget: proxy list: %v", err)
+		return
+	}
+	for _, p := range proxies {
+		if !p.OrphanedAt.IsZero() {
+			continue
+		}
+		if p.FailOpenBudgetMS == budgetMS {
+			continue // already at the target value
+		}
+		p.FailOpenBudgetMS = budgetMS
+		if err := s.d.Store.Routing().SaveProxy(ctx, p); err != nil {
+			s.logf("apply_failopen_budget: save proxy %s: %v", p.Service, err)
+			continue
+		}
+		if err := s.d.CompressorProvisioner.Reconcile(ctx, p); err != nil {
+			s.logf("apply_failopen_budget: reconcile %s: %v", p.Service, err)
+		}
+	}
 }
 
 // dispatchDeleteFiles executes a delete_files action (P6 FR7), re-validating
@@ -827,6 +869,14 @@ var allowedSmithSettingsKeys = map[string]bool{
 	SettingHandoffOfferings: true,
 	SettingSchedule:         true,
 	SettingThresholds:       true,
+	// SettingBuildRefreshWatchlist: smith may append here, auto-populated
+	// from failed model-add compatibility failures (S6 phase 2's original
+	// design — see SettingBuildRefreshWatchlist's doc comment).
+	SettingBuildRefreshWatchlist: true,
+	// SettingFailOpenBudgetMS (Sprint D): smith proposes raising this when
+	// the fail-open rate is high; the apply path restarts forge-compress to
+	// pick up the new value.
+	SettingFailOpenBudgetMS: true,
 }
 
 // settingsKeyAllowed reports whether key is on the smith.* allowlist.

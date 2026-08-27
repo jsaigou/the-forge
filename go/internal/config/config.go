@@ -39,11 +39,20 @@ type Config struct {
 // Server holds listen addresses and the state-db location. Canonical V4
 // ports: dashboard 5000, a0 8085, MCP 8095 (never 8086 — forge-aligner).
 type Server struct {
-	Listen       string `json:"listen"`        // dashboard + API, default ":5000"
+	Listen       string `json:"listen"`        // dashboard + API, default "127.0.0.1:5000"
 	RouterListen string `json:"router_listen"` // a0, default ":8085"
 	MCPListen    string `json:"mcp_listen"`    // default ":8095"
 	DBPath       string `json:"db_path"`       // default "/var/lib/forge/forge.db"
 	TTSUnit      string `json:"tts_unit"`      // TTS systemd unit, default "forge-tts"
+	// CookieSecure controls the Secure attribute on the session cookie
+	// (pwa.go's setSessionCookie) and the WebAuthn challenge cookie
+	// (auth_handlers.go). *bool so an absent `infra.server` field (nothing
+	// ever saved, or a pre-#27 stored record) resolves to the safe default
+	// (true) in applyDefaults, distinct from an operator's explicit opt-out
+	// (false) for the tailscale-serve-only deployment model, where this
+	// process only ever speaks plain HTTP behind a TLS-terminating proxy on
+	// the same host. Security hardening sprint 4, issue #27.
+	CookieSecure *bool `json:"cookie_secure"`
 }
 
 type Paths struct {
@@ -374,13 +383,17 @@ func getSetting(ctx context.Context, settings store.Settings, key string, dst an
 
 func (c *Config) applyDefaults() {
 	if c.Server.Listen == "" {
-		c.Server.Listen = ":5000"
+		c.Server.Listen = "127.0.0.1:5000"
 	}
 	if c.Server.RouterListen == "" {
 		c.Server.RouterListen = ":8085"
 	}
 	if c.Server.MCPListen == "" {
 		c.Server.MCPListen = ":8095"
+	}
+	if c.Server.CookieSecure == nil {
+		t := true
+		c.Server.CookieSecure = &t
 	}
 	if c.Server.TTSUnit == "" {
 		c.Server.TTSUnit = "forge-tts"

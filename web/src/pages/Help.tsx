@@ -4,14 +4,15 @@ import { AskSmith } from "../components/help/AskSmith";
 import { Diagnostics } from "../components/help/Diagnostics";
 import { Guide } from "../components/help/Guide";
 import { reopenTour } from "../onboarding/useOnboarding";
+import { useSession } from "../lib/session";
 
 // Wave 2 nav reorg (docs/v5-smith-wave2.md §3 track W2-B): Help is now a
-// sub-tab shell, not a standalone page. Two sub-tabs — Guide and Ask the
-// smith — routed via the tab/sub hash router (#help/guide, #help/smith,
+// sub-tab shell, not a standalone page. Two sub-tabs, Guide and Ask the
+// smith, routed via the tab/sub hash router (#help/guide, #help/smith,
 // plus #help/smith/conv/<id> deep links into a specific conversation). The
 // Ask the smith tab merges the P3 chat UI (components/help/AskSmith.tsx)
 // with diagnostics findings (components/help/Diagnostics.tsx) in a single
-// scrollable page — chat on top, findings below. Legacy #help/ask and
+// scrollable page: chat on top, findings below. Legacy #help/ask and
 // #help/diagnostics hashes redirect to #help/smith for backward compat.
 //
 // Local useState + onSubChange follows the Settings precedent: local state
@@ -34,6 +35,7 @@ function parseSub(sub?: string): HelpTab {
 
 export function Help({ sub, onSubChange }: { sub?: string; onSubChange?: (sub: string, opts?: { replace?: boolean }) => void }) {
   const [tab, setTab] = useState<HelpTab>(parseSub(sub));
+  const { canOperate } = useSession();
 
   useEffect(() => {
     setTab(parseSub(sub));
@@ -51,15 +53,20 @@ export function Help({ sub, onSubChange }: { sub?: string; onSubChange?: (sub: s
     <section className="page">
       <div className="eyebrow" style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span>Help</span>
-        {/* P4 — re-run entry for the first-run tour (useOnboarding owns the
-            done-flag; this just re-opens it for this session). */}
-        <button
-          className="btn sm"
-          title="Replay the first-run guided tour"
-          onClick={reopenTour}
-        >
-          Replay onboarding tour
-        </button>
+        {/* Sprint 6: re-run entry for the first-run tour (useOnboarding owns
+            the done-flag; this just re-opens it for this session). Gated on
+            canOperate to match useOnboarding's own first-run gate — every
+            tour target is an operator-only control, so a viewer replaying it
+            would just hit dead spotlights. */}
+        {canOperate && (
+          <button
+            className="btn sm"
+            title="Replay the first-run guided tour"
+            onClick={reopenTour}
+          >
+            Replay onboarding tour
+          </button>
+        )}
         <div className="tabs" style={{ marginLeft: "auto" }}>
           {HELP_TABS.map((t) => (
             <button

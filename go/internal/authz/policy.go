@@ -70,6 +70,16 @@ const (
 	// human approval for future occurrences of a problem is a materially
 	// different trust decision than approving one action right now.
 	ResourceActionSmithAutonomy = "action.smith.autonomy"
+
+	// ResourceActionModelDownload gates starting/pausing/resuming/
+	// cancelling/approving an HF model-acquisition job (go/internal/
+	// hfdownload) — a real, tens-of-GB write to disk that ends in new
+	// catalog rows. Deliberately network-tier, matching
+	// ResourceActionModelLoadUnload rather than the password-tier
+	// ResourceActionModelProfile: unlike profiling, a download never
+	// evicts a live slot or touches traffic — the operator-facing risk is
+	// disk space and catalog clutter, not an outage.
+	ResourceActionModelDownload = "action.model.download"
 )
 
 // DefaultPolicy is the shipped seed (§3.4). Written to "auth.policy" on first
@@ -91,6 +101,7 @@ var DefaultPolicy = map[string]string{
 	ResourceActionSmithExecute:     string(AssurancePassword),
 	ResourcePageSmith:              string(AssuranceNetwork),
 	ResourceActionSmithAutonomy:    string(AssurancePassword),
+	ResourceActionModelDownload:    string(AssuranceNetwork),
 }
 
 // allResources is the enumerable set of valid resource keys.
@@ -111,6 +122,7 @@ var allResources = []string{
 	ResourceActionSmithExecute,
 	ResourcePageSmith,
 	ResourceActionSmithAutonomy,
+	ResourceActionModelDownload,
 }
 
 // ValidResource reports whether key is a known resource.

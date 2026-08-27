@@ -674,6 +674,7 @@ func (s *Smith) relevantConfigs(ctx context.Context, userText string) []string {
 	}
 	configs, err := s.d.Catalog.ListConfigs(ctx)
 	if err != nil {
+		s.logf("relevantConfigs: list configs: %v", err)
 		return nil
 	}
 	lower := strings.ToLower(userText)
@@ -1180,7 +1181,13 @@ func (s *Smith) runReasoningTurn(ctx context.Context, convID, msgID int64, userT
 	}
 
 	loopStart := s.d.Now()
+	if br.Resolution == BrainLocalSlot && br.Slot != "" {
+		s.markSlotActivity(br.Slot) // attribution START — refreshed on completion below
+	}
 	result, err := s.runToolLoop(ctx, convID, msgID, sysPrompt, userText, br.Model, mode, tools, batcher, br.Resolution == BrainLocalSlot, baseOverride)
+	if br.Resolution == BrainLocalSlot && br.Slot != "" {
+		s.markSlotActivity(br.Slot) // completion/refresh — the 120s freshness window covers long streams
+	}
 	loopMS := s.d.Now().Sub(loopStart).Milliseconds()
 
 	// S4 instrumentation — one structured line per reasoning turn, enough to
@@ -1225,6 +1232,14 @@ func (s *Smith) runReasoningTurn(ctx context.Context, convID, msgID int64, userT
 		}
 	}
 	s.publishMessageDone(convID, msgID, TierReasoning)
+}
+
+// markSlotActivity attributes slot to "SMITH" in the shared per-slot
+// consumer attribution registry (status.slot_consumers). nil-registry safe.
+func (s *Smith) markSlotActivity(slot string) {
+	if s.d.Activity != nil && slot != "" {
+		s.d.Activity.Mark(slot, "SMITH")
+	}
 }
 
 // toolIDsFor extracts the tool IDs from a tool list (for the missed-pattern

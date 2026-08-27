@@ -39,7 +39,7 @@ export function ActivityHeatmapWidget() {
         <span>Token activity · last 12 weeks</span>
         <RangeToggle options={HEATMAP_SCOPES} value={heatmapScope} onChange={setHeatmapScope} />
       </div>
-      <div className="card">
+      <div className="card heatmap-card">
         {heatmap.isLoading ? (
           <div className="empty-note">Loading activity…</div>
         ) : heatmapDays && heatmapDays.length > 0 ? (

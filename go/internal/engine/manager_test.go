@@ -156,10 +156,10 @@ func testConfig(t *testing.T) *config.Config {
 			StateDir:     t.TempDir(),
 		},
 		Slots: map[string]config.Slot{
-			"a1":   {Unit: "forge-a1", Port: 8080, Label: "A1", Order: 1},
+			"a1": {Unit: "forge-a1", Port: 8080, Label: "A1", Order: 1},
 			"a2": {Unit: "forge-a2", Port: 8081, Label: "A2", Order: 2},
-			"a3":        {Unit: "forge-a3", Port: 8087, Label: "A3", Order: 3},
-			"a4":        {Unit: "forge-a4", Port: 8088, Label: "A4", Order: 4},
+			"a3": {Unit: "forge-a3", Port: 8087, Label: "A3", Order: 3},
+			"a4": {Unit: "forge-a4", Port: 8088, Label: "A4", Order: 4},
 		},
 		Modes: map[string]config.Mode{
 			"unloaded": {},
@@ -689,7 +689,15 @@ func TestWriteServiceFilesPreservesNonForgeKeys(t *testing.T) {
 	seed := "FORGE_MODEL_PATH=/old/model.gguf\n" +
 		"GGML_CUDA_ENABLE_UNIFIED_MEMORY=ON\n" +
 		"LD_LIBRARY_PATH=/opt/rocm-therock-7.13/lib\n" +
-		"HSA_OVERRIDE_GFX_VERSION=11.5.1\n"
+		"HSA_OVERRIDE_GFX_VERSION=11.5.1\n" +
+		// Frozen pre-rename legacy keys — must be dropped, not preserved
+		// forever alongside the fresh FORGE_* lines (docs/pitfalls.md's
+		// FOUNDRY_*/FORGE_* divergence incident: the deployed launcher
+		// script read these exclusively and silently diverged from what
+		// the engine believed was loaded once they stopped being updated).
+		"FOUNDRY_MODEL_PATH=/ancient/wrong-model.gguf\n" +
+		"FOUNDRY_MODEL_ALIAS=wrong-alias\n" +
+		"FOUNDRY_BACKEND=vulkan\n"
 	if err := os.WriteFile(envPath, []byte(seed), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -714,6 +722,11 @@ func TestWriteServiceFilesPreservesNonForgeKeys(t *testing.T) {
 	}
 	if env["FORGE_BACKEND"] != "rocm" {
 		t.Errorf("FORGE_BACKEND = %q", env["FORGE_BACKEND"])
+	}
+	for _, key := range []string{"FOUNDRY_MODEL_PATH", "FOUNDRY_MODEL_ALIAS", "FOUNDRY_BACKEND"} {
+		if v, ok := env[key]; ok {
+			t.Errorf("stale legacy key %s=%q must be dropped, not preserved forever", key, v)
+		}
 	}
 
 	args, err := os.ReadFile(filepath.Join(cfg.Paths.SysconfigDir, "forge-a1-args"))

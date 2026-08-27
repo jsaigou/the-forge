@@ -8,7 +8,10 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
+	"github.com/jsaigou/the-forge/internal/config"
+	"github.com/jsaigou/the-forge/internal/hfdownload"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -20,7 +23,7 @@ import (
 // every tool's Run through *ToolEnv instead of *Smith (tools.go's doc
 // comment).
 func TestToolEnv_ShapeFrozen(t *testing.T) {
-	want := []string{"RunSelected", "KBSearch", "ListFindings", "Catalog", "Web", "Now"}
+	want := []string{"RunSelected", "KBSearch", "ListFindings", "Catalog", "Web", "HF", "HFDownload", "Now"}
 	got := fieldNames(reflect.TypeOf(ToolEnv{}))
 	sort.Strings(want)
 	sort.Strings(got)
@@ -116,14 +119,26 @@ func TestTools_NoWriteAgainstRealStore(t *testing.T) {
 
 	env := s.toolEnv(ctx)
 	argsByTool := map[string]string{
-		"run_check":      `{"check_ids":["gtt_ceiling"]}`,
-		"list_findings":  `{}`,
-		"kb_search":      `{"query":"gtt"}`,
-		"catalog_lookup": `{"kind":"configs"}`,
-		"web_search":     `{"query":"test"}`,
-		"web_fetch":      `{"url":"http://example.invalid"}`,
+		"run_check":        `{"check_ids":["gtt_ceiling"]}`,
+		"list_findings":    `{}`,
+		"kb_search":        `{"query":"gtt"}`,
+		"catalog_lookup":   `{"kind":"configs"}`,
+		"web_search":       `{"query":"test"}`,
+		"web_fetch":        `{"url":"http://example.invalid"}`,
+		"hf_search":        `{"query":"test"}`,
+		"hf_preflight":     `{"repo":"org/model"}`,
+		"download_status":  `{}`,
+		// download_start is deliberately excluded from this loop — it's
+		// the one tool that writes anything (see hfDownloadTool's doc
+		// comment), and env.HFDownload is nil in this harness anyway
+		// (unavailable, a no-op). TestDownloadStartToolOnlyProposesJob
+		// below is its own dedicated test, against a REAL wired engine,
+		// proving exactly what it writes and nothing more.
 	}
 	for _, tool := range toolRegistry {
+		if tool.ID == "download_start" {
+			continue
+		}
 		args, ok := argsByTool[tool.ID]
 		if !ok {
 			t.Fatalf("no test args registered for tool %q — add one", tool.ID)
@@ -142,6 +157,70 @@ func TestTools_NoWriteAgainstRealStore(t *testing.T) {
 		if after != before[tbl] {
 			t.Errorf("table %s: rows %d -> %d — a read-only tool must never write", tbl, before[tbl], after)
 		}
+	}
+}
+
+// TestDownloadStartToolOnlyProposesJob is download_start's dedicated proof
+// (see TestTools_NoWriteAgainstRealStore's comment on why it's separate):
+// against a REALLY wired hfdownload.Service, the tool must create exactly
+// one model_downloads row in pending_approval, touch no smith_* table, and
+// never start a worker (no state transition beyond the insert — proven by
+// polling for a moment and confirming the state never leaves
+// pending_approval, since a real Start would flip it to running).
+func TestDownloadStartToolOnlyProposesJob(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+
+	dl := hfdownload.New(hfdownload.Deps{
+		Store: db, Cfg: func() *config.Config { return &config.Config{} }, Logf: t.Logf,
+	})
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), HFDownload: dl})
+
+	tables := []string{"smith_findings", "smith_actions", "smith_conversations"}
+	before := map[string]int{}
+	for _, tbl := range tables {
+		before[tbl] = countRows(t, db, tbl)
+	}
+	downloadsBefore := countRows(t, db, "model_downloads")
+
+	env := s.toolEnv(ctx)
+	tool, ok := findTool("download_start")
+	if !ok {
+		t.Fatal("download_start not registered")
+	}
+	result, err := runTool(ctx, env, tool, json.RawMessage(`{"repo":"testorg/testmodel","filename":"model.gguf","size_bytes":1000000000}`))
+	if err != nil {
+		t.Fatalf("download_start: %v", err)
+	}
+	resMap, ok := result.(map[string]any)
+	if !ok || resMap["status"] != "proposed" {
+		t.Fatalf("download_start result = %+v, want status=proposed", result)
+	}
+
+	for _, tbl := range tables {
+		if after := countRows(t, db, tbl); after != before[tbl] {
+			t.Errorf("table %s: rows %d -> %d — download_start must never touch smith_* tables", tbl, before[tbl], after)
+		}
+	}
+	if after := countRows(t, db, "model_downloads"); after != downloadsBefore+1 {
+		t.Fatalf("model_downloads rows %d -> %d, want exactly +1", downloadsBefore, after)
+	}
+
+	jobID := resMap["job_id"].(int64)
+	job, err := db.ModelDownloads().Get(ctx, jobID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if job.State != "pending_approval" {
+		t.Errorf("job state = %q, want pending_approval — the tool must never start it", job.State)
+	}
+	time.Sleep(50 * time.Millisecond) // give a hypothetical stray goroutine time to misbehave
+	job, err = db.ModelDownloads().Get(ctx, jobID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if job.State != "pending_approval" {
+		t.Errorf("job state drifted to %q after the tool returned — nothing should be running", job.State)
 	}
 }
 

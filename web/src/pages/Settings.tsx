@@ -12,6 +12,7 @@ import { ProviderKeys } from "../settings/panels/ProviderKeys";
 import { Routing } from "../settings/panels/Routing";
 import { SchedulingSettings } from "../settings/panels/Scheduling";
 import { Smith } from "../settings/panels/Smith";
+import { Voice } from "../settings/panels/Voice";
 import { DEFAULT_SECTION, SETTINGS_GROUPS, SETTINGS_SECTIONS, isSectionKey, type SectionKey } from "../settings/sections";
 import { SettingsSearch } from "../settings/SettingsSearch";
 
@@ -76,6 +77,7 @@ function useSectionComponents(catalogAnchor: string | undefined, onCatalogTabCha
     scheduling: () => <SchedulingSettings canAdmin={canAdmin} />,
     monitoring: () => <Monitoring canAdmin={canAdmin} />,
     smith: () => <Smith canAdmin={canAdmin} />,
+    voice: () => <Voice canAdmin={canAdmin} />,
     catalog: () => <CatalogPanel canAdmin={canAdmin} tab={isCatalogSubTab(catalogAnchor) ? catalogAnchor : undefined} onTabChange={onCatalogTabChange} />,
     benchmarks: () => <Benchmarks canAdmin={canAdmin} />,
     security: () => <SecurityPanel canAdmin={canAdmin} />,

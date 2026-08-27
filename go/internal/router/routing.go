@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/activity"
 	"github.com/jsaigou/the-forge/internal/authz"
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/store"
@@ -531,9 +532,16 @@ func (s *Server) ensureBackendLoaded(ctx context.Context, modelName string, b *B
 // models, whose wire names were never catalog Configs to begin with; see
 // §3.4 — remote migrates to store.Offering in a later phase). handled=true
 // with a nil chain means a catalog config was found but couldn't be
-// loaded/resolved — the caller should surface errMsg as a 502. handled=true
-// with a non-nil chain is a single synthetic foundry_slot backend ready for
-// tryBackends, routed straight to the raw slot port.
+// loaded/resolved — the caller should surface errMsg as a 502, alongside
+// reason (a stable sched.RefusalReason code, "" when the failure wasn't a
+// placement refusal — e.g. a real engine load error) for a consumer to
+// switch on instead of parsing errMsg's prose (Sprint 1, a0 load
+// visibility). reason is recovered from sched.Scheduler.LoadStatus rather
+// than threaded through EnsureLoaded's own (frozen, Contract 2) return
+// signature — the outcome ring LoadStatus reads from was just written by
+// the very EnsureLoaded call above, so it's always fresh here.
+// handled=true with a non-nil chain is a single synthetic foundry_slot
+// backend ready for tryBackends, routed straight to the raw slot port.
 //
 // Deliberately still not binding a proxy to a physical slot here — that
 // exact address-based coupling is what ADR-0007 removes at the routing
@@ -545,25 +553,25 @@ func (s *Server) ensureBackendLoaded(ctx context.Context, modelName string, b *B
 // (ResolvedBackend.UpstreamOverride), so nothing here ever hands the proxy a
 // fixed address — this function still just emits a plain foundry_slot
 // backend, unchanged.
-func (s *Server) catalogChain(ctx context.Context, model string, requestedBy string) (chain []*Backend, handled bool, errMsg string) {
+func (s *Server) catalogChain(ctx context.Context, model string, requestedBy string) (chain []*Backend, handled bool, errMsg string, reason sched.RefusalReason) {
 	sc := s.deps.StoreCatalog
 	if sc == nil {
-		return nil, false, ""
+		return nil, false, "", ""
 	}
 	cfg, err := sc.ConfigByName(ctx, model)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return nil, false, ""
+			return nil, false, "", ""
 		}
-		return nil, true, "catalog lookup failed: " + err.Error()
+		return nil, true, "catalog lookup failed: " + err.Error(), ""
 	}
 	if cfg.Visibility == "hidden" {
-		return nil, false, ""
+		return nil, false, "", ""
 	}
 
 	scd := s.deps.Sched
 	if scd == nil {
-		return nil, true, "scheduler not wired"
+		return nil, true, "scheduler not wired", ""
 	}
 	loadCtx, cancel := context.WithTimeout(ctx, s.cfg().ensureLoadedTimeout())
 	defer cancel()
@@ -573,16 +581,16 @@ func (s *Server) catalogChain(ctx context.Context, model string, requestedBy str
 		TargetSlot:  "",
 	})
 	if err != nil {
-		return nil, true, err.Error()
+		return nil, true, err.Error(), scd.LoadStatus(model).Reason
 	}
 	if ticket.Status == "failed" {
-		return nil, true, "load failed"
+		return nil, true, "load failed", scd.LoadStatus(model).Reason
 	}
 	port := s.deps.Slots[ticket.TargetSlot]
 	if port == 0 {
-		return nil, true, "no port configured for slot " + ticket.TargetSlot
+		return nil, true, "no port configured for slot " + ticket.TargetSlot, ""
 	}
-	return []*Backend{{Name: model, Kind: "foundry_slot", Port: port}}, true, ""
+	return []*Backend{{Name: model, Kind: "foundry_slot", Port: port}}, true, "", ""
 }
 
 // offeringChain resolves a remote model against store.Offering (ADR-0007
@@ -812,6 +820,39 @@ func (cl *chainLabel) setLayer(layer string) { cl.lastLayer = layer }
 // null remote_addr.
 type clientAddrKey struct{}
 
+// consumerLabelKey stashes the request's per-slot consumer-attribution
+// label (see consumerLabel) so tryBackends can Mark each foundry_slot
+// attempt without the identity being threaded through its signature.
+type consumerLabelKey struct{}
+
+func consumerLabelFromCtx(ctx context.Context) string {
+	if v, ok := ctx.Value(consumerLabelKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// consumerLabel derives the human-facing consumer label a request's
+// foundry_slot attempts are attributed with: the key's operator-chosen
+// DisplayName verbatim when set; otherwise activity.DeriveLabel over the
+// key name + User-Agent; — tailnet bypass, no key — the effective remote
+// address. Requests that identify themselves as smith's
+// own reasoning traffic (X-Forge-Requested-By: smith) return "": smith
+// marks its brain slot directly as "SMITH" (reasoning.go /
+// brain_residency.go), and this router's loopback mark would clobber it.
+func (s *Server) consumerLabel(r *http.Request, auth authResult) string {
+	if requestedByHeader(r) == "smith" {
+		return ""
+	}
+	if auth.identity.DisplayName != "" {
+		return auth.identity.DisplayName
+	}
+	if auth.identity.Name != "" {
+		return activity.DeriveLabel(auth.identity.Name, r.UserAgent())
+	}
+	return authz.EffectiveRemoteAddr(parseRemoteAddr(r.RemoteAddr), r.Header.Get("X-Forwarded-For")).String()
+}
+
 func (s *Server) auditOutcome(ctx context.Context, modelName, result, detail string) {
 	if a := s.deps.Audit; a != nil {
 		// store.AuditEntry has no Result field; fold result into Detail (JSON),
@@ -854,7 +895,7 @@ type authResult struct {
 // checkAuth implements the tailnet-conditional auth: tailnet-sourced
 // requests (authz.IsTailnetAddr(authz.EffectiveRemoteAddr(...))) skip the
 // bearer check; non-tailnet requests require a valid sk-router-* token
-// verified via authz.Authenticator.VerifyBearer.
+// verified via authz.Authenticator.VerifyBearerFrom.
 //
 // The CGNAT/XFF logic lives in internal/authz (frozen, table-tested) — this
 // function calls it, never reimplements it (CLAUDE.local.md hard requirement).
@@ -888,7 +929,7 @@ func (s *Server) checkAuth(r *http.Request) authResult {
 		return authResult{ok: false}
 	}
 	token := strings.TrimPrefix(header, "Bearer ")
-	id, err := auth.VerifyBearer(token, authz.KindRouter)
+	id, err := auth.VerifyBearerFrom(r.Context(), effective.String(), token, authz.KindRouter)
 	if err != nil {
 		return authResult{ok: false}
 	}

@@ -18,6 +18,9 @@ import type {
   CostSettingsUpdate,
   DashboardLayout,
   FavoritesResponse,
+  HFDownloadProgressEvent,
+  HFDownloadStartBody,
+  HFPreflightFile,
   IdentityLinkCreateRequest,
   MetricsSettingsUpdate,
   MonitorSettingsUpdate,
@@ -40,6 +43,7 @@ import type {
   SystemSettingsUpdate,
   TotpConfirmRequest,
   UISettingsUpdate,
+  VoiceSettingsUpdate,
   WebAuthnFinishAssertRequest,
   WebAuthnFinishRegisterRequest,
 } from "./types";
@@ -79,6 +83,8 @@ export const qk = {
   monitorSettings: ["monitor", "settings"] as const,
   metricsSettings: ["metrics", "settings"] as const,
   uiSettings: ["ui", "settings"] as const,
+  voiceSettings: ["voice", "settings"] as const,
+  voiceList: ["voice", "list"] as const,
   dashboardLayout: ["dashboard", "layout"] as const,
   systemSettings: ["system", "settings"] as const,
   schedulerSeed: ["scheduler", "seed"] as const,
@@ -92,6 +98,10 @@ export const qk = {
   profile: (mode: string) => ["profile", mode] as const,
   profileProgress: ["profile", "progress"] as const,
   profileActive: ["profile", "active"] as const,
+  hfDownloads: ["hf", "downloads"] as const,
+  hfDownload: (id: number) => ["hf", "downloads", id] as const,
+  hfDownloadProgress: (id: number) => ["hf", "downloads", id, "progress"] as const,
+  hfToken: ["hf", "token"] as const,
   authPolicy: ["auth", "policy"] as const,
   authConfig: ["auth", "config"] as const,
   webauthnCredentials: ["auth", "webauthn", "credentials"] as const,
@@ -162,6 +172,11 @@ export const qk = {
     // cleared on smith:message_done (the persisted tool_call rows in the
     // conversation fetch are what's authoritative afterward).
     toolActivity: (messageId: number) => ["smith", "toolActivity", messageId] as const,
+    // S4 phase 2 — client-only, same shape as streaming/toolActivity above:
+    // the latest smith:status prose line for one in-flight message (e.g.
+    // "loading brain model — first load typically takes 20-90s"), written
+    // by lib/sse.ts's smith:status listener and cleared on smith:message_done.
+    turnStatus: (messageId: number) => ["smith", "turnStatus", messageId] as const,
     // Sprint S3-Web — client-only messaging channel for "Ask smith"
     // affordances on error rows (Console alerts, Diagnostics notifications/
     // findings/investigations). One slot at a time: clicking an affordance
@@ -373,6 +388,45 @@ export function useUpdateUiSettings() {
   return useMutation({
     mutationFn: (patch: UISettingsUpdate) => api.updateUiSettings(patch),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.uiSettings }),
+  });
+}
+
+export function useVoiceSettings() {
+  return useQuery({ queryKey: qk.voiceSettings, queryFn: api.voiceSettings, staleTime: SETTINGS_STALE_MS });
+}
+
+// List all saved voices by engine (Sprint 1 UI papercuts, 2026-08-27).
+// `enabled` lets the caller defer the request until the listing panel is
+// actually opened, rather than fetching it eagerly on every Voice settings
+// page load — forge-tts's own list call is the expensive part, not this one.
+export function useVoiceList(enabled: boolean) {
+  return useQuery({ queryKey: qk.voiceList, queryFn: api.voiceList, enabled, staleTime: SETTINGS_STALE_MS });
+}
+
+export function useUpdateVoiceSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: VoiceSettingsUpdate) => api.updateVoiceSettings(patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.voiceSettings });
+      qc.invalidateQueries({ queryKey: qk.infraServices });
+    },
+  });
+}
+
+export function useStartInfraService() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: "stt" | "embedding" | "aligner" | "tts") => api.startInfraService(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.infraServices }),
+  });
+}
+
+export function useStopInfraService() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: "stt" | "embedding" | "aligner" | "tts") => api.stopInfraService(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.infraServices }),
   });
 }
 
@@ -1488,7 +1542,13 @@ export function useSmithChecksRun() {
   return useMutation({
     mutationFn: ({ scope, checkIds }: { scope?: string; checkIds?: string[] }) =>
       api.smithChecksRun(scope ?? "quick", checkIds),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["smith", "findings"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["smith", "findings"] });
+      // A manually-run check (e.g. comfyui_prune via the Custom… picker,
+      // S7-followup smith UX sprint) can create a proposal — refresh the
+      // actions list too so it shows up without a manual reload.
+      qc.invalidateQueries({ queryKey: ["smith", "actions"] });
+    },
   });
 }
 
@@ -1587,6 +1647,18 @@ export function useSmithActionRecheck(id: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.smithActionRecheck(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["smith", "actions"] });
+      qc.invalidateQueries({ queryKey: qk.smith.action(id) });
+      qc.invalidateQueries({ queryKey: ["smith", "investigations"] });
+    },
+  });
+}
+
+export function useSmithActionCheckNow(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.smithActionCheckNow(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["smith", "actions"] });
       qc.invalidateQueries({ queryKey: qk.smith.action(id) });
@@ -1814,6 +1886,134 @@ export function useSmithSourcingEvaluate() {
   });
 }
 
+// ── HF model acquisition (go/internal/hfdownload + internal/hf) ────────────
+// Search/tree/preflight are one-shot "run this and show me the result"
+// calls (no cache/invalidation), same as useSmithSourcingEvaluate above.
+// Downloads are list/detail queries polled every 3s as the SOURCE OF
+// TRUTH (mirrors useProfile's own doc comment: works even if SSE never
+// reaches the browser); SSE (sse.ts) only writes the client-only
+// per-job progress slot for smooth byte-level updates between polls, and
+// invalidates the poll on a state transition so it doesn't wait a full
+// 3s to notice.
+
+export function useHFSearchMutation() {
+  return useMutation({
+    mutationFn: ({ query, limit }: { query: string; limit?: number }) => api.hfSearch(query, limit),
+  });
+}
+
+export function useHFTreeMutation() {
+  return useMutation({
+    mutationFn: ({ repo, revision, budgetBytes }: { repo: string; revision?: string; budgetBytes?: number }) =>
+      api.hfTree(repo, revision, budgetBytes),
+  });
+}
+
+export function useHFPreflightMutation() {
+  return useMutation({
+    mutationFn: ({ repo, files, destDir }: { repo: string; files: HFPreflightFile[]; destDir?: string }) =>
+      api.hfPreflight(repo, files, destDir),
+  });
+}
+
+export function useHFDownloads() {
+  return useQuery({
+    queryKey: qk.hfDownloads,
+    queryFn: () => api.hfDownloads(),
+    refetchInterval: 3000,
+  });
+}
+
+export function useHFDownload(id: number | null) {
+  return useQuery({
+    queryKey: id ? qk.hfDownload(id) : ["hf", "downloads", "none"],
+    queryFn: () => api.hfDownload(id!),
+    enabled: !!id,
+    refetchInterval: 3000,
+  });
+}
+
+// useHFDownloadProgress reads the SSE-driven byte-level progress cache for
+// one job — decoration only, same posture as useProfileProgress; the poll
+// above (useHFDownloads/useHFDownload) is what actually drives the UI's
+// state machine.
+export function useHFDownloadProgress(jobId: number): HFDownloadProgressEvent | null {
+  const { data } = useQuery<HFDownloadProgressEvent | null>({
+    queryKey: qk.hfDownloadProgress(jobId),
+    queryFn: () => null as HFDownloadProgressEvent | null,
+    staleTime: Infinity,
+  });
+  return data ?? null;
+}
+
+function useHFDownloadMutations() {
+  const qc = useQueryClient();
+  const invalidateAll = () => {
+    qc.invalidateQueries({ queryKey: qk.hfDownloads });
+  };
+  return { invalidateAll };
+}
+
+export function useHFDownloadStart() {
+  const { invalidateAll } = useHFDownloadMutations();
+  return useMutation({
+    mutationFn: (body: HFDownloadStartBody) => api.hfDownloadStart(body),
+    onSuccess: invalidateAll,
+  });
+}
+
+export function useHFDownloadApprove() {
+  const { invalidateAll } = useHFDownloadMutations();
+  return useMutation({
+    mutationFn: (id: number) => api.hfDownloadApprove(id),
+    onSuccess: invalidateAll,
+  });
+}
+
+export function useHFDownloadPause() {
+  const { invalidateAll } = useHFDownloadMutations();
+  return useMutation({
+    mutationFn: (id: number) => api.hfDownloadPause(id),
+    onSuccess: invalidateAll,
+  });
+}
+
+export function useHFDownloadResume() {
+  const { invalidateAll } = useHFDownloadMutations();
+  return useMutation({
+    mutationFn: (id: number) => api.hfDownloadResume(id),
+    onSuccess: invalidateAll,
+  });
+}
+
+export function useHFDownloadCancel() {
+  const { invalidateAll } = useHFDownloadMutations();
+  return useMutation({
+    mutationFn: (id: number) => api.hfDownloadCancel(id),
+    onSuccess: invalidateAll,
+  });
+}
+
+export function useHFDownloadDelete() {
+  const { invalidateAll } = useHFDownloadMutations();
+  return useMutation({
+    mutationFn: (id: number) => api.hfDownloadDelete(id),
+    onSuccess: invalidateAll,
+  });
+}
+
+export function useHFToken() {
+  return useQuery({ queryKey: qk.hfToken, queryFn: () => api.hfTokenGet(), staleTime: SETTINGS_STALE_MS });
+}
+
+export function useSetHFToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) => api.hfTokenPut(token),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.hfToken }),
+  });
+}
+
 // ── P4 — knowledge base ─────────────────────────────────────────────────────
 // No dedicated search hook: KBSearch results feed Tier 2 chat context
 // server-side (reasoning.go's kbBlock) — there's no operator-facing search
@@ -1867,6 +2067,22 @@ export function useSmithToolActivity(messageId: number | null): SmithToolActivit
     staleTime: Infinity,
   });
   return data ?? [];
+}
+
+// useSmithTurnStatus mirrors useSmithStreamingText exactly, for S4 phase
+// 2's smith:status events — the backend already composed a human sentence
+// ("loading brain model — first load typically takes 20-90s"); this was
+// previously reaching the browser and being silently ignored (no listener
+// existed at all). Returns "" (no status yet, or already cleared) rather
+// than undefined.
+export function useSmithTurnStatus(messageId: number | null): string {
+  const { data } = useQuery<string>({
+    queryKey: messageId ? qk.smith.turnStatus(messageId) : ["smith", "turnStatus", "none"],
+    queryFn: () => "",
+    enabled: !!messageId,
+    staleTime: Infinity,
+  });
+  return data ?? "";
 }
 
 // ── Sprint S3-Web — "Ask smith" affordance + resolution banner ────────────

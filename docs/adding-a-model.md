@@ -1,269 +1,151 @@
 # Adding a Model to The Forge
 
-**Example:** Qwen2.5-Coder-7B-Instruct-Q8_0
+**Example:** Qwen2.5-Coder-7B-Instruct-Q4_K_M
 
-This guide walks through every step to download a GGUF model and wire it into The Forge as a new switchable mode.
+There are three ways to get a model into the catalog, depending on what you're adding:
 
----
+1. **The Add Model tab** (recommended for any GGUF model on HuggingFace) - search, rank,
+   pre-flight, download, and auto-register in one flow. No file editing, no restart.
+2. **Ask smith** - the same engine, driven from chat instead of the search UI.
+3. **Manual catalog entry** (Settings → Catalog) - for a non-GGUF model (vLLM/safetensors), a
+   file you already have locally, or any case where you want full control over every row before
+   it exists.
 
-## Step 1 — Download the model file
-
-Models live in `models_dir` from `config.toml` (`/opt/forge/models` on ForgeHost). Download from Hugging Face using `hf` (the current CLI — `huggingface-cli` is deprecated) or `wget`/`curl`.
-
-SSH to ForgeHost first:
-
-```bash
-tailscale ssh forgehost
-```
-
-Then download:
-
-```bash
-cd /opt/forge/models
-
-# Using hf (preferred — handles auth and resumable downloads)
-hf download \
-  Qwen/Qwen2.5-Coder-7B-Instruct-GGUF \
-  qwen2.5-coder-7b-instruct-q8_0.gguf \
-  --local-dir .
-```
-
-Or with `wget` if you have the direct URL:
-
-```bash
-wget -c "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q8_0.gguf"
-```
-
-Verify the file landed correctly:
-
-```bash
-ls -lh /opt/forge/models/qwen2.5-coder-7b-instruct-q8_0.gguf
-```
+There is no config file to edit for any of these - the catalog (models, variants, artifacts,
+configs) lives entirely in the store-backed database. Nothing in this repo reads a config file
+for catalog data.
 
 ---
 
-## Step 2 — Add a mode block to config.toml
+## Path 1 - Add Model tab
 
-Edit `/etc/forge/config.toml` on ForgeHost. Add the new `[modes.<key>]` block **above** `[modes.unloaded]` (keep `unloaded` last; `creative` is a service mode and not relevant to placement):
+Go to **Models → Add Model**.
 
-```toml
-[modes.qwen25coder-7b]
-label       = "Qwen 2.5 Coder 7B"
-description = "Qwen2.5-Coder-7B-Instruct Q8_0 — fast local coder, 32K context"
-icon        = "qwen.svg"
-color       = "#00A884"
-tags        = ["Coding", "Fast", "Small"]
+1. **Search.** Type a model name or `org/repo` and hit enter - this searches HuggingFace
+   directly (GGUF-tagged repos, sorted by downloads).
+2. **Pick a repo.** Selecting a result fetches its real (recursive) file tree and ranks every
+   GGUF file against this host's live memory budget - a 1.2× VRAM headroom rule, preferring
+   `_L` over `_M` and `IQ`/`UD` variants at equal size. The recommended file is starred.
+3. **Select a file.** This runs pre-flight: disk headroom (with a 10% margin), whether the file
+   needs the ROCm+unified-memory backend (over the ~63 GB Vulkan ceiling) or Vulkan is fine, and
+   whether the destination path already exists. A blocked check (not enough disk, an existing
+   file) disables the Download button; a warning (won't fit in VRAM right now) doesn't - you can
+   still download a model you can't load yet.
+4. **Download.** Real, resumable - pause and resume continue from the on-disk byte offset rather
+   than restarting from zero. A model split across shards (`…-00001-of-00003.gguf` and so on)
+   downloads as a single job; you select one file and every shard comes with it. Progress, speed,
+   and ETA show live in the Downloads list at the top of the tab.
+5. **Done - automatically.** Once every shard verifies (checksum when known, and a mandatory GGUF
+   header read for every `.gguf` file), the model registers itself: a new Model, Variant,
+   Artifact, and Config row, with defaults derived from the file itself:
+   - `n_ctx` = the model's own trained context length (never guessed, never inflated)
+   - `--parallel 1` - a hard rule, because `--parallel N` *splits* the configured context
+     across N slots rather than multiplying it, so a mode meant to serve one long conversation
+     at full context must stay at `1`
+   - `--no-mmap --jinja --flash-attn on --threads 16` (the universal llama.cpp flags every other
+     mode already uses)
+   - the Build (Vulkan or ROCm) that actually matches the file's size
 
-  [[modes.qwen25coder-7b.services]]
-  unit       = "forge-primary"
-  port_role  = "primary"
-  model      = "qwen2.5-coder-7b-instruct-q8_0.gguf"
-  alias      = "qwen25coder-7b"
-  context    = 32768
-  mmproj     = ""
-  extra_args = [
-    "--no-mmap", "--jinja",
-    "--cache-type-k", "q8_0", "--cache-type-v", "q8_0",
-    "--flash-attn", "on", "--threads", "16",
-    "--parallel", "4",
-  ]
-```
+   The new Config lands **`status=unverified`, `visibility=hidden`** - it exists for review, not
+   for immediate use. It will not appear in the dashboard's mode switcher until you promote it.
 
-### Key fields
+6. **Promote it.** Open the new Config in Settings → Catalog, review the generated fields (context,
+   flags, backend), and flip `visibility` to `visible` once you're satisfied. This is the same
+   review step every other catalog entry goes through - nothing here bypasses it.
 
-| Field | What it controls |
-|---|---|
-| `model` | Path relative to `models_dir` — filename only for flat files, subdirectory path for sharded models |
-| `context` | KV cache is allocated for this many tokens. Check the model card. Never set higher than tested. |
-| `alias` | The `model_alias` llama-server advertises on `/v1/models` |
-| `extra_args` | Appended verbatim to the llama-server command line |
-| `mmproj` | Vision projector — leave `""` if the model has no multimodal support |
-| `port_role` | `"primary"` → port 8080. Use `"secondary"` only for dual-model modes. |
-| `llama_bin` | (optional) Override the llama-server binary path. Use when a model needs a custom build (e.g. `puzzle-port` branch). Defaults to the backend-appropriate binary. |
-| `backend` | (mode-level) `"vulkan"`, `"rocm"`, or `"vllm"`. Propagated to services automatically. |
+### Gated repos
 
-### `--parallel` and context budget
+License click-through models (Gemma, Llama, and similar) need a HuggingFace access token.
+Set one in **Settings → Security → HuggingFace access token** before searching or downloading a
+gated repo - without one, a gated repo's tree/download calls fail closed with a clear "needs a
+token" error rather than a bare transport failure.
 
-`--parallel N` means N simultaneous request slots, each consuming a full KV cache. For a 7B Q8_0 model at 32K context this is cheap — `--parallel 4` is safe. For 70B+ models at 256K context, use `--parallel 1` or `2`.
+### Repointing an existing config instead of registering a new one
 
----
+If you already have a Config for a model and just want to swap in a different quant or a fresher
+build of the same weights, pick it from the **"Repoint an existing config"** dropdown that appears
+once you select a file in the Add Model tab, instead of leaving it on "register as a new model."
+This repoints that config's existing weight artifact at the newly downloaded file rather than
+creating a new Model/Variant/Config. A typo'd/stale name is rejected immediately, before any
+download work starts - but nothing checks that the new file is actually the same model family, so
+only repoint to a genuinely compatible build, and note that the config's quantization label,
+context size, and any mmproj/sharded companion files are left untouched by a repoint.
 
-## Step 3 — Verify the config parses
-
-On ForgeHost:
-
-```bash
-python3 -c "
-import tomllib
-with open('/etc/forge/config.toml', 'rb') as f:
-    cfg = tomllib.load(f)
-print(list(cfg['modes'].keys()))
-"
-```
-
-The new key (`qwen25coder-7b`) should appear in the list. If you get a `TOMLDecodeError`, fix the syntax before continuing.
-
----
-
-## Step 4 — Restart the dashboard
-
-The engine reads config.toml at startup. Restarting the dashboard picks up the new mode without touching inference:
+The download API/smith's `download_start` tool accept the same `config_name` field directly:
 
 ```bash
-sudo systemctl restart forge-dashboard.service
-```
-
-Verify the new mode appears in the ops UI at `ops.example.ts.net`.
-
----
-
-## Step 5 — Switch to the new mode and verify
-
-```bash
-# Load onto a slot via the forge CLI, or use the dashboard's load action
-forge load qwen25coder-7b [slot]
-```
-
-Or via the dashboard API:
-
-```bash
-curl -sf -X POST http://localhost:5000/api/switch \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "qwen25coder-7b"}'
-```
-
-Then verify context loaded correctly:
-
-```bash
-curl -sf http://localhost:8080/props | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-n = d.get('n_ctx') or d.get('default_generation_settings', {}).get('n_ctx', 0)
-print(f'n_ctx={n}')
-"
-```
-
-Expected output: `n_ctx=32768`
-
-If `n_ctx` is lower than configured, GTT contiguous allocation silently fell back. Run `journalctl -u forge-primary.service -n 50` and look for KV cache allocation warnings.
-
----
-
-## Step 6 — Smoke-test inference
-
-```bash
-curl -sf http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "qwen25coder-7b",
-    "messages": [{"role": "user", "content": "Write a Python hello world."}],
-    "max_tokens": 128
-  }' | python3 -m json.tool
+curl -sf -X POST http://localhost:5000/api/v1/hf/downloads \
+  -H "Authorization: Bearer sk-forge-..." -H "Content-Type: application/json" \
+  -d '{"repo":"org/repo","files":[{"filename":"model-Q5_K_M.gguf","size_bytes":1234567890}],"config_name":"qwen25coder-7b"}'
 ```
 
 ---
 
-## Sharded models
+## Path 2 - Ask smith
 
-If the GGUF is split across multiple files (e.g. three shards), point `model` at the first shard only — llama-server discovers the rest automatically by suffix pattern:
-
-```toml
-model = "qwen25coder-7b/Q8_0/Qwen2.5-Coder-7B-Instruct-Q8_0-00001-of-00003.gguf"
-```
-
-Download all shards into the same directory before switching.
-
----
-
-## Dual-model modes
-
-To pair the new model as a secondary worker alongside an existing primary (e.g. in a planner/worker setup), add a second `[[modes.<key>.services]]` block:
-
-```toml
-[modes.coding-7b]
-label       = "Coding (Dual 7B)"
-description = "Gemma 4 31B (planner) + Qwen2.5-Coder-7B (worker)"
-icon        = "code.svg"
-color       = "#1DA462"
-tags        = ["Dual Model", "Coding", "Fast Worker"]
-
-  [[modes.coding-7b.services]]
-  unit       = "forge-primary"
-  port_role  = "primary"
-  model      = "gemma4-31b-abliterated-Q6_K.gguf"
-  alias      = "gemma4-31b"
-  context    = 65536
-  mmproj     = "gemma4-mmproj/mmproj-31b-F32.gguf"
-  extra_args = [
-    "--no-mmap", "--jinja",
-    "--cache-type-k", "q8_0", "--cache-type-v", "q8_0",
-    "--flash-attn", "on", "--threads", "16",
-    "--parallel", "1", "--ctx-checkpoints", "0",
-  ]
-
-  [[modes.coding-7b.services]]
-  unit       = "forge-secondary"
-  port_role  = "secondary"
-  model      = "qwen2.5-coder-7b-instruct-q8_0.gguf"
-  alias      = "qwen25coder-7b"
-  context    = 32768
-  mmproj     = ""
-  extra_args = [
-    "--no-mmap", "--jinja",
-    "--cache-type-k", "q8_0", "--cache-type-v", "q8_0",
-    "--flash-attn", "on", "--threads", "16",
-    "--parallel", "4",
-  ]
-```
-
-The secondary service runs on port 8081 (`a2.example.ts.net`).
+The same engine is exposed as tools smith can call from a chat turn: `hf_search`, `hf_preflight`,
+and `download_status` are read-only - smith can look things up and report back freely.
+`download_start` is the one exception, and deliberately narrow: it only ever creates a job in
+`pending_approval`. Nothing downloads until you see it and approve it (Approve button in the
+Downloads list, or `POST /api/v1/hf/downloads/{id}/approve`) - smith cannot cause a real download
+on its own, the same propose→approve pattern every other action smith can take already follows.
 
 ---
 
-## FIM / autocomplete models (always-on, outside mode switching)
+## Path 3 - Manual catalog entry (non-GGUF, or a file you already have)
 
-Some models serve a different purpose than main inference: **fill-in-the-middle (FIM) autocomplete** for VS Code Continue ghost text. These run on a dedicated port (8082) via `forge-autocomplete.service` and are never managed by the mode-switching engine.
+The acquisition engine only understands GGUF files fetched from HuggingFace. For a vLLM/safetensors
+model, or a GGUF file you already have on disk from somewhere else:
 
-### Which models support FIM
-
-FIM requires a model specifically trained with FIM tokens. Not all instruction models qualify:
-
-| Model | FIM support | Notes |
-|---|---|---|
-| **Qwen2.5-Coder-7B (base)** | ✅ Yes | `<\|fim_prefix\|>`, `<\|fim_suffix\|>`, `<\|fim_middle\|>` — recommended. Use base, not instruct. |
-| CodeGemma 2B (base) | ✅ Yes | Lightweight, ~2 GB Q4. Use `codegemma-2b`, not `codegemma-2b-it`. |
-| Gemma 4-2B | ❌ No | Instruction model only — use as a chat mode, not autocomplete |
-| Qwen3-Coder-Next | ✅ Yes | Already in config; too large for always-on autocomplete role |
-
-### llama-server args for autocomplete
-
-Autocomplete requests are short. Use a small context and more parallel slots:
-
-```toml
-context    = 4096     # FIM doesn't need large context
-extra_args = [
-  "--no-mmap", "--flash-attn", "on", "--threads", "8",
-  "--cache-type-k", "q8_0", "--cache-type-v", "q8_0",
-  "--parallel", "4",
-  "--metrics",
-]
-```
-
-### Why not a mode in config.toml?
-
-Autocomplete must always be available regardless of which primary mode is active. Wiring it into the mode-switching engine would make it disappear when switching modes. The autocomplete service is a separate systemd unit on port 8082, outside the engine entirely.
-
-See `docs/autocomplete-plan.md` for the full deployment plan and Continue config.
+1. Place the file under the models directory (check the live value with
+   `forge config get infra.paths` - e.g. `/opt/forge/models` on a default install).
+2. Settings → Catalog → **New Model** → **New Variant** → **New Artifact** (point `file_path` at
+   the file, relative to the models directory) → **New Config** (pick the Engine/Build, set
+   `n_ctx`/`--parallel`/extra args yourself - nothing derives these for you on this path).
+3. Verify the config parses and loads correctly (see Verifying below) before setting
+   `visibility=visible`.
 
 ---
 
-## Removing a mode
+## Verifying a new config
 
-1. Delete the `[modes.<key>]` block and its `[[modes.<key>.services]]` entries from config.toml.
-2. Restart `forge-dashboard.service`.
-3. The model file in `/opt/forge/models/` is not touched — delete it manually if you want to reclaim disk.
+After promoting a config (any path above), load it onto a slot and confirm the context actually
+took:
 
-Do not remove a mode that is currently active. Switch to another mode first.
+```bash
+forge load <config-name> [slot]
+curl -sf http://localhost:8080/props | jq .default_generation_settings.n_ctx
+```
+
+(`8080` is `a1`'s configured port on a default install - check `forge status` or
+`GET /api/v1/catalog/slots` if you're not sure which port a given slot uses.) If `n_ctx` comes
+back lower than configured, the kernel silently failed a contiguous GTT allocation - see
+`docs/pitfalls.md`'s GTT section.
+
+---
+
+## FIM / autocomplete models
+
+Fill-in-the-middle (FIM) autocomplete for editor ghost text (e.g. Continue in VS Code) is meant
+to run as a separate, always-on service outside the mode-switching engine entirely, so it stays
+available regardless of which config is loaded on A1–A4. Check the service's own unit file for
+its current port and status before relying on the specifics here.
+
+FIM requires a model specifically trained with FIM tokens - not every instruction model qualifies
+(Qwen2.5-Coder-7B **base**, not instruct, is a solid choice; CodeGemma 2B base is a lighter
+alternative).
+
+---
+
+## Removing a model
+
+Settings → Catalog → open the Model or Config → **Delete**. Deleting a Model cascades to its
+Variants and Artifacts; a Config still referencing an Artifact blocks the Artifact/Variant/Model
+delete until the Config itself is removed first (409, "has dependent … - delete those first").
+The model file on disk is never touched by a catalog delete - remove it from the models directory
+yourself if you want to reclaim the space.
+
+Do not remove a config that's currently loaded on a slot. Unload it first.
 
 ---
 
@@ -271,8 +153,10 @@ Do not remove a mode that is currently active. Switch to another mode first.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `n_ctx` lower than configured | GTT contiguous block too small | Reduce `context`, reboot to defragment GTT, or switch to a smaller quant |
-| `cudaMalloc failed: out of memory` | Missing `GGML_CUDA_ENABLE_UNIFIED_MEMORY=ON` | Verify `/etc/sysconfig/forge-primary-env` contains this var |
-| Mode not visible in dashboard after restart | TOML parse error | Run the Step 3 parse check |
-| `forge-primary` restarts in a loop after stop | `TimeoutStopSec=60` too short | Apply `TimeoutStopSec=300` (see CLAUDE.md pending task) |
-| Model loads but alias is wrong | `alias` field mismatch | Check `alias` in config.toml matches what your client sends as `model` |
+| `n_ctx` lower than configured | GTT contiguous block too small | Reduce `n_ctx`, reboot to defragment GTT, or switch to a smaller quant |
+| `cudaMalloc failed: out of memory` (ROCm backend) | Missing `GGML_CUDA_ENABLE_UNIFIED_MEMORY=ON` | Verify `/etc/sysconfig/forge-a{1,2,3,4}-env` all contain this var - see `docs/pitfalls.md` |
+| Add Model preflight blocks on disk | Not enough free space for the file + 10% margin | Free up space, or pick a smaller quant |
+| Add Model preflight warns "requires rocm" | File is over the ~63 GB Vulkan ceiling | Expected for large models - the generated Config will need a ROCm Build to actually load |
+| Download fails immediately, "gated or private" | No HuggingFace token configured, or the account hasn't accepted the repo's license | Settings → Security → set a token; accept the license on huggingface.co if you haven't |
+| New config doesn't appear in the dashboard switcher | It's still `visibility=hidden` (the default for a freshly auto-registered config) | Settings → Catalog → open it → set visibility to visible |
+| Model loads but the client's `model` field doesn't match | The Config's name/alias doesn't match what the client sends | Check the Config's name in Settings → Catalog |

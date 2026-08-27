@@ -39,6 +39,7 @@ export type SectionKey =
   | "scheduling"
   | "monitoring"
   | "smith"
+  | "voice"
   | "catalog"
   | "benchmarks"
   | "security"
@@ -61,6 +62,7 @@ export const SETTINGS_SECTIONS: SectionMeta[] = [
   { key: "scheduling", label: "Scheduling", group: "Workload" },
   { key: "monitoring", label: "Monitoring", group: "Workload" },
   { key: "smith", label: "smith", group: "Workload" },
+  { key: "voice", label: "Voice & Speech", group: "Workload" },
   { key: "catalog", label: "Catalog", group: "Catalog" },
   { key: "benchmarks", label: "Benchmarks & Profiling", group: "Catalog" },
   { key: "security", label: "Security", group: "Access" },

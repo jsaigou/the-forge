@@ -20,6 +20,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -30,8 +31,50 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
+
+// isSelfWildcardNarrowing reports whether a checkAddr bind-probe failure is
+// the expected self-collision of narrowing an already-bound wildcard host
+// to a specific one on the SAME port (e.g. ":5000" -> "127.0.0.1:5000")
+// rather than a genuine conflict with an unrelated process. Requires all of:
+// the failure is EADDRINUSE, cur/cnd parse as host:port, the ports match,
+// cur's host is unspecified (wildcard — "", "0.0.0.0", "::"), and cnd's
+// host is a concrete (non-wildcard) address. Any other shape — a real port
+// collision, a different port, or cur already being a specific host — falls
+// through to the ordinary error path.
+func isSelfWildcardNarrowing(cur, cnd string, bindErr error) bool {
+	if !errors.Is(bindErr, syscall.EADDRINUSE) {
+		return false
+	}
+	curHost, curPort, err := net.SplitHostPort(cur)
+	if err != nil {
+		return false
+	}
+	cndHost, cndPort, err := net.SplitHostPort(cnd)
+	if err != nil {
+		return false
+	}
+	if curPort != cndPort {
+		return false
+	}
+	if !isWildcardHost(curHost) {
+		return false
+	}
+	return !isWildcardHost(cndHost)
+}
+
+// isWildcardHost reports whether host is empty or an unspecified
+// (all-interfaces) address — ":PORT", "0.0.0.0:PORT", "[::]:PORT" all
+// parse to this via net.SplitHostPort.
+func isWildcardHost(host string) bool {
+	if host == "" {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsUnspecified()
+}
 
 var ttsUnitRE = regexp.MustCompile(`^[A-Za-z0-9@._-]+$`)
 
@@ -128,6 +171,19 @@ func (s *Server) preflightSystem(ctx context.Context, cand systemSettingsRespons
 	// doesn't touch listen/router_listen/mcp_listen. A changed address gets
 	// a real net.Listen+Close probe, explicitly caveated as "checked now,
 	// not guaranteed at restart" (a port free now can be taken later).
+	//
+	// Narrowing an already-wide bind (e.g. ":5000" -> "127.0.0.1:5000") is a
+	// structural exception: the daemon's OWN currently-running wildcard
+	// socket already covers the candidate address on the same port, so the
+	// probe always collides with itself — even though restarting would free
+	// the port cleanly first. Sprint 4 (security hardening, #38) hit this
+	// live tightening ForgeHost's own listen bind. Detected via EADDRINUSE +
+	// "current host is a wildcard, candidate is a narrower host, same
+	// port" — downgraded to warn (does not 422 the PUT, see level=="error"
+	// in add() above) rather than error, since it's disclosed as
+	// unverifiable, not falsely reported as either verified-ok or blocked.
+	// A genuine third-party port conflict (different port, or the current
+	// bind isn't a wildcard) still hits the ordinary error path below.
 	checkAddr := func(field, cur, cnd string) {
 		if cnd == "" {
 			add(field, "error", "must not be empty")
@@ -139,6 +195,11 @@ func (s *Server) preflightSystem(ctx context.Context, cand systemSettingsRespons
 		}
 		ln, err := net.Listen("tcp", cnd)
 		if err != nil {
+			if isSelfWildcardNarrowing(cur, cnd, err) {
+				add(field, "warn", "cannot verify now — this port is currently held by the daemon's "+
+					"own wider bind; narrowing to this address will take effect cleanly on restart")
+				return
+			}
 			add(field, "error", fmt.Sprintf("checked now, not at restart: %v", err))
 			return
 		}

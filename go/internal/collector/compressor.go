@@ -41,6 +41,12 @@ type CompressorSample struct {
 	RequestsTimeoutDelta  int64
 	RequestsCanceledDelta int64
 
+	// FailOpenDelta is the total fail-open events (timeout + error) across
+	// the interval — the sum of compress_failopen_total{reason} label
+	// values. Used by the smith fail-open rate check to detect when the
+	// budget is too low.
+	FailOpenDelta int64
+
 	TTFBCountDelta      int64
 	TTFBSumMsDelta      float64
 	TTFBMinMsSinceStart *float64
@@ -96,5 +102,8 @@ func (s CompressorSample) AllZero() bool {
 		// A canceled request never bumps RequestsFailedDelta (Sprint 4,
 		// cmd/forge-compress/server.go) — without these two, an interval
 		// with only cancellations would misread as idle and get skipped.
-		s.RequestsTimeoutDelta == 0 && s.RequestsCanceledDelta == 0
+		s.RequestsTimeoutDelta == 0 && s.RequestsCanceledDelta == 0 &&
+		// Fail-opens with zero other traffic would also look idle; include
+		// so an all-fail-open interval is not skipped.
+		s.FailOpenDelta == 0
 }

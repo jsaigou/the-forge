@@ -167,13 +167,13 @@ func TestFrozenSmithShapes(t *testing.T) {
 	// POST /api/v1/smith/checks/run.
 	hasKeys(t, smithChecksRunBody{}, "scope", "check_ids")
 	hasKeys(t, smithChecksRunResponse{}, "sweep_kind", "scope", "count", "worst", "findings")
-	hasKeys(t, smith.Finding{}, "check_id", "severity", "summary", "evidence", "proposal_ids", "kb_refs")
+	hasKeys(t, smith.Finding{}, "check_id", "severity", "summary", "evidence", "proposal_ids", "kb_refs", "confidence")
 
 	// GET /api/v1/smith/findings.
 	hasKeys(t, smithFindingsResponse{}, "count", "findings")
 	hasKeys(t, smith.StoredFinding{},
 		"id", "investigation_id", "check_id", "severity", "summary",
-		"evidence", "sweep_kind", "created_at", "kb_refs", "repeat_count")
+		"evidence", "sweep_kind", "created_at", "kb_refs", "repeat_count", "confidence")
 
 	// Investigations (Wave 2 — docs/v5-smith-wave2.md §3).
 	hasKeys(t, smithInvestigationsResponse{}, "count", "investigations")
@@ -273,11 +273,13 @@ func TestFrozenSmithChatShapes(t *testing.T) {
 	hasKeys(t, smithChatResponse{}, "conversation_id", "message_id")
 
 	// GET|PUT /api/v1/smith/settings.
-	hasKeys(t, smithSettingsResponse{}, "model", "handoff_offerings", "schedule", "thresholds", "web", "tools", "retention")
-	hasKeys(t, smith.Thresholds{}, "gtt_warn_pct", "gtt_crit_pct", "disk_warn_pct", "disk_crit_pct")
-	hasKeys(t, smithSettingsBody{}, "model", "handoff_offerings", "schedule", "thresholds", "web", "tools", "retention")
+	hasKeys(t, smithSettingsResponse{}, "model", "handoff_offerings", "brain_chain", "build_refresh_watchlist", "comfyui_keep_files", "schedule", "thresholds", "web", "tools", "retention")
+	hasKeys(t, smith.Thresholds{}, "gtt_warn_pct", "gtt_crit_pct", "disk_warn_pct", "disk_crit_pct", "device_lost_window_minutes", "build_refresh_behind_n")
+	hasKeys(t, smithSettingsBody{}, "model", "handoff_offerings", "brain_chain", "build_refresh_watchlist", "comfyui_keep_files", "schedule", "thresholds", "web", "tools", "retention")
 	hasKeys(t, smithScheduleBody{}, "quick", "deep", "enabled")
-	hasKeys(t, smithThresholdsBody{}, "gtt_warn_pct", "gtt_crit_pct", "disk_warn_pct", "disk_crit_pct")
+	// device_lost_window_minutes/build_refresh_behind_n added S7-followup, 2026-08-26 — both
+	// were already GET-readable (smith.Thresholds carries them) but never PUT-writable.
+	hasKeys(t, smithThresholdsBody{}, "gtt_warn_pct", "gtt_crit_pct", "disk_warn_pct", "disk_crit_pct", "device_lost_window_minutes", "build_refresh_behind_n")
 
 	// Web research (P5, docs/v5-smith.md §4.8) — part of the settings
 	// surface above.

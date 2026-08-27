@@ -24,14 +24,15 @@ import (
 
 // fakeSched is a controllable sched.Scheduler for the tool tests.
 type fakeSched struct {
-	status   sched.Status
-	cfg      sched.Config
-	reserv   []sched.Reservation
-	ensureFn func(context.Context, sched.EnsureRequest) (sched.Ticket, error)
-	unloadFn func(ctx context.Context, slot, requestedBy string) error
-	createFn func(context.Context, sched.Reservation) error
-	updateFn func(ctx context.Context, label string, r sched.Reservation) error
-	cancelFn func(ctx context.Context, label, requestedBy string) error
+	status       sched.Status
+	cfg          sched.Config
+	reserv       []sched.Reservation
+	ensureFn     func(context.Context, sched.EnsureRequest) (sched.Ticket, error)
+	unloadFn     func(ctx context.Context, slot, requestedBy string) error
+	createFn     func(context.Context, sched.Reservation) error
+	updateFn     func(ctx context.Context, label string, r sched.Reservation) error
+	cancelFn     func(ctx context.Context, label, requestedBy string) error
+	loadStatusFn func(model string) sched.LoadState
 
 	// captured call arguments for assertions.
 	lastEnsure sched.EnsureRequest
@@ -98,6 +99,13 @@ func (f *fakeSched) CancelReservation(ctx context.Context, label, requestedBy st
 	return nil
 }
 
+func (f *fakeSched) LoadStatus(model string) sched.LoadState {
+	if f.loadStatusFn != nil {
+		return f.loadStatusFn(model)
+	}
+	return sched.LoadState{Model: model, State: "idle"}
+}
+
 // fakeEngine is a controllable CanFitter.
 type fakeEngine struct {
 	fit engine.CanFit
@@ -120,9 +128,9 @@ func (a *fakeAuth) VerifySession(string) (authz.Identity, error) {
 	return authz.Identity{}, errors.New("no sessions in mcp")
 }
 
-func (a *fakeAuth) VerifyBearer(token string, want authz.KeyKind) (authz.Identity, error) {
+func (a *fakeAuth) VerifyBearerFrom(_ context.Context, _, token string, want authz.KeyKind) (authz.Identity, error) {
 	if a.t != nil && want != authz.KindMCP {
-		a.t.Errorf("VerifyBearer want kind = %q, expected KindMCP", want)
+		a.t.Errorf("VerifyBearerFrom want kind = %q, expected KindMCP", want)
 	}
 	if token != a.token {
 		return authz.Identity{}, authz.ErrBadToken
@@ -575,6 +583,25 @@ func TestEnsureLoadedTimeoutIs200(t *testing.T) {
 	}
 	if body["success"] != false {
 		t.Errorf("success = %v, want false", body["success"])
+	}
+}
+
+func TestEnsureLoadedTimeoutSurfacesRefusalReason(t *testing.T) {
+	sc := &fakeSched{
+		ensureFn: func(context.Context, sched.EnsureRequest) (sched.Ticket, error) {
+			return sched.Ticket{}, fmt.Errorf("sched: timed out waiting for x to load: %w", context.DeadlineExceeded)
+		},
+		loadStatusFn: func(model string) sched.LoadState {
+			return sched.LoadState{Model: model, State: "failed", Reason: sched.ReasonNoEvictableIdle}
+		},
+	}
+	srv := newTestServer(t, sc, &fakeEngine{})
+	code, body := do(t, srv, http.MethodPost, "/v1/tools/ensure_loaded", goodToken, `{"model":"nemotron"}`)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for timeout", code)
+	}
+	if body["reason"] != string(sched.ReasonNoEvictableIdle) {
+		t.Errorf("reason = %v, want %q", body["reason"], sched.ReasonNoEvictableIdle)
 	}
 }
 

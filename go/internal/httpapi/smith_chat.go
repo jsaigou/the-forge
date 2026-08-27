@@ -228,24 +228,38 @@ func resolveAPIKeyWrite(submitted, currentReal string) string {
 }
 
 type smithSettingsResponse struct {
-	Model            string               `json:"model"`
-	HandoffOfferings []int64              `json:"handoff_offerings"`
-	Schedule         smith.Schedule       `json:"schedule"`
-	Thresholds       smith.Thresholds     `json:"thresholds"`
-	Web              smithWebBody         `json:"web"`
-	Tools            smith.ToolsConfig    `json:"tools"`
-	Retention        smith.Retention      `json:"retention"`
-	SelfReview       smith.SelfReview     `json:"self_review"`
-	BrainResidency   smith.BrainResidency `json:"brain_residency"`
+	Model                 string               `json:"model"`
+	HandoffOfferings      []int64              `json:"handoff_offerings"`
+	BrainChain            []string             `json:"brain_chain"`
+	BuildRefreshWatchlist []string             `json:"build_refresh_watchlist"`
+	ComfyUIKeepFiles      []string             `json:"comfyui_keep_files"`
+	Schedule              smith.Schedule       `json:"schedule"`
+	Thresholds            smith.Thresholds     `json:"thresholds"`
+	Web                   smithWebBody         `json:"web"`
+	Tools                 smith.ToolsConfig    `json:"tools"`
+	Retention             smith.Retention      `json:"retention"`
+	SelfReview            smith.SelfReview     `json:"self_review"`
+	BrainResidency        smith.BrainResidency `json:"brain_residency"`
 }
 
 func (s *Server) smithSettingsView(ctx context.Context) smithSettingsResponse {
 	webCfg := s.deps.Smith.WebConfig(ctx)
+	// BrainChain() deliberately returns nil (not []string{}) when unset —
+	// its own doc comment says the nil/empty distinction matters to its
+	// other (non-HTTP) callers, so coalesce only here at the JSON boundary
+	// rather than changing that reader's semantics.
+	brainChain := s.deps.Smith.BrainChain(ctx)
+	if brainChain == nil {
+		brainChain = []string{}
+	}
 	return smithSettingsResponse{
-		Model:            s.deps.Smith.ModelSetting(ctx),
-		HandoffOfferings: s.deps.Smith.HandoffOfferings(ctx),
-		Schedule:         s.deps.Smith.Schedule(ctx),
-		Thresholds:       s.deps.Smith.Thresholds(ctx),
+		Model:                 s.deps.Smith.ModelSetting(ctx),
+		HandoffOfferings:      s.deps.Smith.HandoffOfferings(ctx),
+		BrainChain:            brainChain,
+		BuildRefreshWatchlist: s.deps.Smith.BuildRefreshWatchlist(ctx),
+		ComfyUIKeepFiles:      s.deps.Smith.ComfyUIKeepFiles(ctx),
+		Schedule:              s.deps.Smith.Schedule(ctx),
+		Thresholds:            s.deps.Smith.Thresholds(ctx),
 		Web: smithWebBody{
 			Enabled:       webCfg.Enabled,
 			ProviderOrder: webCfg.ProviderOrder,
@@ -282,6 +296,16 @@ type smithThresholdsBody struct {
 	GTTCritPct  float64 `json:"gtt_crit_pct"`
 	DiskWarnPct float64 `json:"disk_warn_pct"`
 	DiskCritPct float64 `json:"disk_crit_pct"`
+	// DeviceLostWindowMinutes and BuildRefreshBehindN round out this body to
+	// match every field smith.Thresholds' reader (smith.go Thresholds())
+	// already knows how to apply from the stored JSON — both were readable
+	// (GET returns the full smith.Thresholds struct) but not writable: this
+	// body used to omit them, so a PUT could never actually set either one,
+	// and the reader's own defensive nil-pointer-means-keep-default handling
+	// meant the gap silently read back as "stuck at the code default" rather
+	// than erroring (S7-followup catalog/settings review, 2026-08-26).
+	DeviceLostWindowMinutes int `json:"device_lost_window_minutes"`
+	BuildRefreshBehindN     int `json:"build_refresh_behind_n"`
 }
 
 // smithSettingsBody is PUT /api/v1/smith/settings's request body — every
@@ -316,15 +340,18 @@ type smithBrainResidencyBody struct {
 }
 
 type smithSettingsBody struct {
-	Model            *string                  `json:"model"`
-	HandoffOfferings *[]int64                 `json:"handoff_offerings"`
-	Schedule         *smithScheduleBody       `json:"schedule"`
-	Thresholds       *smithThresholdsBody     `json:"thresholds"`
-	Web              *smithWebBody            `json:"web"`
-	Tools            *smithToolsBody          `json:"tools"`
-	Retention        *smithRetentionBody      `json:"retention"`
-	SelfReview       *smithSelfReviewBody     `json:"self_review"`
-	BrainResidency   *smithBrainResidencyBody `json:"brain_residency"`
+	Model                 *string                  `json:"model"`
+	HandoffOfferings      *[]int64                 `json:"handoff_offerings"`
+	BrainChain            *[]string                `json:"brain_chain"`
+	BuildRefreshWatchlist *[]string                `json:"build_refresh_watchlist"`
+	ComfyUIKeepFiles      *[]string                `json:"comfyui_keep_files"`
+	Schedule              *smithScheduleBody       `json:"schedule"`
+	Thresholds            *smithThresholdsBody     `json:"thresholds"`
+	Web                   *smithWebBody            `json:"web"`
+	Tools                 *smithToolsBody          `json:"tools"`
+	Retention             *smithRetentionBody      `json:"retention"`
+	SelfReview            *smithSelfReviewBody     `json:"self_review"`
+	BrainResidency        *smithBrainResidencyBody `json:"brain_residency"`
 }
 
 // handleSmithSettingsPut — PUT /api/v1/smith/settings (operator). Validates
@@ -370,6 +397,12 @@ func (s *Server) handleSmithSettingsPut(w http.ResponseWriter, r *http.Request) 
 			if v <= 0 || v > 100 {
 				fieldErrs["thresholds."+name] = "must be between 0 and 100"
 			}
+		}
+		if b.Thresholds.DeviceLostWindowMinutes <= 0 || b.Thresholds.DeviceLostWindowMinutes > 1440 {
+			fieldErrs["thresholds.device_lost_window_minutes"] = "must be between 1 and 1440 (24h)"
+		}
+		if b.Thresholds.BuildRefreshBehindN <= 0 || b.Thresholds.BuildRefreshBehindN > 100000 {
+			fieldErrs["thresholds.build_refresh_behind_n"] = "must be between 1 and 100000"
 		}
 	}
 	if b.Web != nil {
@@ -432,6 +465,27 @@ func (s *Server) handleSmithSettingsPut(w http.ResponseWriter, r *http.Request) 
 	if b.HandoffOfferings != nil {
 		raw, _ := json.Marshal(*b.HandoffOfferings)
 		if err := s.deps.Settings.Set(ctx, smith.SettingHandoffOfferings, raw); err != nil {
+			writeInternalError(w, err)
+			return
+		}
+	}
+	if b.BrainChain != nil {
+		raw, _ := json.Marshal(*b.BrainChain)
+		if err := s.deps.Settings.Set(ctx, smith.SettingBrainChain, raw); err != nil {
+			writeInternalError(w, err)
+			return
+		}
+	}
+	if b.BuildRefreshWatchlist != nil {
+		raw, _ := json.Marshal(*b.BuildRefreshWatchlist)
+		if err := s.deps.Settings.Set(ctx, smith.SettingBuildRefreshWatchlist, raw); err != nil {
+			writeInternalError(w, err)
+			return
+		}
+	}
+	if b.ComfyUIKeepFiles != nil {
+		raw, _ := json.Marshal(*b.ComfyUIKeepFiles)
+		if err := s.deps.Settings.Set(ctx, smith.SettingComfyUIKeepFiles, raw); err != nil {
 			writeInternalError(w, err)
 			return
 		}

@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/activity"
 	"github.com/jsaigou/the-forge/internal/authz"
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/store"
@@ -77,6 +78,12 @@ type Deps struct {
 	// is skipped entirely (streaming/non-streaming responses still proxy
 	// normally; only the cost-recording side effect is absent).
 	Usage store.Usage
+	// Activity is the per-slot consumer attribution registry (shared with
+	// smith + httpapi — one instance wired in cmd/forge). Foundry_slot
+	// attempts Mark the slot with the caller's derived consumer label on
+	// request start and again when the upstream body is fully streamed.
+	// Nil → no attribution.
+	Activity *activity.Registry
 }
 
 // Server is the a0 router.
@@ -177,6 +184,12 @@ func (s *Server) SlotErrorCount(port int, windowSeconds int64) (int, int64) {
 //   - POST /v1/chat/completions — OpenAI-compatible passthrough (tailnet-conditional auth)
 //   - POST /v1/embeddings       — static passthrough to the embedding service
 //     (tailnet-conditional auth; no routing/failover — see embeddings.go)
+//   - GET /v1/load-status       — model-keyed load-progress poll (Sprint 1, a0 load
+//     visibility, 2026-08-27; tailnet-conditional auth — see load_status.go)
+//   - POST /v1/audio/speech     — static passthrough to forge-tts (Sprint 3, a0 TTS
+//     passthrough, 2026-08-27; tailnet-conditional auth — see speech.go)
+//   - GET /v1/voices            — static passthrough to forge-tts's voice list
+//     (same auth, same file; GET only, matching forge-tts's own auth scope)
 //
 // In skeleton mode (New() with no deps), only /healthz answers; /v1/* paths
 // return 503 "router not configured".
@@ -203,6 +216,9 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("POST /v1/chat/completions", s.chatCompletions)
 	mux.HandleFunc("POST /v1/embeddings", s.embeddings)
+	mux.HandleFunc("GET /v1/load-status", s.loadStatus)
+	mux.HandleFunc("POST /v1/audio/speech", s.speechProxy("/audio/speech"))
+	mux.HandleFunc("GET /v1/voices", s.speechProxy("/voices"))
 
 	return mux
 }

@@ -61,6 +61,8 @@ type fakeLlama struct {
 	promptSecondsTotal float64
 	nDecodeTotal       float64
 	nctx               int
+	modelAlias         string
+	modelPath          string
 	srv                *httptest.Server
 }
 
@@ -83,7 +85,8 @@ func newFakeLlama(t *testing.T, nctx int) *fakeLlama {
 			fmt.Fprintf(w, "llamacpp:prompt_seconds_total %g\n", f.promptSecondsTotal)
 			fmt.Fprintf(w, "llamacpp:n_decode_total %g\n", f.nDecodeTotal)
 		case "/props":
-			fmt.Fprintf(w, `{"default_generation_settings":{"n_ctx":%d}}`, f.nctx)
+			fmt.Fprintf(w, `{"default_generation_settings":{"n_ctx":%d},"model_alias":%q,"model_path":%q}`,
+				f.nctx, f.modelAlias, f.modelPath)
 		case "/health":
 			fmt.Fprint(w, `{"status":"ok"}`)
 		default:
@@ -407,6 +410,8 @@ func TestNCtxPerSlotSession(t *testing.T) {
 	sys := &fakeSystemd{}
 	sys.set("forge-a1", "active", "running")
 	llama := newFakeLlama(t, 30000)
+	llama.modelAlias = "vk-mode"
+	llama.modelPath = "/opt/forge/models/vk-mode.gguf"
 
 	c := New(Options{
 		Cfg:      func() *config.Config { return cfg },
@@ -422,17 +427,27 @@ func TestNCtxPerSlotSession(t *testing.T) {
 	if snap.Inference["a1"].NCtx != 30000 {
 		t.Fatalf("NCtx = %d", snap.Inference["a1"].NCtx)
 	}
+	if snap.Inference["a1"].ModelAlias != "vk-mode" || snap.Inference["a1"].ModelPath != "/opt/forge/models/vk-mode.gguf" {
+		t.Errorf("ModelAlias/ModelPath = %q/%q, want vk-mode//opt/forge/models/vk-mode.gguf",
+			snap.Inference["a1"].ModelAlias, snap.Inference["a1"].ModelPath)
+	}
 
-	// Reload with a different context: session cache must reset.
+	// Reload with a different context AND a different actually-running
+	// model: session cache must reset for both, not just NCtx.
 	sys.set("forge-a1", "inactive", "dead")
 	c.ProbeNow(ctx)
 	llama.mu.Lock()
 	llama.nctx = 8192 // kernel silently reduced it this time
+	llama.modelAlias = "other-mode"
+	llama.modelPath = "/opt/forge/models/other-mode.gguf"
 	llama.mu.Unlock()
 	sys.set("forge-a1", "active", "running")
 	snap = c.ProbeNow(ctx)
 	if snap.Inference["a1"].NCtx != 8192 {
 		t.Errorf("NCtx after reload = %d, want 8192 (stale session cache?)", snap.Inference["a1"].NCtx)
+	}
+	if snap.Inference["a1"].ModelAlias != "other-mode" {
+		t.Errorf("ModelAlias after reload = %q, want other-mode (stale identity cache?)", snap.Inference["a1"].ModelAlias)
 	}
 }
 
@@ -679,6 +694,48 @@ func TestCompressorProxyUnitsUseRealUnitName(t *testing.T) {
 	}
 	if !u.Active() {
 		t.Errorf("headroom-external state = %+v, want active", u)
+	}
+}
+
+// TestTTSEngineUnitsDiscoveredLive: Tier 1 Sprint 2 (Voice & Speech
+// settings) — tts.engines' configured units (forge-tts-custom/-base,
+// kokoro) must be watched so their restart-loop alerts actually fire (the
+// Sprint 0 incident: they crash-looped for 5 days undetected because
+// nothing probed them). Unlike ExtraUnits (a static snapshot from daemon
+// startup), TTSEngineUnits is a closure re-consulted every cycle — this
+// test proves that by changing what it returns between two ProbeNow calls
+// on the SAME Collector, with no restart.
+func TestTTSEngineUnitsDiscoveredLive(t *testing.T) {
+	cfg := testConfig(t)
+	sys := &fakeSystemd{}
+	sys.set("forge-tts-custom", "active", "running")
+
+	var configured []string
+	c := New(Options{
+		Cfg:            func() *config.Config { return cfg },
+		Systemd:        sys,
+		GPU:            &GPU{DRMRoot: t.TempDir()},
+		Proc:           Proc{Root: t.TempDir()},
+		BaseURL:        func(port int) string { return "http://127.0.0.1:1" },
+		DialPort:       func(port int) bool { return false },
+		TTSEngineUnits: func() []string { return configured },
+	})
+
+	snap := c.ProbeNow(context.Background())
+	if _, ok := snap.Units["forge-tts-custom"]; ok {
+		t.Fatal("forge-tts-custom probed before it was configured — TTSEngineUnits should gate this")
+	}
+
+	// Simulate an operator saving Settings -> Voice & Speech with a real
+	// unit filled in, with no daemon restart in between.
+	configured = []string{"forge-tts-custom"}
+	snap = c.ProbeNow(context.Background())
+	u, ok := snap.Units["forge-tts-custom"]
+	if !ok {
+		t.Fatal("forge-tts-custom not probed after TTSEngineUnits started returning it — not read live per cycle")
+	}
+	if !u.Active() {
+		t.Errorf("forge-tts-custom state = %+v, want active", u)
 	}
 }
 

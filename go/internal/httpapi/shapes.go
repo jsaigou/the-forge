@@ -73,6 +73,12 @@ type statusResponse struct {
 	// Surfaced on /status (already polled by every tab) rather than a new
 	// endpoint.
 	RestartRequired *restartRequiredInfo `json:"restart_required,omitempty"`
+	// SlotConsumers is additive (per-slot consumer attribution): slot id →
+	// the human-facing label of whoever most recently generated against it
+	// ("ExampleHost (OpenCode)", "SMITH", a tailnet IP), within the freshness
+	// window (activity.ConsumerFreshness). omitempty — absent when nothing
+	// is consuming.
+	SlotConsumers map[string]string `json:"slot_consumers,omitempty"`
 }
 
 // profilingStatus additive (Sprint K): lets Bay.tsx show a warning-stripe
@@ -809,9 +815,16 @@ type apiKeyResponse struct {
 	Kind       string   `json:"kind"`
 	Name       string   `json:"name"`
 	Role       string   `json:"role,omitempty"`
+	// Operator's preferred consumer label ("" = derive at request time).
+	DisplayName string   `json:"display_name,omitempty"`
+	// BoundIP is the exact client IP this key verifies from; "" = unbound
+	// (security sprint 3, #34).
+	BoundIP    string   `json:"bound_ip,omitempty"`
 	CreatedAt  float64  `json:"created_at"`
 	LastUsedAt *float64 `json:"last_used_at,omitempty"`
 	RevokedAt  *float64 `json:"revoked_at,omitempty"`
+	// ExpiresAt is unset for a key that never expires (security sprint 3, #36).
+	ExpiresAt *float64 `json:"expires_at,omitempty"`
 }
 
 // apiKeysResponse mirrors web/src/lib/types.ts APIKeysResponse.
@@ -824,6 +837,16 @@ type apiKeyCreateRequest struct {
 	Kind string `json:"kind"`
 	Name string `json:"name"`
 	Role string `json:"role,omitempty"`
+	// DisplayName is the operator's preferred consumer label (optional) —
+	// used verbatim in slot-consumer attribution when set.
+	DisplayName string `json:"display_name,omitempty"`
+	// BindToRequester binds the new key to this mint request's own resolved
+	// client IP (effectiveClientIP — tailscale-serve aware); false (the
+	// default when omitted) mints an unbound key. Security sprint 3, #34.
+	BindToRequester bool `json:"bind_to_requester,omitempty"`
+	// TTLSeconds sets the key to expire that many seconds from now; 0/omitted
+	// mints a key that never expires. Security sprint 3, #36.
+	TTLSeconds int64 `json:"ttl_seconds,omitempty"`
 }
 
 // apiKeyCreateResponse mirrors web/src/lib/types.ts APIKeyCreateResponse. The

@@ -203,7 +203,7 @@ func (s *Smith) GetInvestigation(ctx context.Context, id int64) (*Investigation,
 // newest first.
 func (s *Smith) findingsForInvestigation(ctx context.Context, invID int64) ([]StoredFinding, error) {
 	rows, err := s.d.Store.SQL().QueryContext(ctx,
-		`SELECT id, investigation_id, check_id, severity, summary, evidence, sweep_kind, created_at, kb_refs, repeat_count
+		`SELECT id, investigation_id, check_id, severity, summary, evidence, sweep_kind, created_at, kb_refs, repeat_count, confidence, confidence_note
 		 FROM smith_findings WHERE investigation_id = ?
 		 ORDER BY created_at DESC, id DESC`, invID)
 	if err != nil {
@@ -218,7 +218,7 @@ func (s *Smith) findingsForInvestigation(ctx context.Context, invID int64) ([]St
 		var createdAt int64
 		var kbRefsJSON string
 		if err := rows.Scan(&sf.ID, &invIDCol, &sf.CheckID, &sf.Severity,
-			&sf.Summary, &sf.Evidence, &sf.SweepKind, &createdAt, &kbRefsJSON, &sf.RepeatCount); err != nil {
+			&sf.Summary, &sf.Evidence, &sf.SweepKind, &createdAt, &kbRefsJSON, &sf.RepeatCount, &sf.Confidence, &sf.ConfidenceNote); err != nil {
 			return nil, fmt.Errorf("smith: scan finding: %w", err)
 		}
 		if invIDCol.Valid {

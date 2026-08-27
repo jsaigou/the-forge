@@ -37,10 +37,12 @@ const (
 // Role.Allows, per-IP rate limiting, CSRF issuance/validation, key minting,
 // and first-run wizard state.
 //
-// The frozen Authenticator interface has no client-IP parameter, so the
-// interface methods verify WITHOUT rate limiting; HTTP middleware must use
-// the *From variants (VerifyBearerFrom) and Login, which enforce the
-// 10-fails/60s limit per Contract 1 §1.
+// The Authenticator interface's VerifyBearerFrom and LoginService's Login
+// both take a client-IP rate-limit key and enforce the 10-fails/60s limit
+// per Contract 1 §1. The unlimited VerifyBearer (below) is intentionally
+// off the interface — it exists only for tests and internal callers that
+// already own rate limiting themselves; no production HTTP path should
+// reach it (issue #35, 2026-08-25).
 type Authorizer struct {
 	st         store.Store
 	hasher     Hasher
@@ -241,28 +243,33 @@ func (a *Authorizer) SweepExpiredSessions(ctx context.Context) (int64, error) {
 
 // ── Bearer keys ─────────────────────────────────────────────────────────────
 
-// VerifyBearer implements Authenticator: full token verification with kind
-// enforcement, one Argon2 verify per request (keyid routes to exactly one
-// row). NOT rate-limited — no client IP in the frozen signature; HTTP
-// middleware uses VerifyBearerFrom.
+// VerifyBearer is full token verification with kind enforcement, one
+// Argon2 verify per request (keyid routes to exactly one row), but NOT
+// rate-limited. Test/internal use only — deliberately not part of the
+// Authenticator interface (see the type doc above); production HTTP
+// middleware must use VerifyBearerFrom. Passes ip="" — a key bound to a
+// specific IP (#34) never verifies through this path; use VerifyBearerFrom
+// with a real ip to exercise binding in tests.
 func (a *Authorizer) VerifyBearer(token string, want KeyKind) (Identity, error) {
-	return a.verifyBearer(context.Background(), token, want)
+	return a.verifyBearer(context.Background(), "", token, want)
 }
 
 // VerifyBearerFrom is VerifyBearer with the contract's per-IP rate limit
-// (failures counted, 10/60s shared with the login path).
+// (failures counted, 10/60s shared with the login path). ip also feeds the
+// key's optional host binding (#34): a key with a non-empty BoundIP only
+// verifies when ip matches exactly.
 func (a *Authorizer) VerifyBearerFrom(ctx context.Context, ip, token string, want KeyKind) (Identity, error) {
 	if a.limiter.TooMany(ip) {
 		return Identity{}, ErrRateLimited
 	}
-	id, err := a.verifyBearer(ctx, token, want)
+	id, err := a.verifyBearer(ctx, ip, token, want)
 	if errors.Is(err, ErrUnauthenticated) {
 		a.limiter.Fail(ip)
 	}
 	return id, err
 }
 
-func (a *Authorizer) verifyBearer(ctx context.Context, token string, want KeyKind) (Identity, error) {
+func (a *Authorizer) verifyBearer(ctx context.Context, ip, token string, want KeyKind) (Identity, error) {
 	kind, keyid, secret, err := ParseToken(token)
 	if err != nil {
 		return Identity{}, ErrUnauthenticated
@@ -281,6 +288,12 @@ func (a *Authorizer) verifyBearer(ctx context.Context, token string, want KeyKin
 	if !k.RevokedAt.IsZero() {
 		return Identity{}, ErrUnauthenticated
 	}
+	if !k.ExpiresAt.IsZero() && !a.now().Before(k.ExpiresAt) {
+		return Identity{}, ErrUnauthenticated
+	}
+	if k.BoundIP != "" && k.BoundIP != ip {
+		return Identity{}, ErrUnauthenticated
+	}
 	ok, err := a.hasher.Verify(k.SecretHash, secret)
 	if err != nil || !ok {
 		return Identity{}, ErrUnauthenticated
@@ -292,14 +305,18 @@ func (a *Authorizer) verifyBearer(ctx context.Context, token string, want KeyKin
 	if kind == KindForge {
 		role = Role(k.Role)
 	}
-	return Identity{Name: k.Name, Role: role, KeyID: keyid, Kind: kind}, nil
+	return Identity{Name: k.Name, Role: role, KeyID: keyid, Kind: kind, DisplayName: k.DisplayName}, nil
 }
 
 // MintKey creates a bearer key and returns the full token — shown exactly
 // once, never stored or logged in plaintext. role is required for forge
 // keys and must be empty otherwise. Any existing active key of the same
 // kind+name is revoked first (V4 mint semantics: one key per consumer name).
-func (a *Authorizer) MintKey(ctx context.Context, kind KeyKind, name string, role Role) (string, error) {
+// boundIP == "" mints an unbound key (verifies from any IP — the default for
+// router/MCP keys); expiresAt.IsZero() mints a key that never expires
+// (security sprint 3, #34/#36). Callers choose the defaults for their own
+// surface — MintKey itself applies none.
+func (a *Authorizer) MintKey(ctx context.Context, kind KeyKind, name, displayName string, role Role, boundIP string, expiresAt time.Time) (string, error) {
 	switch kind {
 	case KindForge:
 		if !validRole(role) {
@@ -343,7 +360,8 @@ func (a *Authorizer) MintKey(ctx context.Context, kind KeyKind, name string, rol
 	}
 	if err := a.st.Keys().Create(ctx, store.APIKey{
 		KeyID: keyid, Kind: string(kind), Name: name, SecretHash: hash,
-		Role: string(role), CreatedAt: a.now(),
+		Role: string(role), DisplayName: displayName, BoundIP: boundIP,
+		CreatedAt: a.now(), ExpiresAt: expiresAt,
 	}); err != nil {
 		return "", err
 	}
