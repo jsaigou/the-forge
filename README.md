@@ -10,11 +10,14 @@
 
 </div>
 
-The Forge is a single Go binary for running several local LLMs on one machine: a scheduler that
-loads models on demand and evicts by memory budget, a router with cloud failover, a live model
-catalog, and an in-process agent (Smith) that watches the host and can act on what it finds.
-Built for AMD's unified-memory APUs (Ryzen AI Max+ 395 / "Strix Halo"), where GPU and CPU share
-one pool of RAM.
+The Forge is my attempt at solving the problem of managing multiple local AI and cloud accounts on the Strix Halo platform from AMD. It is build of quality of life fixes and hard earned knowledge.  It began over a year a go as a simple loading tool with basic monitoring. I may have gone too far.
+
+The Forge became a LLM Orchestrator, llm proxy and token compression system.  It comes with STT, TTS, Aligning and Embedding by default. It will auto load and evict models on your system silently. 
+
+It features SMITH a hybrid service agent that monitors the system and can fix most issues including trick recompiles of llama.cpp.  All of the findings from [docs/pitfalls.md](docs/pitfalls.md) are built into the agent. 
+
+Tailnet is highly recommended. 
+
 
 <p align="center">
   <img src="docs/assets/console-light-dark.png" alt="The Forge console, light and dark theme" width="100%">
@@ -186,9 +189,14 @@ Full list in [docs/pitfalls.md](docs/pitfalls.md).
 
 ## Status
 
-Early public release: source and installer are published for review. Binaries and model weights
-aren't distributed — build from source against your own llama.cpp. Expect churn in the scheduler
-and auth surfaces while the v0.5 line stabilizes.
+Early public release.
+
+The installer is woefully under-tested.  All my testes were simulated.  I don't have any spare hardware and can't justify taking my system down for hours at a time.  In a pinch you could point your claude code at the repo to help with the install. 
+
+Going forward, I plan to focus on token compression latency and dealing with cached tokens on the provider side.  It doesn't help to reduce token use if there are no matches against the cache.   
+
+I don not have any plans to use headroom.  I tried a few versions without success.  Older versions would sometimes lead to context leakage between providers.  Newer versions would randomly consume 80GB of ram and OOM. The simplified approach I've taken sticks withing a 400MB limit per proxy. 
+
 
 ## Support
 
