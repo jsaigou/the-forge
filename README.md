@@ -10,7 +10,7 @@
 
 </div>
 
-The Forge is my attempt at solving the problem of managing multiple local AI and cloud accounts on the Strix Halo platform from AMD. It is build of quality of life fixes and hard earned knowledge.  It began over a year a go as a simple loading tool with basic monitoring. I may have gone too far.
+The Forge is my attempt at solving the problem of managing multiple local AI and cloud accounts on the Strix Halo platform from AMD. It is built from quality of life fixes and hard earned knowledge.  It began over a year a go as a simple loading tool with basic monitoring. I may have gone too far.
 
 The Forge became a LLM Orchestrator, llm proxy and token compression system.  It comes with STT, TTS, Aligning and Embedding by default. It will auto load and evict models on your system silently. 
 
