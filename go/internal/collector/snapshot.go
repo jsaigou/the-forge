@@ -208,6 +208,15 @@ type UnitState struct {
 	// the unit isn't running or nothing is measurable. Slot units carry it
 	// too, but the canonical per-slot figure stays SlotState.MemoryBytes.
 	GPUBytes int64
+	// ExecStartPath is the absolute path of the unit's ExecStart= program,
+	// parsed from the same Service-interface GetAllPropertiesContext call
+	// as Result/NRestarts/ExecMainStatus (no extra D-Bus round trip). Empty
+	// when unparseable or the unit has no Service-interface ExecStart
+	// (non-service unit types). Lets binary_paths (checks_paths.go) catch a
+	// unit whose launcher script/binary went missing (203/EXEC) BEFORE
+	// anyone tries to load/reach it — found live 2026-09-01, forge-comfyui
+	// crash-looped a week undetected because nothing checked this.
+	ExecStartPath string
 }
 
 // Active reports whether the unit is fully active.

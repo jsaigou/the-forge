@@ -90,7 +90,7 @@ func (s *Server) buildStatusResponse() statusResponse {
 		}
 		// alerts.
 		for _, a := range snap.Alerts {
-			aj := alertJSON{Code: a.Code, Msg: a.Msg}
+			aj := alertJSON{Code: a.Code, Msg: a.Msg, Unit: a.Unit}
 			if a.Port != 0 {
 				aj.Port = ptrInt(a.Port)
 			}

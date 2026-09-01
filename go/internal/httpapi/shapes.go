@@ -134,6 +134,14 @@ type alertJSON struct {
 	Code string `json:"code"`
 	Msg  string `json:"msg"`
 	Port *int   `json:"port,omitempty"`
+	// Unit is the systemd unit name for a unit-scoped alert (UNIT_CRASH/
+	// UNIT_OOM/UNIT_RESTARTED). Additive — mirrors smith.AlertInfo.Unit
+	// (smith.go), which already carried this; this endpoint dropped it.
+	// Found live 2026-09-01: without it, an "Ask smith" handoff from a
+	// Console alert chip has no way to name which unit crashed, and smith's
+	// alert classifier falls back to a generic answer about the whole
+	// daemon instead of the actual failing service.
+	Unit string `json:"unit,omitempty"`
 }
 
 // metricsResponse mirrors web/src/lib/types.ts Metrics.

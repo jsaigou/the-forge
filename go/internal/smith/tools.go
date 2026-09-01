@@ -213,9 +213,19 @@ var toolRegistry = []Tool{
 		Description: "Run one or more of smith's deterministic checks right now and return their findings. Does not persist or open any action — a read, not a sweep.",
 		Params: objectSchema(map[string]any{
 			"check_ids": map[string]any{
-				"type": "array", "items": map[string]any{"type": "string"},
+				"type": "array",
+				"items": map[string]any{
+					"type": "string",
+					// The COMPLETE, authoritative set — generated from the
+					// same registry selectChecks validates against, so it
+					// can never drift. Constrains generation for backends
+					// that enforce enum (native tool-calling); the
+					// partial-batch handling in runCheckTool is the
+					// fallback for fenced-mode backends that don't.
+					"enum": registryCheckIDs(),
+				},
 				"minItems": 1, "maxItems": 4,
-				"description": "Known check IDs, e.g. gtt_ceiling, disk_space, n_ctx_actual, gpu_hang, slot_agreement.",
+				"description": "Check IDs to run — must be exact values from this list, not invented.",
 			},
 		}, "check_ids"),
 		Network: true, // blocked_work_recheck (a valid check_id) really fetches
@@ -371,6 +381,16 @@ func toolIDs(tools []Tool) []string {
 
 // ── Run implementations ─────────────────────────────────────────────────
 
+// runCheckTool partitions the requested IDs against the registry BEFORE
+// calling RunSelected (which wraps the strict, all-or-nothing selectChecks
+// — left strict deliberately, since POST /smith/checks/run and the sweep
+// path should keep hard-failing a typo'd ID). One hallucinated ID riding
+// alongside real ones used to discard the whole batch — found live
+// 2026-09-01 (conversation 64): round 1 correctly named comfyui_health but
+// paired it with an invented ID, and the entire call errored, so the one
+// correct guess never produced data. Now the valid subset always runs, and
+// unknown_check_ids/valid_check_ids tell the model exactly what to fix on
+// the next round instead of a bare error string.
 func runCheckTool(ctx context.Context, env *ToolEnv, args json.RawMessage) (any, error) {
 	if env.RunSelected == nil {
 		return nil, fmt.Errorf("run_check: checks unavailable")
@@ -387,15 +407,41 @@ func runCheckTool(ctx context.Context, env *ToolEnv, args json.RawMessage) (any,
 	if len(a.CheckIDs) > 4 {
 		a.CheckIDs = a.CheckIDs[:4]
 	}
-	findings, err := env.RunSelected(ctx, a.CheckIDs)
+
+	known := registryCheckIDSet()
+	valid := make([]string, 0, len(a.CheckIDs))
+	var unknown []string
+	for _, id := range a.CheckIDs {
+		if known[id] {
+			valid = append(valid, id)
+		} else {
+			unknown = append(unknown, id)
+		}
+	}
+
+	out := map[string]any{}
+	if len(unknown) > 0 {
+		out["unknown_check_ids"] = unknown
+	}
+	if len(valid) == 0 {
+		// Soft-degrade, not an error — mirrors the web tools'
+		// {"unavailable":…} pattern (docs/v5-smith.md "Tool use") — so the
+		// model can self-correct next round instead of just retrying blind.
+		out["error"] = "no valid check_ids in this batch"
+		out["valid_check_ids"] = registryCheckIDs()
+		return out, nil
+	}
+
+	findings, err := env.RunSelected(ctx, valid)
 	if err != nil {
 		return nil, fmt.Errorf("run_check: %w", err)
 	}
-	out := make([]toolFinding, len(findings))
+	projected := make([]toolFinding, len(findings))
 	for i, f := range findings {
-		out[i] = projectFinding(f)
+		projected[i] = projectFinding(f)
 	}
-	return map[string]any{"findings": out}, nil
+	out["findings"] = projected
+	return out, nil
 }
 
 func listFindingsTool(ctx context.Context, env *ToolEnv, args json.RawMessage) (any, error) {

@@ -29,8 +29,8 @@ import (
 func runBinaryPaths(ctx context.Context, env *CheckEnv) Finding {
 	const id = "binary_paths"
 	cfg := env.cfg()
-	if cfg == nil && env.Catalog == nil {
-		return skipFinding(id, "no config or catalog source for binary paths")
+	if cfg == nil && env.Catalog == nil && env.Snap == nil {
+		return skipFinding(id, "no config, catalog, or snapshot source for binary paths")
 	}
 
 	type pathStatus struct {
@@ -39,12 +39,25 @@ func runBinaryPaths(ctx context.Context, env *CheckEnv) Finding {
 		OK    bool   `json:"ok"`
 		Error string `json:"error,omitempty"`
 	}
+	// unitExecMiss is the structured (not label-string-parsed) evidence
+	// proposeRestoreUnitLauncher (propose.go) reads to turn a missing
+	// launcher into a restore_unit_launcher proposal — kept separate from
+	// the generic pathStatus/statuses list (which also carries non-unit
+	// paths like infra.paths.vulkan_bin) so the proposer never has to parse
+	// a human-readable label back into a unit name.
+	type unitExecMiss struct {
+		Unit string `json:"unit"`
+		Path string `json:"path"`
+	}
 	var statuses []pathStatus
 	var missing []string
+	var unitMisses []unitExecMiss
 
-	checkPath := func(label, path string) {
+	// checkPath returns (attempted, ok) — attempted is false only for an
+	// unconfigured (empty) path, which is not this check's concern.
+	checkPath := func(label, path string) (attempted, ok bool) {
 		if path == "" {
-			return // unconfigured is not this check's concern
+			return false, false
 		}
 		st := pathStatus{Label: label, Path: path}
 		info, err := os.Stat(path)
@@ -62,6 +75,7 @@ func runBinaryPaths(ctx context.Context, env *CheckEnv) Finding {
 		if !st.OK {
 			missing = append(missing, fmt.Sprintf("%s (%s)", label, path))
 		}
+		return true, st.OK
 	}
 
 	if cfg != nil {
@@ -81,8 +95,31 @@ func runBinaryPaths(ctx context.Context, env *CheckEnv) Finding {
 			checkPath(fmt.Sprintf("build %q", b.Name), b.BinaryPath)
 		}
 	}
+	if env.Snap != nil {
+		// Every watched unit's own ExecStart= program — catches a unit whose
+		// launcher script/binary went missing (systemd 203/EXEC) even before
+		// anything tries to load or reach it. Found live 2026-09-01:
+		// forge-comfyui.service crash-looped for a week on exactly this
+		// (start-comfyui.sh dropped during the Foundry->Forge migration,
+		// docs/pitfalls.md) with nothing catching it until an operator tried
+		// to use ComfyUI. Sorted for stable output.
+		units := make([]string, 0, len(env.Snap.Units))
+		for name := range env.Snap.Units {
+			units = append(units, name)
+		}
+		sort.Strings(units)
+		for _, name := range units {
+			path := env.Snap.Units[name].ExecStartPath
+			if attempted, ok := checkPath(fmt.Sprintf("unit %s ExecStart", name), path); attempted && !ok {
+				unitMisses = append(unitMisses, unitExecMiss{Unit: name, Path: path})
+			}
+		}
+	}
 
 	ev := map[string]any{"paths": statuses}
+	if len(unitMisses) > 0 {
+		ev["unit_exec_missing"] = unitMisses
+	}
 	if len(statuses) == 0 {
 		return skipFinding(id, "no binary paths configured (infra.paths and catalog builds both empty)")
 	}

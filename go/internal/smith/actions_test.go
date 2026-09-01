@@ -1033,7 +1033,7 @@ func TestRestartAllowlist(t *testing.T) {
 		{"forge-embedding allowed", "forge-embedding", cfg, true},
 		{"forge-aligner allowed", "forge-aligner", cfg, true},
 		{"tts unit allowed", "forge-tts", cfg, true},
-		{"ai-mode-comfyui allowed", "ai-mode-comfyui", cfg, true},
+		{"forge-comfyui allowed", "forge-comfyui", cfg, true},
 		{"headroom@ template allowed", "headroom@local", cfg, true},
 		{"headroom@ deepseek allowed", "headroom@deepseek", cfg, true},
 		{"legacy compressor- allowed", "headroom-local", cfg, true},

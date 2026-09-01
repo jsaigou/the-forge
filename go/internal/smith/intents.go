@@ -173,12 +173,67 @@ func (s *Smith) classifyContextItems(ctx context.Context, items []ChatContext) (
 		if item.Code != "" && checkIDs[item.Code] {
 			return Intent{Family: FamilyHealth, Entity: checkIDToHealthEntity(item.Code), Phrasing: "context:" + item.Code}, true
 		}
+		// Unit-scoped alert codes: route to the CRASHED UNIT's own health
+		// entity when the unit is known, before falling back to
+		// alertCodeToEntity's generic per-code mapping. Without this, every
+		// UNIT_CRASH/UNIT_OOM — ComfyUI, a slot, a service, a compressor
+		// proxy — answered about the same generic "forge" entity regardless
+		// of which unit actually failed (found live 2026-09-01: a
+		// forge-comfyui crash was diagnosed via forge_self's unrelated DB-
+		// integrity check).
+		if item.Unit != "" && unitScopedAlertCode(item.Code) {
+			if entity := s.unitToHealthEntity(item.Unit); entity != "" {
+				return Intent{Family: FamilyHealth, Entity: entity, Phrasing: "context:" + item.Code}, true
+			}
+		}
 		// Known alert/notification codes that map to a check.
 		if entity, ok := alertCodeToEntity(item.Code); ok {
 			return Intent{Family: FamilyHealth, Entity: entity, Phrasing: "context:" + item.Code}, true
 		}
 	}
 	return Intent{}, false
+}
+
+// unitScopedAlertCode reports whether code identifies a specific systemd
+// unit (mirrors collector.unitAlerts' three codes — run.go) rather than a
+// port/GTT condition with no single owning unit.
+func unitScopedAlertCode(code string) bool {
+	switch code {
+	case "UNIT_CRASH", "UNIT_OOM", "UNIT_RESTARTED":
+		return true
+	}
+	return false
+}
+
+// unitToHealthEntity maps a real systemd unit name to the health entity
+// entityCheck (answers.go) already knows how to check — the missing half of
+// classifyContextItems' unit-scoped routing above. Returns "" for a unit
+// with no dedicated health entity (e.g. forge-a5 doesn't exist, an unknown
+// compressor instance name) rather than guessing.
+func (s *Smith) unitToHealthEntity(unit string) string {
+	if cfg := s.cfg(); cfg != nil && cfg.Server.TTSUnit != "" && unit == cfg.Server.TTSUnit {
+		return "tts"
+	}
+	switch unit {
+	case "forge-comfyui":
+		return "comfyui"
+	case "forge-daemon":
+		return "forge"
+	case "forge-embedding":
+		return "embedding"
+	case "forge-stt":
+		return "stt"
+	case "forge-aligner":
+		return "aligner"
+	case "forge-tts":
+		return "tts"
+	case "forge-a1", "forge-a2", "forge-a3", "forge-a4":
+		return strings.TrimPrefix(unit, "forge-")
+	}
+	if compressorUnitPattern.MatchString(unit) {
+		return "compressor"
+	}
+	return ""
 }
 
 // checkIDToHealthEntity maps a check ID to the health-family entity the

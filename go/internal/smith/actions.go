@@ -37,6 +37,17 @@ const (
 	// only a procedure_id; the steps themselves are never in the action
 	// row, only in the registry and (once running) smith_procedure_runs.
 	KindProcedure = "procedure"
+	// KindInstallLauncher installs one missing /usr/local/lib/forge/*.sh
+	// launcher script from smith's embedded canonical copy
+	// (internal/smith/launchers) — 2026-09-01, the atomic op
+	// restore_unit_launcher's procedure wraps as its first step (mirrors
+	// KindRestartForgeUnit/restart_down_unit's precedent: an atomic
+	// proposal that's also independently meaningful on its own — installing
+	// without restarting still lets the unit's own Restart=on-failure loop
+	// pick it up on its next retry). Risk is always RiskLow: it only ever
+	// writes a file that provably didn't exist (launcherInstallAllowed
+	// never overwrites).
+	KindInstallLauncher = "install_launcher"
 )
 
 // dedupeKeyBinaryUpstreamPrefix is the DedupeKey prefix propose.go's
@@ -103,6 +114,16 @@ var (
 	// ErrPathNotAllowed is wrapped into delete_files proposal/execution
 	// errors when the target path fails deleteAllowed.
 	ErrPathNotAllowed = errors.New("smith: path not on the delete allowlist")
+
+	// ErrInstallLauncherUnwired is returned by restore_unit_launcher
+	// execution when Deps.InstallLauncherFile is nil.
+	ErrInstallLauncherUnwired = errors.New("smith: install launcher func not wired")
+
+	// ErrLauncherNotAllowed is wrapped into restore_unit_launcher execution
+	// errors when the target path fails launcherInstallAllowed (not under
+	// the allowlisted directory, no embedded canonical copy for that
+	// basename, or a file already exists there — smith never overwrites).
+	ErrLauncherNotAllowed = errors.New("smith: launcher path not allowed")
 
 	// ErrProcedureNotFound is wrapped into procedure proposal/execution
 	// errors when detail.procedure_id doesn't resolve in the procedures
@@ -288,7 +309,7 @@ func (s *Smith) CreateAction(ctx context.Context, d ActionDraft) (*Action, error
 	}
 	switch d.Kind {
 	case KindRunbook, KindLoadConfig, KindUnloadSlot, KindRestartForgeUnit, KindSettingsChange,
-		KindCatalogChange, KindDeleteFiles, KindProcedure:
+		KindCatalogChange, KindDeleteFiles, KindProcedure, KindInstallLauncher:
 	default:
 		return nil, fmt.Errorf("smith: unknown action kind %q", d.Kind)
 	}
