@@ -183,6 +183,7 @@ func (s *Smith) healthAnswerFromFinding(entity string, f Finding) FastAnswer {
 				evidenceAs[bool](f.Evidence, "unit_active"),
 				evidenceAs[string](f.Evidence, "unit_state"),
 				evidenceAs[string](f.Evidence, "unit_result"),
+				evidenceAs[int32](f.Evidence, "unit_exec_main_status"),
 				evidenceAs[int](f.Evidence, "port")))
 	} else {
 		fmt.Fprintf(&b, "No — %s %s (checked just now).", label, f.Summary)
@@ -752,8 +753,8 @@ var restartUnitEntities = map[string]string{
 	"restart_forge-stt":       "forge-stt",
 	"restart_forge-embedding": "forge-embedding",
 	"restart_forge-aligner":   "forge-aligner",
-	"restart_comfyui":           "ai-mode-comfyui",
-	"restart_compressor":          "headroom@local",
+	"restart_comfyui":         "forge-comfyui",
+	"restart_compressor":      "headroom@local",
 }
 
 func (s *Smith) answerAction(ctx context.Context, intent Intent) (FastAnswer, bool) {

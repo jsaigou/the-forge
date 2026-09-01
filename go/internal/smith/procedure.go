@@ -419,6 +419,34 @@ func (s *Smith) runNativeOp(ctx context.Context, op string, params map[string]st
 		}
 		return procedures.StepResult{Stdout: "restarted " + unit, Duration: s.d.Now().Sub(start)}, nil
 
+	case "install_unit_launcher":
+		unit := params["unit"]
+		if unit == "" {
+			return procedures.StepResult{}, errors.New("smith: install_unit_launcher op requires a unit param")
+		}
+		snap := s.snapshot()
+		if snap == nil {
+			return procedures.StepResult{}, errors.New("smith: no collector snapshot available")
+		}
+		ut, ok := snap.Units[unit]
+		if !ok {
+			return procedures.StepResult{}, fmt.Errorf("smith: unit %q not found in the current snapshot", unit)
+		}
+		content, ok, reason := launcherInstallAllowed(ut.ExecStartPath)
+		if !ok {
+			return procedures.StepResult{}, fmt.Errorf("smith: launcher path %q not allowed: %s: %w", ut.ExecStartPath, reason, ErrLauncherNotAllowed)
+		}
+		if s.d.InstallLauncherFile == nil {
+			return procedures.StepResult{}, ErrInstallLauncherUnwired
+		}
+		if err := s.d.InstallLauncherFile(ctx, ut.ExecStartPath, content); err != nil {
+			return procedures.StepResult{}, fmt.Errorf("smith: install launcher %s: %w", ut.ExecStartPath, err)
+		}
+		return procedures.StepResult{
+			Stdout:   fmt.Sprintf("installed %s (%d bytes) for unit %s", ut.ExecStartPath, len(content), unit),
+			Duration: s.d.Now().Sub(start),
+		}, nil
+
 	case "unload_slot":
 		slot := params["slot"]
 		if slot == "" {

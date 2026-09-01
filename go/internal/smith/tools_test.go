@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -266,6 +267,121 @@ func TestRunSelected_DoesNotPersistOrProposeOrLock(t *testing.T) {
 	// RunChecks must succeed, not return ErrAlreadyRunning.
 	if _, err := s.RunChecks(ctx, ScopeQuick, nil, SweepManual); err != nil {
 		t.Errorf("RunChecks after runSelected = %v, want nil (runSelected must not hold s.sweeping)", err)
+	}
+}
+
+// ── run_check partial-batch tolerance (2026-09-01 incident fix) ────────────
+//
+// Before this, selectChecks' strict all-or-nothing validation reached all
+// the way to the LLM-facing tool: one hallucinated ID in a batch discarded
+// every real finding, including a correctly-guessed one (smith conversation
+// 64 — round 1 named the right check, comfyui_health, paired with an
+// invented one, and the whole call errored). runCheckTool now partitions
+// before calling RunSelected, so the strict selectChecks itself is
+// untouched — POST /smith/checks/run and the sweep path still hard-fail a
+// typo'd ID, only this seam tolerates one.
+
+func TestRunCheckTool_AllValidIDsUnaffected(t *testing.T) {
+	db := openDB(t)
+	seedBrainCatalog(t, db)
+	ctx := context.Background()
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog()})
+	env := s.toolEnv(ctx)
+
+	result, err := runCheckTool(ctx, env, json.RawMessage(`{"check_ids":["gtt_ceiling","disk_space"]}`))
+	if err != nil {
+		t.Fatalf("runCheckTool: %v", err)
+	}
+	m := result.(map[string]any)
+	if _, has := m["unknown_check_ids"]; has {
+		t.Errorf("unknown_check_ids present for an all-valid batch: %+v", m)
+	}
+	findings, ok := m["findings"].([]toolFinding)
+	if !ok || len(findings) != 2 {
+		t.Fatalf("findings = %#v, want 2 toolFinding", m["findings"])
+	}
+}
+
+func TestRunCheckTool_MixedBatchRunsValidReportsUnknown(t *testing.T) {
+	db := openDB(t)
+	seedBrainCatalog(t, db)
+	ctx := context.Background()
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog()})
+	env := s.toolEnv(ctx)
+
+	result, err := runCheckTool(ctx, env, json.RawMessage(`{"check_ids":["comfyui_health","service_status_embedding"]}`))
+	if err != nil {
+		t.Fatalf("runCheckTool: %v, want no error — the valid ID must still run", err)
+	}
+	m := result.(map[string]any)
+	findings, ok := m["findings"].([]toolFinding)
+	if !ok || len(findings) != 1 || findings[0].CheckID != "comfyui_health" {
+		t.Fatalf("findings = %#v, want exactly the comfyui_health finding", m["findings"])
+	}
+	unknown, ok := m["unknown_check_ids"].([]string)
+	if !ok || len(unknown) != 1 || unknown[0] != "service_status_embedding" {
+		t.Errorf("unknown_check_ids = %#v, want [service_status_embedding]", m["unknown_check_ids"])
+	}
+}
+
+func TestRunCheckTool_AllUnknownSoftDegradesWithValidList(t *testing.T) {
+	db := openDB(t)
+	seedBrainCatalog(t, db)
+	ctx := context.Background()
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog()})
+	env := s.toolEnv(ctx)
+
+	result, err := runCheckTool(ctx, env, json.RawMessage(`{"check_ids":["gpu_device_status","unit_status_all"]}`))
+	if err != nil {
+		t.Fatalf("runCheckTool: %v, want a soft-degrade result, not an error (so the model can self-correct)", err)
+	}
+	m := result.(map[string]any)
+	if _, has := m["findings"]; has {
+		t.Errorf("findings present when every ID was unknown: %+v", m)
+	}
+	valid, ok := m["valid_check_ids"].([]string)
+	if !ok || len(valid) == 0 {
+		t.Fatalf("valid_check_ids missing/empty — the model has nothing to correct against: %#v", m)
+	}
+	found := false
+	for _, id := range valid {
+		if id == "comfyui_health" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("valid_check_ids = %v, want it to contain comfyui_health (a real registered check)", valid)
+	}
+}
+
+// TestRunCheckSchema_EnumMatchesRegistry proves the schema's enum was built
+// from the real registry, not a hand-maintained list that can silently
+// drift. It checks only the enum-is-a-subset direction: toolRegistry's enum
+// is computed once at package var-init time, before any test file's own
+// init() runs, so under `go test` (never in production) a test-only check
+// registered via init() — e.g. procedure_test.go's synthetic
+// test_precondition_gate — legitimately widens the live `registry` after
+// the enum was already baked in. Real (non-test-injected) IDs must all
+// still be present.
+func TestRunCheckSchema_EnumMatchesRegistry(t *testing.T) {
+	tool, ok := findTool("run_check")
+	if !ok {
+		t.Fatal("run_check not registered")
+	}
+	props := tool.Params["properties"].(map[string]any)
+	checkIDs := props["check_ids"].(map[string]any)
+	items := checkIDs["items"].(map[string]any)
+	enum, ok := items["enum"].([]string)
+	if !ok || len(enum) == 0 {
+		t.Fatalf("run_check's check_ids.items.enum = %#v, want the full registry ID list", items["enum"])
+	}
+	for _, id := range []string{"gtt_ceiling", "disk_space", "n_ctx_actual", "gpu_hang", "slot_agreement", "comfyui_health"} {
+		if !slices.Contains(enum, id) {
+			t.Errorf("registry check %q missing from run_check's advertised enum", id)
+		}
+	}
+	if slices.Contains(enum, "gpu_device_status") || slices.Contains(enum, "unit_status_all") {
+		t.Errorf("enum contains an invented ID that was never real: %v", enum)
 	}
 }
 

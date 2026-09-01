@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jsaigou/the-forge/internal/collector"
@@ -59,6 +60,23 @@ func TestComfyUIHealth_UnitActiveNoPortConfigured(t *testing.T) {
 	f := runComfyUIHealth(context.Background(), env)
 	if f.Severity != SeverityOK {
 		t.Errorf("severity = %s, want ok", f.Severity)
+	}
+}
+
+func TestComfyUIHealth_UnitFailedExecMissing(t *testing.T) {
+	env := &CheckEnv{
+		ComfyUIEnabled: true,
+		ComfyUIUnit:    "forge-comfyui",
+		Snap: &collector.Snapshot{Units: map[string]collector.UnitState{
+			"forge-comfyui": {ActiveState: "failed", Result: "exit-code", ExecMainStatus: 203},
+		}},
+	}
+	f := runComfyUIHealth(context.Background(), env)
+	if f.Severity != SeverityInfo {
+		t.Errorf("severity = %s, want info", f.Severity)
+	}
+	if !strings.Contains(f.Summary, "203/EXEC") || !strings.Contains(f.Summary, "missing or not executable") {
+		t.Errorf("summary = %q, want it to name the 203/EXEC launcher-missing condition, not a generic crash", f.Summary)
 	}
 }
 

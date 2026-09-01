@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"time"
 
 	sd "github.com/coreos/go-systemd/v22/dbus"
@@ -179,5 +180,53 @@ func unitStateFromProps(props map[string]interface{}) collector.UnitState {
 	if v, ok := props["MainPID"].(uint32); ok {
 		st.MainPID = v
 	}
+	st.ExecStartPath = execStartPath(props["ExecStart"])
 	return st
+}
+
+// execStartPath extracts the launcher path from the Service interface's
+// ExecStart property (D-Bus signature a(sasbttttuii): an array of structs,
+// one per ExecStart= line — path, argv, ignore-failure flag, four
+// timestamps, pid, exit status; confirmed live against a real unit,
+// 2026-09-01: `busctl get-property … Service ExecStart` on forge-comfyui
+// returns exactly this shape). godbus decodes each struct's fields
+// positionally, but the OUTER and INNER slice's concrete Go type isn't
+// pinned by the D-Bus spec — depending on godbus's own generic-Variant
+// decode path this can surface as []interface{} of []interface{}, or as a
+// properly-typed [][]interface{}, or similar. reflect walks whatever
+// slice/array-like value comes back at each level rather than betting on
+// one concrete type, and degrades to "" on any shape it doesn't recognize
+// — a defensive read only, never authoritative over what systemd itself
+// reports for ActiveState/Result (which decode as plain scalars, unaffected
+// by this).
+func execStartPath(raw interface{}) string {
+	first, ok := firstSliceElem(raw)
+	if !ok {
+		return ""
+	}
+	field0, ok := firstSliceElem(first)
+	if !ok {
+		return ""
+	}
+	path, _ := field0.(string)
+	return path
+}
+
+// firstSliceElem returns v's first element if v is a non-empty slice or
+// array (any element type), via reflection — godbus-decoded D-Bus values
+// don't come back as one fixed concrete Go type.
+func firstSliceElem(v interface{}) (interface{}, bool) {
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() {
+		return nil, false
+	}
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		if rv.Len() == 0 {
+			return nil, false
+		}
+		return rv.Index(0).Interface(), true
+	default:
+		return nil, false
+	}
 }

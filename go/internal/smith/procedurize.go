@@ -36,8 +36,9 @@ var ErrNoProcedureForKind = errors.New("smith: this action kind has no equivalen
 // silently loses its button).
 var procedureForActionKind = map[string]string{
 	KindRestartForgeUnit: "restart_down_unit",
-	KindUnloadSlot:         "reconcile_orphaned_slot",
-	KindDeleteFiles:        "comfyui_prune",
+	KindUnloadSlot:       "reconcile_orphaned_slot",
+	KindDeleteFiles:      "comfyui_prune",
+	KindInstallLauncher:  "restore_unit_launcher",
 }
 
 // procedureForAction resolves a's mapped procedure ID. Most kinds are
@@ -76,6 +77,12 @@ func procedureParamsForAction(a *Action) (map[string]string, error) {
 	switch {
 	case a.Kind == KindRestartForgeUnit:
 		d, err := parseDetail[restartUnitDetail](a.Detail)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"unit": d.Unit}, nil
+	case a.Kind == KindInstallLauncher:
+		d, err := parseDetail[installLauncherDetail](a.Detail)
 		if err != nil {
 			return nil, err
 		}

@@ -64,7 +64,7 @@ export interface Status {
   // 2026-07-29) — that endpoint persists + dedupes the same collector
   // signal with ack/dismiss, which this bare array never had. Kept on the
   // wire for backward compat; the FE reads notifications, not this.
-  alerts?: Array<{ code: string; msg: string; port?: number }>;
+  alerts?: Array<{ code: string; msg: string; port?: number; unit?: string }>;
   // Sprint K (2026-08-05): true while a loaded slot has requests_processing
   // > 0 right now. Absent key == not loaded / not scraped yet, same
   // convention as `slots`. This is the poll/reconnect source of truth; the
@@ -2405,6 +2405,12 @@ export interface SmithChatContext {
   message: string;
   source: string;
   at: number; // unix seconds
+  // unit is the systemd unit name for a unit-scoped alert (UNIT_CRASH/
+  // UNIT_OOM/UNIT_RESTARTED) — optional, additive. Lets smith's classifier
+  // route to the crashed unit's own health check instead of a generic
+  // per-code fallback (found live 2026-09-01 — see intents.go
+  // classifyContextItems / unitToHealthEntity).
+  unit?: string;
 }
 
 // POST /api/v1/smith/chat request body. conversation_id omitted/0 starts a

@@ -305,6 +305,32 @@ func fastCheckCount() int {
 	return n
 }
 
+// registryCheckIDs returns every registered check's ID (including
+// ManualOnly ones — run_check and POST /smith/checks/run may still name
+// them explicitly), in registry order. The single source both ListChecks
+// (investigations.go, GET /api/v1/smith/checks) and the run_check tool's
+// JSON-schema enum + partial-batch validation (tools.go) enumerate from, so
+// neither can silently drift from what selectChecks actually accepts. Found
+// live 2026-09-01: run_check's schema used to hand-list five example IDs
+// out of ~20 real ones, so the reasoning tier hallucinated plausible-
+// sounding ones that never existed (conversation 64).
+func registryCheckIDs() []string {
+	out := make([]string, len(registry))
+	for i, c := range registry {
+		out[i] = c.ID
+	}
+	return out
+}
+
+// registryCheckIDSet is registryCheckIDs as a membership set.
+func registryCheckIDSet() map[string]bool {
+	out := make(map[string]bool, len(registry))
+	for _, c := range registry {
+		out[c.ID] = true
+	}
+	return out
+}
+
 // checkEnv builds the per-sweep read environment.
 func (s *Smith) checkEnv(ctx context.Context) *CheckEnv {
 	env := &CheckEnv{

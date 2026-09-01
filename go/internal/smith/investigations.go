@@ -456,7 +456,9 @@ func (s *Smith) finishResolution(ctx context.Context, actionID, invID int64, inv
 }
 
 // ListChecks returns the check catalog metadata (id/name/category/fast), for
-// the GET /api/v1/smith/checks endpoint.
+// the GET /api/v1/smith/checks endpoint. registryCheckIDs (checks.go) is the
+// ID-only sibling of this same registry enumeration, shared with the
+// run_check tool's schema/validation (tools.go).
 func (s *Smith) ListChecks() []CheckMeta {
 	out := make([]CheckMeta, len(registry))
 	for i, c := range registry {

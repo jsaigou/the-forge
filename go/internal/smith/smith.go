@@ -711,6 +711,15 @@ type Deps struct {
 	// unwired daemon.
 	DeleteFile func(ctx context.Context, path string) error
 
+	// InstallLauncherFile writes one launcher script's canonical content
+	// (production: os.WriteFile 0755 + a best-effort SELinux relabel — see
+	// cmd/forge/main.go's smithInstallLauncherFile, including its note on
+	// why an unprivileged daemon may not always be able to complete the
+	// relabel), called ONLY after launcherInstallAllowed re-validates the
+	// path (execute.go, restore_unit_launcher's "install_unit_launcher"
+	// op). nil ⇒ that op fails with ErrInstallLauncherUnwired.
+	InstallLauncherFile func(ctx context.Context, path string, content []byte) error
+
 	// RunStep executes one procedure step's fixed argv (production:
 	// exec.CommandContext, bounded by spec.Timeout, no shell — see
 	// procedure.go's runProcedureSteps, which re-validates every argv
