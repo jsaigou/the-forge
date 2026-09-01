@@ -15,6 +15,7 @@ import (
 
 	"github.com/jsaigou/the-forge/internal/config"
 	"github.com/jsaigou/the-forge/internal/engine"
+	"github.com/jsaigou/the-forge/internal/smith/launchers"
 	"github.com/jsaigou/the-forge/internal/smith/procedures"
 	"github.com/jsaigou/the-forge/internal/store"
 )
@@ -157,6 +158,8 @@ func (s *Smith) executeAction(ctx context.Context, id int64) {
 		dispatchErr = s.dispatchUnloadSlot(ctx, a)
 	case KindRestartForgeUnit:
 		unit, dispatchErr = s.dispatchRestartUnit(ctx, a)
+	case KindInstallLauncher:
+		unit, dispatchErr = s.dispatchInstallLauncher(ctx, a)
 	case KindSettingsChange:
 		dispatchErr = s.dispatchSettingsChange(ctx, a)
 	case KindDeleteFiles:
@@ -369,6 +372,13 @@ func verifyChecksFor(kind, unit string) []string {
 			return []string{"compressor_reachability"}
 		}
 		return []string{"always_on_ports"}
+	case KindInstallLauncher:
+		// binary_paths, not comfyui_health/always_on_ports: a bare
+		// install (no restart) leaves the unit down until systemd's own
+		// Restart=on-failure loop next fires, so no "is the unit up" check
+		// is honest here — binary_paths confirms what THIS action actually
+		// did (the file now exists and is executable).
+		return []string{"binary_paths"}
 	case KindSettingsChange:
 		// Only smith.model touches something checkably real (brain-swap /
 		// swap-back); every other allowlisted key (schedule/thresholds/
@@ -457,6 +467,15 @@ type unloadSlotDetail struct {
 
 // restartUnitDetail is KindRestartForgeUnit's detail shape.
 type restartUnitDetail struct {
+	Unit string `json:"unit"`
+}
+
+// installLauncherDetail is KindInstallLauncher's detail shape. Carries only
+// the unit name — never a path — dispatchInstallLauncher always re-resolves
+// the real path from the live collector snapshot at execution time, exactly
+// like restart_forge_unit re-checks restartAllowed rather than trusting the
+// proposal's own detail.
+type installLauncherDetail struct {
 	Unit string `json:"unit"`
 }
 
@@ -611,6 +630,40 @@ func (s *Smith) dispatchRestartUnit(ctx context.Context, a *Action) (string, err
 	}
 	if err := s.d.RestartUnit(ctx, d.Unit); err != nil {
 		return d.Unit, fmt.Errorf("smith: restart %s: %w", d.Unit, err)
+	}
+	return d.Unit, nil
+}
+
+// dispatchInstallLauncher executes an install_launcher action via
+// Deps.InstallLauncherFile, re-resolving the unit's live ExecStartPath from
+// the collector snapshot and re-checking launcherInstallAllowed at execution
+// time (not just at proposal time — live state can change in between; the
+// path itself is never read from the action's own detail). Returns the
+// target unit regardless of outcome, matching dispatchRestartUnit's
+// convention, so executeAction can pick the right verify check even on
+// failure.
+func (s *Smith) dispatchInstallLauncher(ctx context.Context, a *Action) (string, error) {
+	d, err := parseDetail[installLauncherDetail](a.Detail)
+	if err != nil {
+		return "", err
+	}
+	snap := s.snapshot()
+	if snap == nil {
+		return d.Unit, errors.New("smith: no collector snapshot available")
+	}
+	ut, ok := snap.Units[d.Unit]
+	if !ok {
+		return d.Unit, fmt.Errorf("smith: unit %q not found in the current snapshot", d.Unit)
+	}
+	content, ok, reason := launcherInstallAllowed(ut.ExecStartPath)
+	if !ok {
+		return d.Unit, fmt.Errorf("smith: launcher path %q not allowed: %s: %w", ut.ExecStartPath, reason, ErrLauncherNotAllowed)
+	}
+	if s.d.InstallLauncherFile == nil {
+		return d.Unit, ErrInstallLauncherUnwired
+	}
+	if err := s.d.InstallLauncherFile(ctx, ut.ExecStartPath, content); err != nil {
+		return d.Unit, fmt.Errorf("smith: install launcher %s: %w", ut.ExecStartPath, err)
 	}
 	return d.Unit, nil
 }
@@ -781,6 +834,57 @@ func deleteAllowed(roots []string, path string) (bool, string) {
 	return false, "path is not under any configured comfyui model root"
 }
 
+// forgeLibDir is the one directory smith may ever install a launcher script
+// into — every static /usr/local/lib/forge/*.sh launcher's real deployed
+// location (scripts/migrate-foundry-to-forge.sh, internal/smith/launchers).
+// A var, not a const, so tests can point it at a t.TempDir() — the real
+// path doesn't exist on a dev machine, and launcherInstallAllowed fails
+// closed (EvalSymlinks errors) on a directory that isn't there.
+var forgeLibDir = "/usr/local/lib/forge"
+
+// launcherInstallAllowed reports whether smith may install a launcher
+// script at path (a systemd unit's live ExecStartPath — restore_unit_launcher
+// never accepts an operator/LLM-supplied path, only a unit name it resolves
+// itself), returning the canonical content to write when allowed. path must
+// resolve to exactly forgeLibDir/<basename>, no traversal; the basename
+// must have a real embedded copy (internal/smith/launchers); and — the
+// never-clobber guarantee — nothing may already exist there. A launcher
+// left behind by any prior partially-failed install attempt is deliberately
+// NOT treated as retryable here: this function can't safely tell "a failed
+// prior attempt" apart from "an operator's real, intentional file" from
+// content alone, so a second attempt requires a human to remove it first.
+func launcherInstallAllowed(path string) ([]byte, bool, string) {
+	if path == "" {
+		return nil, false, "empty path"
+	}
+	if !filepath.IsAbs(path) {
+		return nil, false, "path must be absolute"
+	}
+	clean := filepath.Clean(path)
+	dirResolved, err := filepath.EvalSymlinks(filepath.Dir(clean))
+	if err != nil {
+		return nil, false, "resolve parent dir: " + err.Error()
+	}
+	libResolved, err := filepath.EvalSymlinks(forgeLibDir)
+	if err != nil {
+		return nil, false, "resolve " + forgeLibDir + ": " + err.Error()
+	}
+	if dirResolved != libResolved {
+		return nil, false, "path is not directly under " + forgeLibDir
+	}
+	base := filepath.Base(clean)
+	content, ok := launchers.Content(base)
+	if !ok {
+		return nil, false, "no canonical embedded copy for " + base
+	}
+	if _, err := os.Lstat(clean); err == nil {
+		return nil, false, "a file already exists at this path — smith never overwrites, remove it first if this is meant to be replaced"
+	} else if !os.IsNotExist(err) {
+		return nil, false, "stat: " + err.Error()
+	}
+	return content, true, ""
+}
+
 // dispatchCatalogChange executes a catalog_change action (P6 FR4). See
 // sourcing.go.
 func (s *Smith) dispatchCatalogChange(ctx context.Context, a *Action) error {
@@ -814,8 +918,8 @@ var compressorUnitPattern = regexp.MustCompile(`^(headroom[@-]|forge-compress@)[
 
 // restartAllowed reports whether unit may be restarted by a smith action,
 // and if not, why. This is strictly NARROWER than the real polkit grant
-// (polkit/50-forge.rules + 51-headroom.rules — forge-*.service,
-// ai-mode-comfyui.service, compressor-*.service, headroom@*.service, all
+// (polkit/50-forge.rules + 51-headroom.rules — every forge-*.service unit,
+// including forge-comfyui, plus compressor-*.service/headroom@*.service, all
 // passwordless for the user forge runs as): this function adds no
 // privilege, it only decides which of those already-grantable units smith
 // itself may touch autonomously. Re-checked at proposal/creation time
@@ -843,7 +947,7 @@ func restartAllowed(cfg *config.Config, unit string) (bool, string) {
 		}
 	}
 	switch unit {
-	case "forge-stt", "forge-embedding", "forge-aligner", "ai-mode-comfyui":
+	case "forge-stt", "forge-embedding", "forge-aligner", "forge-comfyui":
 		return true, ""
 	}
 	if cfg.Server.TTSUnit != "" && unit == cfg.Server.TTSUnit {

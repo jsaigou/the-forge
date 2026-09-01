@@ -195,6 +195,7 @@ func init() {
 	Register(restartDownUnitProcedure)
 	Register(reconcileOrphanedSlotProcedure)
 	Register(comfyUIPruneProcedure)
+	Register(restoreUnitLauncherProcedure)
 }
 
 // Register adds p to the registry. Panics on a duplicate ID — a

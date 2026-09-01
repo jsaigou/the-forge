@@ -48,18 +48,19 @@ func runComfyUIHealth(_ context.Context, env *CheckEnv) Finding {
 		portUp = env.Dial(env.ComfyUIPort)
 	}
 	ev := map[string]any{
-		"unit":          env.ComfyUIUnit,
-		"unit_active":   unitActive,
-		"unit_state":    unit.ActiveState,
-		"unit_substate": unit.SubState,
-		"unit_result":   unit.Result,
-		"port":          env.ComfyUIPort,
-		"port_up":       portUp,
+		"unit":                  env.ComfyUIUnit,
+		"unit_active":           unitActive,
+		"unit_state":            unit.ActiveState,
+		"unit_substate":         unit.SubState,
+		"unit_result":           unit.Result,
+		"unit_exec_main_status": unit.ExecMainStatus,
+		"port":                  env.ComfyUIPort,
+		"port_up":               portUp,
 	}
 	if !unitActive || !portUp {
 		return Finding{CheckID: id, Severity: SeverityInfo,
 			Summary: fmt.Sprintf("ComfyUI unreachable — %s (pruning/GTT checks unavailable until it's running)",
-				comfyUIDownReason(env.ComfyUIUnit, unitActive, unit.ActiveState, unit.Result, env.ComfyUIPort)),
+				comfyUIDownReason(env.ComfyUIUnit, unitActive, unit.ActiveState, unit.Result, unit.ExecMainStatus, env.ComfyUIPort)),
 			Evidence: ev}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK, Summary: "ComfyUI reachable", Evidence: ev}
@@ -71,11 +72,13 @@ func runComfyUIHealth(_ context.Context, env *CheckEnv) Finding {
 // different problems. Returned as a fragment that reads after either
 // "ComfyUI unreachable — " (finding summary) or "ComfyUI is unreachable: "
 // (chat answer).
-func comfyUIDownReason(unit string, active bool, state, result string, port int) string {
+func comfyUIDownReason(unit string, active bool, state, result string, execMainStatus int32, port int) string {
 	if !active {
 		switch {
 		case state == "failed" && result == "oom-kill":
 			return fmt.Sprintf("the %s unit was OOM-killed", unit)
+		case state == "failed" && execMainStatus == 203:
+			return fmt.Sprintf("the %s unit's ExecStart program is missing or not executable (systemd 203/EXEC — check binary_paths for the exact path)", unit)
 		case state == "failed" && result != "":
 			return fmt.Sprintf("the %s unit crashed (failed: %s)", unit, result)
 		case state == "failed":

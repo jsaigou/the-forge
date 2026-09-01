@@ -16,10 +16,13 @@ package smith
 // ever eligible. autonomyEligible below is the fixed, reviewed allowlist —
 // deliberately NOT derived at runtime from procedureForActionKind + a risk
 // lookup, so widening it is always a visible, reviewed code change. Today
-// that's exactly one procedure (restart_down_unit); reconcile_orphaned_slot
-// and comfyui_prune are RiskHigh and structurally excluded (see
-// proposeComfyUIDelete's "never auto-approved (RiskHigh, always)" and
-// proposeReconcileOrphanSlot's guardrail-2 posture in propose.go).
+// that's restart_down_unit and (2026-09-01) restore_unit_launcher — both
+// RiskLow, both fail closed on their own real preconditions (restartAllowed,
+// launcherInstallAllowed) rather than ever falsely reporting success.
+// reconcile_orphaned_slot and comfyui_prune are RiskHigh and structurally
+// excluded (see proposeComfyUIDelete's "never auto-approved (RiskHigh,
+// always)" and proposeReconcileOrphanSlot's guardrail-2 posture in
+// propose.go).
 
 import (
 	"context"
@@ -57,7 +60,8 @@ const (
 // TestMaybeAutoRunProcedure_RiskHighNeverEligible, which deliberately adds a
 // RiskHigh procedure to this map and confirms the run is still refused.
 var autonomyEligible = map[string]bool{
-	"restart_down_unit": true,
+	"restart_down_unit":     true,
+	"restore_unit_launcher": true,
 }
 
 // ProcedureAutonomy is one procedure's opt-in policy entry. Zero value

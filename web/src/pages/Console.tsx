@@ -196,7 +196,7 @@ export function Console() {
               </span>
               <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{a.msg}</span>
               <AskSmithButton
-                context={[{ code: a.code, message: a.msg, source: "console", at: Math.floor(Date.now() / 1000) }]}
+                context={[{ code: a.code, message: a.msg, source: "console", at: Math.floor(Date.now() / 1000), unit: a.unit }]}
                 title={`Ask smith about ${a.code}`}
               />
               <a

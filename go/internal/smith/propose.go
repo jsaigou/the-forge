@@ -7,12 +7,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jsaigou/the-forge/internal/smith/comfyui"
+	"github.com/jsaigou/the-forge/internal/smith/launchers"
 )
 
 // maxAutoOpenProposals caps how many pending, smith-created proposals may be
@@ -70,6 +72,7 @@ var proposers = map[string]proposer{
 	"gtt_ceiling":             proposeFreeMemoryRunbook,
 	"binary_versions":         proposeRebuildRunbook,
 	"comfyui_prune":           proposeComfyUIDelete,
+	"binary_paths":            proposeRestoreUnitLauncher,
 }
 
 // evidenceAs reads ev[key] as T. In-process (the common case: proposeFrom
@@ -189,6 +192,58 @@ func proposeRestartCompressorProxy(env *CheckEnv, f Finding, _ BrainResolution) 
 			Risk:      RiskLow,
 			Detail:    detail,
 			DedupeKey: KindRestartForgeUnit + ":" + d.Unit,
+		})
+	}
+	return out
+}
+
+// unitExecMiss mirrors checks_paths.go's runBinaryPaths evidence shape for
+// a unit whose ExecStart= program is missing/not executable.
+type unitExecMiss struct {
+	Unit string `json:"unit"`
+	Path string `json:"path"`
+}
+
+// proposeRestoreUnitLauncher turns binary_paths' unit_exec_missing list into
+// install_launcher proposals — one per unit smith can actually restore
+// (restartAllowed on the allowlist, AND a canonical embedded copy exists for
+// that launcher's basename; launcherInstallAllowed re-confirms the rest —
+// never-clobber, path containment — at dispatch time, same double-check
+// convention as every other proposer here). Kind:KindInstallLauncher, not a
+// direct KindProcedure — mirrors restart_forge_unit/restart_down_unit's
+// precedent exactly (an atomic, independently-meaningful proposal that
+// Procedurize()/standing-autonomy upgrades into its 2-step procedure via
+// procedureForActionKind), which is also what lets this participate in
+// maybeAutoRunProcedure at all: that function resolves a run's procedure
+// via procedureForAction(a), which only recognizes atomic action kinds, not
+// a bare KindProcedure action minted directly by a proposer.
+//
+// Found live 2026-09-01: this is the first proposal that makes a genuinely
+// new class of failure (a missing launcher script) fixable at all, not just
+// diagnosable — restart_down_unit alone just repeats the same 203/EXEC.
+func proposeRestoreUnitLauncher(env *CheckEnv, f Finding, _ BrainResolution) []ActionDraft {
+	if f.Severity != SeverityWarn {
+		return nil
+	}
+	cfg := env.cfg()
+	var out []ActionDraft
+	for _, miss := range evidenceAs[[]unitExecMiss](f.Evidence, "unit_exec_missing") {
+		if allowed, _ := restartAllowed(cfg, miss.Unit); !allowed {
+			continue
+		}
+		if _, ok := launchers.Content(filepath.Base(miss.Path)); !ok {
+			continue // no canonical copy to restore from — nothing safe to propose
+		}
+		detail, err := json.Marshal(installLauncherDetail{Unit: miss.Unit})
+		if err != nil {
+			continue
+		}
+		out = append(out, ActionDraft{
+			Kind:      KindInstallLauncher,
+			Title:     "Restore missing launcher for " + miss.Unit,
+			Risk:      RiskLow,
+			Detail:    detail,
+			DedupeKey: KindInstallLauncher + ":" + miss.Unit,
 		})
 	}
 	return out

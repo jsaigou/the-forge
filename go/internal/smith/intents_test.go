@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jsaigou/the-forge/internal/config"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -224,6 +225,65 @@ func TestClassify_IsDeterministic(t *testing.T) {
 	intent := s.Classify(ctx, "is comfyui healthy?")
 	if intent.Family != FamilyHealth || intent.Entity != "comfyui" {
 		t.Fatalf("Classify with no deps = %s/%q, want health/comfyui", intent.Family, intent.Entity)
+	}
+}
+
+// TestClassifyContext_UnitScopedAlertRoutesToCrashedUnit pins the fix for
+// the 2026-09-01 incident: a UNIT_CRASH alert carrying the real unit name
+// must route to THAT unit's own health entity, not the generic "forge"
+// bucket every unit crash fell into before (smith conversation 64 —
+// forge-comfyui crashed, got diagnosed via forge_self's unrelated DB-
+// integrity check instead).
+func TestClassifyContext_UnitScopedAlertRoutesToCrashedUnit(t *testing.T) {
+	s := classifySmith(t)
+	ctx := context.Background()
+	cases := []struct {
+		name       string
+		code, unit string
+		wantEntity string
+	}{
+		{"comfyui crash", "UNIT_CRASH", "forge-comfyui", "comfyui"},
+		{"a2 oom", "UNIT_OOM", "forge-a2", "a2"},
+		{"embedding restart", "UNIT_RESTARTED", "forge-embedding", "embedding"},
+		{"compressor proxy crash", "UNIT_CRASH", "headroom@deepseek", "compressor"},
+		{"forge-daemon itself", "UNIT_CRASH", "forge-daemon", "forge"},
+		{"unknown unit falls back to generic code mapping", "UNIT_CRASH", "some-unknown-unit", "forge"},
+		{"no unit falls back to generic code mapping", "UNIT_CRASH", "", "forge"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			intent := s.classifyWithContext(ctx, "", []ChatContext{{Code: tc.code, Unit: tc.unit, Message: "test"}})
+			if intent.Family != FamilyHealth || intent.Entity != tc.wantEntity {
+				t.Errorf("code=%s unit=%q => %s/%q, want health/%q", tc.code, tc.unit, intent.Family, intent.Entity, tc.wantEntity)
+			}
+		})
+	}
+}
+
+// TestClassifyContext_NonUnitScopedCodeIgnoresUnit proves a Unit riding
+// along on a non-unit-scoped alert code (e.g. GTT_HIGH, which has no single
+// owning unit) is ignored rather than mis-routed.
+func TestClassifyContext_NonUnitScopedCodeIgnoresUnit(t *testing.T) {
+	s := classifySmith(t)
+	ctx := context.Background()
+	intent := s.classifyWithContext(ctx, "", []ChatContext{{Code: "GTT_HIGH", Unit: "forge-comfyui", Message: "test"}})
+	if intent.Family != FamilyHealth || intent.Entity != "gtt" {
+		t.Errorf("= %s/%q, want health/gtt (GTT_HIGH is not unit-scoped, must ignore the stray Unit field)", intent.Family, intent.Entity)
+	}
+}
+
+// TestUnitToHealthEntity_TTSUnitIsConfigDriven proves the TTS unit name
+// (deployment-specific, cfg.Server.TTSUnit) is resolved dynamically rather
+// than only matching the literal "forge-tts" default.
+func TestUnitToHealthEntity_TTSUnitIsConfigDriven(t *testing.T) {
+	s := New(Deps{Cfg: func() *config.Config {
+		return &config.Config{Server: config.Server{TTSUnit: "forge-tts-custom"}}
+	}, Logf: func(string, ...any) {}})
+	if got := s.unitToHealthEntity("forge-tts-custom"); got != "tts" {
+		t.Errorf("unitToHealthEntity(custom TTS unit) = %q, want tts", got)
+	}
+	if got := s.unitToHealthEntity("forge-tts"); got != "tts" {
+		t.Errorf("unitToHealthEntity(default forge-tts) = %q, want tts (default literal must still work)", got)
 	}
 }
 

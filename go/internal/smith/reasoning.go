@@ -922,6 +922,14 @@ type ChatContext struct {
 	Message string `json:"message"`
 	Source  string `json:"source"`
 	At      int64  `json:"at"`
+	// Unit is the systemd unit name for a unit-scoped alert (UNIT_CRASH/
+	// UNIT_OOM/UNIT_RESTARTED) — additive, optional. classifyContextItems
+	// (intents.go) uses it to route to the crashed unit's own health check
+	// instead of alertCodeToEntity's generic per-code fallback. Found live
+	// 2026-09-01: without this, EVERY unit crash — ComfyUI, a slot, a
+	// service — was diagnosed against the same generic "forge" entity
+	// (forge_self), regardless of which unit actually failed.
+	Unit string `json:"unit,omitempty"`
 }
 
 // Chat starts one turn: persists the user message, decides the tier, and
