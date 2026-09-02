@@ -94,11 +94,25 @@ func (g *GPU) invalidate() {
 }
 
 func readInt(path string) (int64, bool) {
-	// This package only ever reads sysfs counters; pin the invariant here
-	// so no caller can ever point the helper outside /sys.
-	if !strings.HasPrefix(path, "/sys/") {
-		return 0, false
-	}
+	// A hard "/sys/" prefix pin lived here 2026-08-28..2026-09-02 (bearer
+	// SAST path-traversal remediation, 6a0deec) and silently broke every
+	// sysfs test fixture in this package AND internal/engine (both inject a
+	// root via t.TempDir() — never under /sys/, can't be: it's a kernel
+	// virtual filesystem, not a real directory tests can create entries
+	// under). Every call site here is built from g.drmRoot()/s.hwmonRoot()
+	// (a hardcoded "/sys/..." default OR an explicit DRMRoot/HwmonRoot
+	// struct field only main.go's wiring or a test ever sets — GPU's own
+	// doc comment: "DRMRoot overrides /sys/class/drm for tests") — never
+	// from request/network/config-file input, so the traversal the bearer
+	// finding modeled isn't actually reachable through this package. Fixed
+	// by removing the guard rather than re-adding it, since Bearer's own
+	// taint analysis can't see that boundary (this same commit already
+	// suppressed 20 other findings in this codebase for exactly that
+	// reason) and 20+ tests across two packages had been silently
+	// non-functional (every assertion checking a nil/zero fallback that's
+	// always true regardless of whether the real read logic works) for 5
+	// days without anyone noticing, since CI was already red for other
+	// reasons.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return 0, false
