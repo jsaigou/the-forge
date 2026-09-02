@@ -1,7 +1,5 @@
 # Critical Pitfalls
 
-"A tale of suffering." - Jon
-
 ## ROCm & GTT Memory (unified-memory APUs)
 
 A unified-memory APU host (e.g. AMD Strix Halo) has no discrete GPU or PCIe bus - CPU and GPU
