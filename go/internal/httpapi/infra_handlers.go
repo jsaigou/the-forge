@@ -38,7 +38,10 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/jsaigou/the-forge/internal/config"
 )
 
 // preflightCheck is one row of a Danger Zone check-before-save result.
@@ -325,6 +328,94 @@ func (s *Server) handleMonitorSettingsPut(w http.ResponseWriter, r *http.Request
 	}
 	resp.applyMonitorDefaults()
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ── GET/PUT /api/v1/service-icons — infra.service_icons (live) ─────────────
+//
+// Vendor-icon override for the fixed infra services (STT/Embedding/Aligner/
+// TTS — bare [ports] entries with no catalog-backed model metadata, so they
+// have no other place to record which model they're currently showing an
+// icon for). Previously a Go literal map in services_handlers.go
+// (serviceVendorLogoBySlug) — changing which icon a service showed meant a
+// source edit, rebuild, and daemon restart for a purely cosmetic value.
+// Operator feedback 2026-09-06: "bad design to need a restart to change an
+// icon." Genuinely live, unlike most of the system group above: handled the
+// same way infra.ports is stored (a bare map, whole-map replace when the
+// body includes it), and handleInfraServices reads cfg.ServiceIcons fresh
+// off s.deps.Config() on every request — no downstream component captures
+// this value at startup the way a listener address or DB path would, so
+// ReloadConfig alone (no restart) is sufficient.
+
+type serviceIconsResponse struct {
+	Icons map[string]string `json:"icons"`
+}
+
+func (s *Server) resolvedServiceIcons(ctx context.Context) serviceIconsResponse {
+	var icons map[string]string
+	if err := json.Unmarshal(s.getRawSetting(ctx, "infra.service_icons"), &icons); err != nil {
+		log.Printf("httpapi: warning: corrupt stored setting: %v", err)
+	}
+	if icons == nil {
+		icons = map[string]string{}
+	}
+	for name, slug := range config.DefaultServiceIcons() {
+		if _, ok := icons[name]; !ok {
+			icons[name] = slug
+		}
+	}
+	return serviceIconsResponse{Icons: icons}
+}
+
+// handleServiceIconsGet — GET /api/v1/service-icons (operator).
+func (s *Server) handleServiceIconsGet(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.resolvedServiceIcons(r.Context()))
+}
+
+type serviceIconsBody struct {
+	Icons map[string]string `json:"icons"`
+}
+
+// handleServiceIconsPut — PUT /api/v1/service-icons (admin, page.settings).
+// Whole-map replace when the body includes "icons" (same semantics as
+// infra.ports in the system group) — send the full current map back (as
+// returned by GET) with just the one entry changed, not a single-key patch.
+func (s *Server) handleServiceIconsPut(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Settings == nil {
+		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		return
+	}
+	var body serviceIconsBody
+	if fields := decodeJSONBody(r, &body); fields != nil {
+		writeValidationError(w, fields)
+		return
+	}
+	if body.Icons == nil {
+		writeValidationError(w, map[string]string{"icons": "must be present"})
+		return
+	}
+	for name, slug := range body.Icons {
+		if strings.TrimSpace(name) == "" || strings.TrimSpace(slug) == "" {
+			writeValidationError(w, map[string]string{"icons": "keys and values must be non-empty"})
+			return
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	raw, err := json.Marshal(body.Icons)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	if err := s.deps.Settings.Set(ctx, "infra.service_icons", raw); err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	if s.deps.ReloadConfig != nil {
+		s.deps.ReloadConfig()
+	}
+	s.audit(r, identity(r).Name, "service_icons", "infra.service_icons", string(raw))
+	writeJSON(w, http.StatusOK, s.resolvedServiceIcons(ctx))
 }
 
 // putIntField is the small manual "if the caller sent this field, marshal
@@ -1105,8 +1196,8 @@ type dashboardWidgetEntry struct {
 }
 
 type dashboardPageEntry struct {
-	ID      string                `json:"id"`
-	Name    string                `json:"name"`
+	ID      string                 `json:"id"`
+	Name    string                 `json:"name"`
 	Widgets []dashboardWidgetEntry `json:"widgets"`
 }
 
