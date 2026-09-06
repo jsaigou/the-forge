@@ -1208,7 +1208,7 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
 .ro-head .icon { width: 20px; height: 20px; border-radius: 5px; }
 .ro-head .ro-model-name { font-weight: 700; font-size: 13px; }
 .ro-provider {
-  display: grid; grid-template-columns: 26px 1fr; gap: 9px; align-items: center;
+  display: grid; grid-template-columns: 26px 1fr auto; gap: 9px; align-items: center;
   padding: 6px 9px;
   background: var(--panel-glass);
   backdrop-filter: var(--panel-blur);
