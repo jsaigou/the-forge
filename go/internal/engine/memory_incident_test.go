@@ -226,6 +226,75 @@ func TestLoadRefusesSiblingWeightsWithoutRoom(t *testing.T) {
 	}
 }
 
+// TestFitPlanCatches20260907IncidentShape reproduces the exact incident
+// this file's KV-cache-aware modeNeedEstimate fix (kvcache.go) closes:
+// gemma4-26b-a4b-nothink's curated safe_memory_bytes (25 GiB, weight-
+// adjacent, no KV term) was <= the ~25.5 GiB the host genuinely had free
+// (qwen38-flash-next's real ~90 GiB footprint occupied the rest), so the
+// fit check approved a load that actually needed ~47 GiB once its
+// 262144-context, --swa-full KV cache materialized — triggering a
+// whole-host OOM cascade. Before the fix this plan would have returned
+// Fits: true; after it, the computed weights+KV floor correctly refuses.
+func TestFitPlanCatches20260907IncidentShape(t *testing.T) {
+	cfg := testConfig(t)
+	modelPath := filepath.Join(cfg.Paths.ModelsDir, "gemma4.gguf")
+	put(t, modelPath, strings.Repeat("x", 1024)) // content irrelevant; modeWeightBytes reads size only
+
+	mode := cfg.Modes["gemma"]
+	mode.ConfigID = 1
+	mode.Services = []config.Service{{
+		Model:     "gemma4.gguf",
+		Alias:     "gemma",
+		Context:   262144,
+		PortRole:  "a1",
+		Backend:   "vulkan",
+		ExtraArgs: []string{"--swa-full", "--cache-type-k", "q8_0", "--cache-type-v", "q8_0"},
+	}}
+	cfg.Modes["gemma"] = mode
+
+	// Engineer the exact incident margin: ~25.5 GiB genuinely free (as if
+	// another already-loaded model, matching the real qwen38-flash-next's
+	// ~90 GiB, already accounts for the rest of a ~100 GiB budget).
+	gpu := incidentGPU(t, int64(74500)*1024*1024, int64(100)*incidentGiB)
+
+	meta := gemmaLikeMetadata()
+	m, err := NewManager(Deps{
+		Cfg:          func() *config.Config { return cfg },
+		Sys:          newFakeSys(),
+		GPU:          gpu,
+		Proc:         collector.Proc{Root: t.TempDir()},
+		Usage:        &fakeUsage{},
+		Notify:       &notifyCounter{},
+		BaseURL:      func(int) string { return "http://127.0.0.1:1" },
+		Kill:         func(int) error { return nil },
+		PollInterval: time.Millisecond,
+		Logf:         t.Logf,
+		ReadMeta: func(path string) (gguf.Metadata, error) {
+			if path == modelPath {
+				return meta, nil
+			}
+			return gguf.Metadata{}, nil
+		},
+		WeightEstimateBytes: func(configID int64) (int64, bool) {
+			if configID == 1 {
+				return int64(25) * incidentGiB, true // the real incident's exact curated figure
+			}
+			return 0, false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := m.FitPlan("gemma")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Fits {
+		t.Fatalf("plan = %+v, want refusal (the 2026-09-07 incident: curated 25 GiB must not pass against a real ~47 GiB need)", plan)
+	}
+}
+
 // Same weights WITH room proceeds past the guard into the normal flow.
 func TestLoadAllowsSiblingWeightsWithRoom(t *testing.T) {
 	cfg := siblingConfig(t)

@@ -77,6 +77,21 @@ func (b *ggufBuilder) kvInt32Array(key string, vals ...int32) {
 	b.kvCount++
 }
 
+func (b *ggufBuilder) kvBoolArray(key string, vals ...bool) {
+	b.str(key)
+	b.w(uint32(typeArray))
+	b.w(uint32(typeBool))
+	b.w(uint64(len(vals)))
+	for _, v := range vals {
+		bb := uint8(0)
+		if v {
+			bb = 1
+		}
+		b.w(bb)
+	}
+	b.kvCount++
+}
+
 // build writes the complete file: header, KV section, then `trailer` bytes
 // standing in for the tensor table region.
 func (b *ggufBuilder) build(t *testing.T, trailer []byte) string {
@@ -274,5 +289,152 @@ func TestRejectsImplausibleLengths(t *testing.T) {
 	path := b.build(t, nil)
 	if _, err := ReadMetadata(path); err == nil {
 		t.Fatal("expected error for implausible string length")
+	}
+}
+
+// A plain dense/GQA model: scalar head_count_kv, no per-layer SWA split —
+// the common case the KV-cache estimator (engine/kvcache.go) must also
+// handle, not just Gemma's per-layer arrays.
+func TestReadMetadataPlainGQA(t *testing.T) {
+	b := newBuilder()
+	b.kvString("general.architecture", "llama")
+	b.kvUint32("llama.block_count", 32)
+	b.kvUint32("llama.embedding_length", 4096)
+	b.kvUint32("llama.attention.head_count", 32)
+	b.kvUint32("llama.attention.head_count_kv", 8) // scalar
+	b.kvUint32("llama.attention.key_length", 128)
+	b.kvUint32("llama.attention.value_length", 128)
+	path := b.build(t, nil)
+
+	md, err := ReadMetadata(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.BlockCount != 32 {
+		t.Errorf("BlockCount = %d, want 32", md.BlockCount)
+	}
+	if len(md.HeadCountKV) != 32 {
+		t.Fatalf("HeadCountKV len = %d, want 32 (scalar broadcast)", len(md.HeadCountKV))
+	}
+	for i, v := range md.HeadCountKV {
+		if v != 8 {
+			t.Fatalf("HeadCountKV[%d] = %d, want 8", i, v)
+		}
+	}
+	if md.KeyLength != 128 || md.ValueLength != 128 {
+		t.Errorf("KeyLength/ValueLength = %d/%d, want 128/128", md.KeyLength, md.ValueLength)
+	}
+	if md.SWAPattern != nil {
+		t.Errorf("SWAPattern = %v, want nil (no per-layer split declared)", md.SWAPattern)
+	}
+	if md.Hybrid {
+		t.Error("Hybrid = true, want false")
+	}
+}
+
+// Gemma4-shaped model: per-layer head_count_kv and sliding_window_pattern
+// arrays, plus separate SWA key/value lengths — the exact shape ground-
+// truthed against the real gemma4-26b-a4b GGUF on ForgeHost during the
+// 2026-09-07 incident investigation (30 layers, 5 SWA : 1 global pattern).
+func TestReadMetadataGemmaISWA(t *testing.T) {
+	b := newBuilder()
+	b.kvString("general.architecture", "gemma4")
+	b.kvUint32("gemma4.block_count", 6) // small stand-in for the real 30
+	b.kvUint32("gemma4.embedding_length", 2816)
+	b.kvUint32("gemma4.attention.head_count", 16)
+	b.kvInt32Array("gemma4.attention.head_count_kv", 8, 8, 8, 8, 8, 2)
+	b.kvUint32("gemma4.attention.key_length", 512)
+	b.kvUint32("gemma4.attention.value_length", 512)
+	b.kvUint32("gemma4.attention.key_length_swa", 256)
+	b.kvUint32("gemma4.attention.value_length_swa", 256)
+	b.kvUint32("gemma4.attention.sliding_window", 1024)
+	b.kvBoolArray("gemma4.attention.sliding_window_pattern", true, true, true, true, true, false)
+	path := b.build(t, nil)
+
+	md, err := ReadMetadata(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.BlockCount != 6 {
+		t.Fatalf("BlockCount = %d, want 6", md.BlockCount)
+	}
+	wantKV := []int{8, 8, 8, 8, 8, 2}
+	if len(md.HeadCountKV) != 6 {
+		t.Fatalf("HeadCountKV len = %d, want 6", len(md.HeadCountKV))
+	}
+	for i, v := range wantKV {
+		if md.HeadCountKV[i] != v {
+			t.Errorf("HeadCountKV[%d] = %d, want %d", i, md.HeadCountKV[i], v)
+		}
+	}
+	wantPattern := []bool{true, true, true, true, true, false}
+	if len(md.SWAPattern) != 6 {
+		t.Fatalf("SWAPattern len = %d, want 6", len(md.SWAPattern))
+	}
+	for i, v := range wantPattern {
+		if md.SWAPattern[i] != v {
+			t.Errorf("SWAPattern[%d] = %v, want %v", i, md.SWAPattern[i], v)
+		}
+	}
+	if md.KeyLengthSWA != 256 || md.ValueLengthSWA != 256 {
+		t.Errorf("KeyLengthSWA/ValueLengthSWA = %d/%d, want 256/256", md.KeyLengthSWA, md.ValueLengthSWA)
+	}
+	if md.SlidingWindow != 1024 {
+		t.Errorf("SlidingWindow = %d, want 1024", md.SlidingWindow)
+	}
+}
+
+// Presence of an ssm.* key must set Hybrid, regardless of its value —
+// qwen4exp (Qwen3.8-Flash-Next) declares ssm.state_size etc. alongside
+// ordinary attention keys, and the KV-cache formula must abstain rather
+// than apply dense-attention math to a recurrent-state architecture.
+func TestReadMetadataHybridSSMSignal(t *testing.T) {
+	b := newBuilder()
+	b.kvString("general.architecture", "qwen4exp")
+	b.kvUint32("qwen4exp.block_count", 48)
+	b.kvUint32("qwen4exp.ssm.state_size", 128)
+	path := b.build(t, nil)
+
+	md, err := ReadMetadata(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !md.Hybrid {
+		t.Error("Hybrid = false, want true (ssm.* key present)")
+	}
+}
+
+// Presence of an attention.indexer.* key (the block-sparse indexer cache
+// qwen4exp also carries) must likewise set Hybrid.
+func TestReadMetadataHybridIndexerSignal(t *testing.T) {
+	b := newBuilder()
+	b.kvString("general.architecture", "qwen4exp")
+	b.kvUint32("qwen4exp.attention.indexer.head_count", 4)
+	path := b.build(t, nil)
+
+	md, err := ReadMetadata(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !md.Hybrid {
+		t.Error("Hybrid = false, want true (attention.indexer.* key present)")
+	}
+}
+
+// A head_count_kv array whose length doesn't match block_count is corrupt
+// or unparseable in a way we can't trust — must be dropped, not guessed at.
+func TestReadMetadataHeadCountKVLengthMismatchDropped(t *testing.T) {
+	b := newBuilder()
+	b.kvString("general.architecture", "weird")
+	b.kvUint32("weird.block_count", 4)
+	b.kvInt32Array("weird.attention.head_count_kv", 8, 8) // len 2, want 4 or 1
+	path := b.build(t, nil)
+
+	md, err := ReadMetadata(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.HeadCountKV != nil {
+		t.Errorf("HeadCountKV = %v, want nil (length mismatch must not be guessed)", md.HeadCountKV)
 	}
 }
