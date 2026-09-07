@@ -30,15 +30,15 @@
       "notes": "CPU-only always-on embedding server (forge-embedding.service, port 8083)."
     },
     {
-      "id": "parakeet-stt-0.6b",
+      "id": "qwen3-asr-stt-0.6b",
       "role": "mandatory",
       "hf_repo": null,
       "gguf": true,
-      "dest_rel_path": "models/parakeet",
+      "dest_rel_path": "models/qwen3-asr",
       "files": [
-        { "filename": "nemotron-3.5-asr-streaming-0.6b-f16.gguf", "sha256": null, "size_bytes": null }
+        { "filename": "qwen3-asr-0.6b-q8_0.gguf", "sha256": "d81d497b25508449b4bb511b343aee663405d28132d8dccfd5f29a1cceef77d3", "size_bytes": 1354082720 }
       ],
-      "notes": "STT server model (forge-stt.service). Upstream repo TBD."
+      "notes": "STT server model (forge-stt.service, swapped from Nemotron ASR 2026-09-06 — see progress.md). Not a direct HF download: clone https://github.com/predict-woo/qwen3-asr.cpp (verified at commit 6dcc586), download Qwen/Qwen3-ASR-0.6B from HF, then run that repo's scripts/convert_hf_to_gguf.py --type q8_0 to produce this file locally. sha256/size_bytes above are the exact bytes verified working in production on 2026-09-06 — a re-conversion at a later qwen3-asr.cpp/Qwen3-ASR-0.6B revision may not reproduce byte-for-byte; treat as a known-good reference rather than a strict pin. Two local fixes were needed against the conversion script as of that commit: it hardcodes a dev-machine gguf-py path check that throws PermissionError instead of failing closed on a non-root user (patch GGUF_PY_PATH to a nonexistent path so it falls through to the pip 'gguf' package), and 'gguf' itself is missing from scripts/requirements.txt (pip/uv install it separately)."
     },
     {
       "id": "qwen-tts",

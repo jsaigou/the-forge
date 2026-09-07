@@ -215,11 +215,24 @@ type Plan struct {
 // modeNeedEstimate is FitPlan's need-bytes derivation for any mode: a
 // fresh profiled safe-memory figure first (weights + KV cache at max
 // context, measured), then the catalog's curated safe_memory_bytes, then
-// the on-disk weight set. ok=false means no defensible figure exists.
-// Used by FitPlan for its own mode and by the in-flight reservation logic,
-// which must reserve a loading slot's eventual footprint before any of it
-// is measurable (the 2026-08-22 crash admitted a second load while the
-// first sibling's pages were still materializing).
+// the on-disk weight set — each of the latter two floored against a real
+// weights+KV-cache estimate computed from GGUF metadata (kvcache.go)
+// whenever the architecture and metadata support it. ok=false means no
+// defensible figure exists. Used by FitPlan for its own mode and by the
+// in-flight reservation logic, which must reserve a loading slot's
+// eventual footprint before any of it is measurable (the 2026-08-22 crash
+// admitted a second load while the first sibling's pages were still
+// materializing).
+//
+// 2026-09-07 incident fix: a curated safe_memory_bytes value is a
+// hand-entered, often weight-adjacent guess with no guarantee it accounts
+// for KV cache at the mode's configured context — gemma4-26b-a4b-nothink's
+// curated 25 GiB let a load through that actually needed ~40 GiB once its
+// 262144-context, --swa-full KV cache materialized, triggering a
+// whole-host OOM cascade while a co-resident model's real ~90 GiB
+// footprint left only ~25.5 GiB genuinely free. A stale/optimistic curated
+// or file-size figure must never be allowed to undercut what
+// kvAwareNeedBytes can actually compute from the model's own metadata.
 func (m *Manager) modeNeedEstimate(cfg *config.Config, modeName string) (int64, bool) {
 	if _, ok := cfg.Modes[modeName]; !ok {
 		return 0, false
@@ -229,16 +242,32 @@ func (m *Manager) modeNeedEstimate(cfg *config.Config, modeName string) (int64, 
 			return b, true
 		}
 	}
+
+	kvBytes, kvOK := m.kvAwareNeedBytes(modeName)
+
 	if m.d.WeightEstimateBytes != nil {
 		configID := cfg.Modes[modeName].ConfigID
 		if configID != 0 {
 			if b, ok := m.d.WeightEstimateBytes(configID); ok && b > 0 {
+				if kvOK && kvBytes > b {
+					m.logf("fit %s: curated safe_memory_bytes (%.1f GiB) undercuts the computed weights+KV floor (%.1f GiB) — using the computed floor",
+						modeName, float64(b)/(1<<30), float64(kvBytes)/(1<<30))
+					return kvBytes, true
+				}
 				return b, true
 			}
 		}
 	}
 	if w := modeWeightBytes(cfg, modeName); w > 0 {
+		if kvOK && kvBytes > w {
+			m.logf("fit %s: on-disk weight size (%.1f GiB) undercuts the computed weights+KV floor (%.1f GiB) — using the computed floor",
+				modeName, float64(w)/(1<<30), float64(kvBytes)/(1<<30))
+			return kvBytes, true
+		}
 		return w, true
+	}
+	if kvOK {
+		return kvBytes, true
 	}
 	return 0, false
 }
