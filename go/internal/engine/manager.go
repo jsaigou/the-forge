@@ -107,6 +107,22 @@ type Manager struct {
 	// mu guards slots.
 	mu    sync.Mutex
 	slots map[string]*slotRec
+
+	// metaMu guards metaCache, the KV-cache estimator's GGUF-header cache
+	// (kvcache.go). FitPlan is on the scheduler's hot decision path (polled
+	// every PollInterval during EnsureLoaded), and gguf.ReadMetadata has no
+	// cache of its own — without this, every poll would re-open and
+	// re-scan the candidate model's GGUF header.
+	metaMu    sync.Mutex
+	metaCache map[string]metaCacheEntry
+}
+
+// metaCacheEntry pairs a cached gguf.Metadata read with the (size, mtime)
+// it was read at, so a re-written or replaced file invalidates cleanly.
+type metaCacheEntry struct {
+	size    int64
+	modTime time.Time
+	meta    gguf.Metadata
 }
 
 type slotRec struct {
@@ -144,9 +160,10 @@ func NewManager(d Deps) (*Manager, error) {
 		d.Logf = log.Printf
 	}
 	m := &Manager{
-		d:     d,
-		llama: collector.NewLlamaClient(d.BaseURL),
-		slots: map[string]*slotRec{},
+		d:         d,
+		llama:     collector.NewLlamaClient(d.BaseURL),
+		slots:     map[string]*slotRec{},
+		metaCache: map[string]metaCacheEntry{},
 	}
 	for name := range d.Cfg().Slots {
 		m.slots[name] = &slotRec{}
