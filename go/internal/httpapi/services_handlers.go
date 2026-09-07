@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/jsaigou/the-forge/internal/collector"
+	"github.com/jsaigou/the-forge/internal/config"
 	"github.com/jsaigou/the-forge/internal/smith"
 )
 
@@ -87,7 +88,7 @@ func (s *Server) handleInfraServices(w http.ResponseWriter, r *http.Request) {
 				Name: "STT", Unit: ptrString("forge-stt"),
 				Port: &p, Active: unitActive(snap, "forge-stt"),
 				Kind: "systemd", ModeKey: nil,
-				Logo: serviceVendorLogo("STT"),
+				Logo: serviceVendorLogo(cfg, "STT"),
 			})
 		}
 		if p, ok := cfg.Ports["embedding"]; ok {
@@ -95,7 +96,7 @@ func (s *Server) handleInfraServices(w http.ResponseWriter, r *http.Request) {
 				Name: "Embedding", Unit: ptrString("forge-embedding"),
 				Port: &p, Active: unitActive(snap, "forge-embedding"),
 				Kind: "systemd", ModeKey: nil,
-				Logo: serviceVendorLogo("Embedding"),
+				Logo: serviceVendorLogo(cfg, "Embedding"),
 			})
 		}
 		// Aligner (Qwen3 aligner, pre-existing on ForgeHost, unrelated to slots —
@@ -107,7 +108,7 @@ func (s *Server) handleInfraServices(w http.ResponseWriter, r *http.Request) {
 				Name: "Aligner", Unit: ptrString("forge-aligner"),
 				Port: &p, Active: unitActive(snap, "forge-aligner"),
 				Kind: "systemd", ModeKey: nil,
-				Logo: serviceVendorLogo("Aligner"),
+				Logo: serviceVendorLogo(cfg, "Aligner"),
 			})
 		}
 	}
@@ -122,7 +123,7 @@ func (s *Server) handleInfraServices(w http.ResponseWriter, r *http.Request) {
 		Name: "TTS", Unit: ptrString(ttsUnit),
 		Port: &ttsPort, Active: unitActive(snap, ttsUnit),
 		Kind: "systemd", ModeKey: nil,
-		Logo: serviceVendorLogo("TTS"),
+		Logo: serviceVendorLogo(cfg, "TTS"),
 	})
 
 	// Service modes from config (e.g. ComfyUI). Icon comes from the mode's
@@ -180,31 +181,22 @@ func (s *Server) handleInfraServices(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, infraServicesResponse{Services: services})
 }
 
-// serviceVendorLogoBySlug maps a fixed infra service's display Name to an
-// Icon manifest slug (web/src/assets/icons/manifest.ts) for the model it
-// actually runs. Ground-truthed live against ForgeHost's real systemd unit files
-// 2026-07-31 (Console polish pass), not guessed from doc comments:
-//   - STT (forge-stt): parakeet-server --model .../nemotron-3.5-asr-streaming-0.6b-f16.gguf
-//   - Embedding (forge-embedding): llama-server -m .../Qwen3-Embedding-0.6B-Q8_0.gguf
-//   - Aligner (forge-aligner): aligner_server.py MODEL_NAME = "Qwen/Qwen3-ForcedAligner-0.6B"
-//   - TTS (forge-tts): tts_server.py MODEL_IDS = "Qwen/Qwen3-TTS-12Hz-1.7B-*"
-//
-// These are bare [ports] entries with no model metadata anywhere in the
-// store (unlike catalog-backed service modes, e.g. ComfyUI below), so a
-// literal map is the honest fix rather than a workaround for a missing
-// dynamic mechanism.
-// Operator feedback 2026-08-14: the icon names the MODEL, not the company —
-// Embedding/Aligner/TTS all run Qwen models, so they get the qwen mark
-// (STT runs Nvidia Parakeet, hence nvidia).
-var serviceVendorLogoBySlug = map[string]string{
-	"STT":       "nvidia",
-	"Embedding": "qwen",
-	"Aligner":   "qwen",
-	"TTS":       "qwen",
-}
-
-func serviceVendorLogo(name string) *string {
-	if slug, ok := serviceVendorLogoBySlug[name]; ok {
+// serviceVendorLogo looks up the Icon manifest slug (web/src/assets/icons/
+// manifest.ts) for a fixed infra service's display Name — STT/Embedding/
+// Aligner/TTS are bare [ports] entries with no catalog-backed model
+// metadata (unlike service_mode rows, e.g. ComfyUI below, which carry
+// their own services.icon), so this used to be a Go literal map here.
+// Moved to the store-backed infra.service_icons setting (config.Config.
+// ServiceIcons, config.go's defaultServiceIcons for the fallback values) —
+// operator feedback 2026-09-06: a Go-literal map meant changing which icon
+// a service showed needed a source edit, rebuild, and daemon restart for a
+// purely cosmetic value. It's SIGHUP-reloadable now, same as every other
+// infra.* setting (see GET/PUT /api/v1/service-icons in infra_handlers.go).
+func serviceVendorLogo(cfg *config.Config, name string) *string {
+	if cfg == nil {
+		return nil
+	}
+	if slug, ok := cfg.ServiceIcons[name]; ok && slug != "" {
 		return ptrString(slug)
 	}
 	return nil

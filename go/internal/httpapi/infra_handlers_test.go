@@ -179,6 +179,74 @@ func TestMonitorSettingsGetPutIsLiveNotRestart(t *testing.T) {
 	}
 }
 
+// TestServiceIconsGetDefaultsAndPutOverride is the HTTP-layer counterpart to
+// config.TestServiceIconsDefaultsAndOverride — regression coverage for
+// "changing a fixed infra service's icon needs a rebuild+restart" (operator
+// feedback 2026-09-06). Confirms GET fills in config.DefaultServiceIcons()
+// for anything unset, PUT persists a whole-map override live (no restart
+// marker, matching monitor settings' contract above), and a round-trip
+// GET-then-PUT-the-full-map never silently drops a sibling key.
+func TestServiceIconsGetDefaultsAndPutOverride(t *testing.T) {
+	set := newFakeSettings()
+	s := serverWithSettings(t, set)
+
+	w := do(t, s, authedRequest("GET", "/api/v1/service-icons", nil))
+	if w.Code != 200 {
+		t.Fatalf("GET service-icons = %d, body=%s", w.Code, w.Body)
+	}
+	var resp serviceIconsResponse
+	decodeJSON(t, w.Body, &resp)
+	for name, want := range config.DefaultServiceIcons() {
+		if got := resp.Icons[name]; got != want {
+			t.Errorf("GET (no override) Icons[%q] = %q, want default %q", name, got, want)
+		}
+	}
+
+	// Round-trip: send the full map back with just STT changed, as a real
+	// caller (following GET's own documented contract) would.
+	resp.Icons["STT"] = "nvidia"
+	body, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal PUT body: %v", err)
+	}
+	w = do(t, s, authedRequest("PUT", "/api/v1/service-icons", strings.NewReader(string(body))))
+	if w.Code != 200 {
+		t.Fatalf("PUT service-icons = %d, body=%s", w.Code, w.Body)
+	}
+	var putResp serviceIconsResponse
+	decodeJSON(t, w.Body, &putResp)
+	if putResp.Icons["STT"] != "nvidia" {
+		t.Errorf("Icons[STT] after PUT = %q, want nvidia", putResp.Icons["STT"])
+	}
+	if putResp.Icons["Embedding"] != "qwen" {
+		t.Errorf("Icons[Embedding] after PUT = %q, want qwen (sibling key dropped by round-trip)", putResp.Icons["Embedding"])
+	}
+	// Purely cosmetic value — must never mark a restart pending.
+	if info := s.restartRequired(context.Background()); info != nil {
+		t.Errorf("service-icons should not mark restart_required, got %+v", info)
+	}
+
+	// GET again confirms the write actually persisted to the store, not just
+	// echoed back in the PUT response.
+	w = do(t, s, authedRequest("GET", "/api/v1/service-icons", nil))
+	var resp2 serviceIconsResponse
+	decodeJSON(t, w.Body, &resp2)
+	if resp2.Icons["STT"] != "nvidia" {
+		t.Errorf("GET after PUT Icons[STT] = %q, want nvidia (PUT did not persist)", resp2.Icons["STT"])
+	}
+
+	// Empty/missing icons object rejected rather than silently wiping the
+	// stored map.
+	w = do(t, s, authedRequest("PUT", "/api/v1/service-icons", strings.NewReader(`{}`)))
+	if w.Code != 422 {
+		t.Fatalf("PUT with no icons field = %d, want 422", w.Code)
+	}
+	w = do(t, s, authedRequest("PUT", "/api/v1/service-icons", strings.NewReader(`{"icons":{"STT":""}}`)))
+	if w.Code != 422 {
+		t.Fatalf("PUT with empty-string value = %d, want 422", w.Code)
+	}
+}
+
 func TestMetricsSettingsSplitApplyMode(t *testing.T) {
 	set := newFakeSettings()
 	s := serverWithSettings(t, set)

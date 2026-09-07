@@ -19,7 +19,7 @@ func sampleConfig() Config {
 		Paths:  Paths{ModelsDir: "/opt/forge/models"},
 		Slots: map[string]Slot{
 			"a1": {Unit: "forge-a1", Port: 8080, Label: "A1", Order: 1},
-			"a3":      {Unit: "forge-a3", Port: 8087, Label: "A3", Order: 3},
+			"a3": {Unit: "forge-a3", Port: 8087, Label: "A3", Order: 3},
 		},
 		Ports: map[string]int{"embedding": 8083, "stt": 8084},
 		Modes: map[string]Mode{
@@ -239,6 +239,51 @@ func TestLoadFromStoreEmpty(t *testing.T) {
 	}
 	if len(cfg.Modes) != 0 {
 		t.Errorf("Modes = %+v, want empty (Modes never comes from LoadFromStore)", cfg.Modes)
+	}
+}
+
+// TestServiceIconsDefaultsAndOverride covers the fix for "changing a fixed
+// infra service's icon needs a rebuild+restart" (operator feedback
+// 2026-09-06): defaultServiceIcons fills in for any key the operator hasn't
+// overridden, and applyDefaults must not clobber a real override — the same
+// per-key-fill contract as infra.ports would need if it ever gained a
+// similar default map.
+func TestServiceIconsDefaultsAndOverride(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	cfg, err := LoadFromStore(ctx, db)
+	if err != nil {
+		t.Fatalf("LoadFromStore: %v", err)
+	}
+	for name, want := range defaultServiceIcons {
+		if got := cfg.ServiceIcons[name]; got != want {
+			t.Errorf("ServiceIcons[%q] = %q, want default %q", name, got, want)
+		}
+	}
+
+	raw, err := json.Marshal(map[string]string{"STT": "nvidia"})
+	if err != nil {
+		t.Fatalf("marshal override: %v", err)
+	}
+	if err := db.Settings().Set(ctx, "infra.service_icons", raw); err != nil {
+		t.Fatalf("Settings.Set: %v", err)
+	}
+
+	cfg2, err := LoadFromStore(ctx, db)
+	if err != nil {
+		t.Fatalf("LoadFromStore (with override): %v", err)
+	}
+	if cfg2.ServiceIcons["STT"] != "nvidia" {
+		t.Errorf("ServiceIcons[STT] = %q, want operator override %q", cfg2.ServiceIcons["STT"], "nvidia")
+	}
+	if cfg2.ServiceIcons["Embedding"] != "qwen" {
+		t.Errorf("ServiceIcons[Embedding] = %q, want default %q (override of one key must not drop the others)",
+			cfg2.ServiceIcons["Embedding"], "qwen")
 	}
 }
 

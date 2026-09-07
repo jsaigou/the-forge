@@ -1,16 +1,18 @@
 [Unit]
-Description=The Forge — STT Server (Nemotron ASR, port 8084)
+Description=The Forge — STT Server (Qwen3-ASR-0.6B, port 8084)
 After=network.target
 
 [Service]
 Type=simple
 User=testuser
 Group=testuser
-ExecStart=/opt/forge/parakeet-src/build/examples/server/parakeet-server \
-    --model /opt/forge/models/parakeet/nemotron-3.5-asr-streaming-0.6b-f16.gguf \
+ExecStart=/opt/forge/qwen3-asr-src/build/qwen3-asr-server \
+    -m /opt/forge/models/qwen3-asr/qwen3-asr-0.6b-q8_0.gguf \
     --host 127.0.0.1 \
     --port 8084 \
-    --threads 4
+    --max-upload-mb 512 \
+    --convert \
+    -t 4
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal

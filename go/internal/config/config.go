@@ -25,15 +25,48 @@ import (
 
 // Config is the root of forge's infra config, built by LoadFromStore.
 type Config struct {
-	Server    Server
-	Paths     Paths
-	Slots     map[string]Slot
-	Ports     map[string]int // auxiliary services: embedding, stt, ...
-	Modes     map[string]Mode
-	Scheduler SchedulerDefault
-	Monitor   Monitor
-	Tailscale Tailscale
-	Cost      Cost
+	Server       Server
+	Paths        Paths
+	Slots        map[string]Slot
+	Ports        map[string]int // auxiliary services: embedding, stt, ...
+	ServiceIcons map[string]string
+	Modes        map[string]Mode
+	Scheduler    SchedulerDefault
+	Monitor      Monitor
+	Tailscale    Tailscale
+	Cost         Cost
+}
+
+// defaultServiceIcons are the fallback vendor-icon manifest slugs (see
+// web/src/assets/icons/manifest.ts) for the four fixed infra services
+// (STT/Embedding/Aligner/TTS — bare [ports] entries with no catalog-backed
+// model metadata, unlike service_mode rows like ComfyUI, which carry their
+// own services.icon). Previously a Go literal map in
+// httpapi/services_handlers.go (serviceVendorLogoBySlug) — changing which
+// icon a service showed meant editing source and shipping a new binary.
+// Moved into infra.service_icons (operator feedback 2026-09-06: "bad design
+// to need a restart to change an icon") so it's store-backed and
+// SIGHUP-reloadable like every other infra.* value, with these as the
+// zero-value fallback so nothing changes for anyone who hasn't overridden
+// it. The icon names the MODEL, not the company (2026-08-14 precedent) — all
+// four fixed services currently run Qwen models.
+var defaultServiceIcons = map[string]string{
+	"STT":       "qwen",
+	"Embedding": "qwen",
+	"Aligner":   "qwen",
+	"TTS":       "qwen",
+}
+
+// DefaultServiceIcons returns a copy of the fallback vendor-icon map (see
+// defaultServiceIcons above) for callers outside this package — httpapi's
+// GET /api/v1/service-icons overlays these under any operator override
+// without exposing the shared package-level map itself for mutation.
+func DefaultServiceIcons() map[string]string {
+	out := make(map[string]string, len(defaultServiceIcons))
+	for k, v := range defaultServiceIcons {
+		out[k] = v
+	}
+	return out
 }
 
 // Server holds listen addresses and the state-db location. Canonical V4
@@ -336,13 +369,14 @@ func LoadFromStore(ctx context.Context, st store.Store) (*Config, error) {
 	settings := st.Settings()
 
 	for key, dst := range map[string]any{
-		"infra.server":    &cfg.Server,
-		"infra.paths":     &cfg.Paths,
-		"infra.ports":     &cfg.Ports,
-		"infra.scheduler": &cfg.Scheduler,
-		"infra.monitor":   &cfg.Monitor,
-		"infra.tailscale": &cfg.Tailscale,
-		"infra.cost":      &cfg.Cost,
+		"infra.server":        &cfg.Server,
+		"infra.paths":         &cfg.Paths,
+		"infra.ports":         &cfg.Ports,
+		"infra.service_icons": &cfg.ServiceIcons,
+		"infra.scheduler":     &cfg.Scheduler,
+		"infra.monitor":       &cfg.Monitor,
+		"infra.tailscale":     &cfg.Tailscale,
+		"infra.cost":          &cfg.Cost,
 	} {
 		if err := getSetting(ctx, settings, key, dst); err != nil {
 			return nil, err
@@ -445,6 +479,14 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Cost.MaxPowerW <= 0 {
 		c.Cost.MaxPowerW = DefaultMaxPowerW
+	}
+	if c.ServiceIcons == nil {
+		c.ServiceIcons = map[string]string{}
+	}
+	for name, icon := range defaultServiceIcons {
+		if _, ok := c.ServiceIcons[name]; !ok {
+			c.ServiceIcons[name] = icon
+		}
 	}
 	for name, svc := range c.allServices() {
 		if svc.Backend == "" {

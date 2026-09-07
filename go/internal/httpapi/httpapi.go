@@ -663,6 +663,11 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	mux.Handle("PUT /api/v1/metrics/settings", s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleMetricsSettingsPut))))
 	mux.Handle("GET /api/v1/ui/settings", s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleUISettingsGet))))
 	mux.Handle("PUT /api/v1/ui/settings", s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleUISettingsPut))))
+	// infra.service_icons (live) — vendor-icon override for the fixed infra
+	// services, added 2026-09-06 to replace a Go-literal map that needed a
+	// rebuild+restart to change.
+	mux.Handle("GET /api/v1/service-icons", s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleServiceIconsGet))))
+	mux.Handle("PUT /api/v1/service-icons", s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleServiceIconsPut))))
 	// ADR-0011: custom dashboard pages — system-wide settings key
 	// "dashboard.pages", full-replace PUT (frontend sends complete layout).
 	mux.Handle("GET /api/v1/dashboard/layout", s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleDashboardLayoutGet))))

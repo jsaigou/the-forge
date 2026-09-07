@@ -26,5 +26,9 @@ func TestLiveHeaders(t *testing.T) {
 		}
 		t.Logf("%s: %s arch=%q name=%q ctx=%d quant=%q params=%d",
 			filepath.Base(p), time.Since(t0), md.Architecture, md.Name, md.TrainedCtx, md.QuantType, md.ParameterCount)
+		t.Logf("  layers: block_count=%d embd=%d head_count=%d head_count_kv=%v",
+			md.BlockCount, md.EmbeddingLength, md.HeadCount, md.HeadCountKV)
+		t.Logf("  attn: key_len=%d val_len=%d key_len_swa=%d val_len_swa=%d sliding_window=%d swa_pattern=%v hybrid=%v",
+			md.KeyLength, md.ValueLength, md.KeyLengthSWA, md.ValueLengthSWA, md.SlidingWindow, md.SWAPattern, md.Hybrid)
 	}
 }

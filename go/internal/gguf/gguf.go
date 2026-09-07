@@ -30,6 +30,46 @@ type Metadata struct {
 	ParameterCount int64
 	QuantType      string
 	FileSizeBytes  int64
+
+	// The fields below back the KV-cache-aware memory estimator
+	// (go/internal/engine/kvcache.go). All of it lives in the KV section
+	// already being scanned — no tensor-table read is added.
+
+	// BlockCount is <arch>.block_count (n_layer).
+	BlockCount int
+	// EmbeddingLength is <arch>.embedding_length. Paired with HeadCount, it
+	// is the head_dim fallback llama.cpp itself uses
+	// (n_embd_head_k_full = n_embd / n_head()) when key_length/value_length
+	// aren't present in the file (llama-model.cpp:1329-1333).
+	EmbeddingLength int
+	// HeadCount is <arch>.attention.head_count (n_head, the query head
+	// count — distinct from HeadCountKV).
+	HeadCount int
+	// HeadCountKV is <arch>.attention.head_count_kv, normalized to one entry
+	// per layer: a scalar in the GGUF broadcasts to len==BlockCount here; a
+	// real per-layer array (Gemma-style, where SWA/global layers differ) is
+	// kept as-is. Empty when the key is absent.
+	HeadCountKV []int
+	// KeyLength / ValueLength are <arch>.attention.key_length /
+	// .value_length — per-head K/V dim for non-SWA ("full") layers.
+	KeyLength   int
+	ValueLength int
+	// KeyLengthSWA / ValueLengthSWA are the SWA-layer counterparts (0 = the
+	// model draws no K/V-dim distinction between SWA and full layers).
+	KeyLengthSWA   int
+	ValueLengthSWA int
+	// SlidingWindow is <arch>.attention.sliding_window (window size, cells).
+	SlidingWindow int
+	// SWAPattern is <arch>.attention.sliding_window_pattern: true at index
+	// il means layer il is a windowed/SWA layer. len==BlockCount when
+	// present; nil means the model declares no per-layer SWA split (every
+	// layer is treated as "full").
+	SWAPattern []bool
+	// Hybrid is true when the file declares any <arch>.ssm.* or
+	// <arch>.attention.indexer.* key — a recurrent-state or block-sparse
+	// architecture the KV-cache formula below does not model. Callers must
+	// treat this as "cannot estimate," never guess.
+	Hybrid bool
 }
 
 const ggufMagic = 0x46554747 // "GGUF" little-endian
@@ -133,8 +173,18 @@ func readAll(r *bufio.Reader, fileSize int64) (Metadata, error) {
 	}
 
 	// ctxByArch holds every *.context_length seen, so key order relative to
-	// general.architecture doesn't matter.
+	// general.architecture doesn't matter. attnByArch mirrors the same
+	// arch-keyed-staging pattern for the KV-cache estimator's fields.
 	ctxByArch := map[string]uint64{}
+	attnByArch := map[string]*archAttn{}
+	stageFor := func(arch string) *archAttn {
+		a, ok := attnByArch[arch]
+		if !ok {
+			a = &archAttn{}
+			attnByArch[arch] = a
+		}
+		return a
+	}
 	var fileType uint64
 	var haveFileType bool
 
@@ -146,6 +196,13 @@ func readAll(r *bufio.Reader, fileSize int64) (Metadata, error) {
 		var vt uint32
 		if err := binary.Read(r, binary.LittleEndian, &vt); err != nil {
 			return md, fmt.Errorf("kv %q type: %w", key, err)
+		}
+
+		// Hybrid-architecture signal: presence alone matters, not the
+		// value, so this doesn't consume anything — the switch below still
+		// reads/skips the value normally.
+		if strings.Contains(key, ".ssm.") || strings.Contains(key, ".attention.indexer.") {
+			md.Hybrid = true
 		}
 
 		switch {
@@ -177,6 +234,66 @@ func readAll(r *bufio.Reader, fileSize int64) (Metadata, error) {
 				return md, fmt.Errorf("kv %q: %w", key, err)
 			}
 			ctxByArch[strings.TrimSuffix(key, ".context_length")] = u
+		case strings.HasSuffix(key, ".block_count"):
+			u, err := readTypedUint(r, vt)
+			if err != nil {
+				return md, fmt.Errorf("kv %q: %w", key, err)
+			}
+			stageFor(strings.TrimSuffix(key, ".block_count")).blockCount = int(u)
+		case strings.HasSuffix(key, ".embedding_length"):
+			u, err := readTypedUint(r, vt)
+			if err != nil {
+				return md, fmt.Errorf("kv %q: %w", key, err)
+			}
+			stageFor(strings.TrimSuffix(key, ".embedding_length")).embeddingLength = int(u)
+		case strings.HasSuffix(key, ".attention.head_count_kv"):
+			vals, err := readUintOrArray(r, vt, fileSize)
+			if err != nil {
+				return md, fmt.Errorf("kv %q: %w", key, err)
+			}
+			stageFor(strings.TrimSuffix(key, ".attention.head_count_kv")).headCountKV = vals
+		case strings.HasSuffix(key, ".attention.head_count"):
+			u, err := readTypedUint(r, vt)
+			if err != nil {
+				return md, fmt.Errorf("kv %q: %w", key, err)
+			}
+			stageFor(strings.TrimSuffix(key, ".attention.head_count")).headCount = int(u)
+		case strings.HasSuffix(key, ".attention.key_length_swa"):
+			u, err := readTypedUint(r, vt)
+			if err != nil {
+				return md, fmt.Errorf("kv %q: %w", key, err)
+			}
+			stageFor(strings.TrimSuffix(key, ".attention.key_length_swa")).keyLengthSWA = int(u)
+		case strings.HasSuffix(key, ".attention.value_length_swa"):
+			u, err := readTypedUint(r, vt)
+			if err != nil {
+				return md, fmt.Errorf("kv %q: %w", key, err)
+			}
+			stageFor(strings.TrimSuffix(key, ".attention.value_length_swa")).valueLengthSWA = int(u)
+		case strings.HasSuffix(key, ".attention.key_length"):
+			u, err := readTypedUint(r, vt)
+			if err != nil {
+				return md, fmt.Errorf("kv %q: %w", key, err)
+			}
+			stageFor(strings.TrimSuffix(key, ".attention.key_length")).keyLength = int(u)
+		case strings.HasSuffix(key, ".attention.value_length"):
+			u, err := readTypedUint(r, vt)
+			if err != nil {
+				return md, fmt.Errorf("kv %q: %w", key, err)
+			}
+			stageFor(strings.TrimSuffix(key, ".attention.value_length")).valueLength = int(u)
+		case strings.HasSuffix(key, ".attention.sliding_window_pattern"):
+			vals, err := readBoolArray(r, vt, fileSize)
+			if err != nil {
+				return md, fmt.Errorf("kv %q: %w", key, err)
+			}
+			stageFor(strings.TrimSuffix(key, ".attention.sliding_window_pattern")).swaPattern = vals
+		case strings.HasSuffix(key, ".attention.sliding_window"):
+			u, err := readTypedUint(r, vt)
+			if err != nil {
+				return md, fmt.Errorf("kv %q: %w", key, err)
+			}
+			stageFor(strings.TrimSuffix(key, ".attention.sliding_window")).slidingWindow = int(u)
 		default:
 			if err := skipValue(r, vt, fileSize); err != nil {
 				return md, fmt.Errorf("kv %q: %w", key, err)
@@ -200,7 +317,53 @@ func readAll(r *bufio.Reader, fileSize int64) (Metadata, error) {
 			md.QuantType = fmt.Sprintf("unknown(%d)", fileType)
 		}
 	}
+
+	if a, ok := attnByArch[md.Architecture]; ok {
+		md.BlockCount = a.blockCount
+		md.EmbeddingLength = a.embeddingLength
+		md.HeadCount = a.headCount
+		md.KeyLength = a.keyLength
+		md.ValueLength = a.valueLength
+		md.KeyLengthSWA = a.keyLengthSWA
+		md.ValueLengthSWA = a.valueLengthSWA
+		md.SlidingWindow = a.slidingWindow
+		switch {
+		case len(a.headCountKV) == 1 && md.BlockCount > 0:
+			// Scalar head_count_kv (the common case): broadcast to every
+			// layer so callers never special-case "scalar vs. array".
+			md.HeadCountKV = make([]int, md.BlockCount)
+			for i := range md.HeadCountKV {
+				md.HeadCountKV[i] = a.headCountKV[0]
+			}
+		case len(a.headCountKV) == md.BlockCount && md.BlockCount > 0:
+			md.HeadCountKV = a.headCountKV
+			// else: length mismatch (corrupt/unexpected) — leave nil rather
+			// than guess which layers the values belong to.
+		}
+		if len(a.swaPattern) == md.BlockCount && md.BlockCount > 0 {
+			md.SWAPattern = a.swaPattern
+			// else: length mismatch — leave nil, which the KV-cache
+			// estimator reads as "no per-layer SWA split known."
+		}
+	}
+
 	return md, nil
+}
+
+// archAttn stages the KV-cache-estimator fields for one architecture prefix
+// while the KV section is scanned (mirrors ctxByArch: key order relative to
+// general.architecture doesn't matter).
+type archAttn struct {
+	blockCount      int
+	embeddingLength int
+	headCount       int
+	headCountKV     []int
+	keyLength       int
+	valueLength     int
+	keyLengthSWA    int
+	valueLengthSWA  int
+	slidingWindow   int
+	swaPattern      []bool
 }
 
 func readString(r *bufio.Reader, fileSize int64) (string, error) {
@@ -280,6 +443,84 @@ func readTypedUint(r *bufio.Reader, vt uint32) (uint64, error) {
 	default:
 		return 0, fmt.Errorf("expected numeric scalar, got type %d", vt)
 	}
+}
+
+// maxLayerArray bounds how many elements a per-layer array (head_count_kv,
+// sliding_window_pattern) retains — real models have at most a few hundred
+// layers; this guards a corrupt/adversarial count without needing
+// block_count up front (it may arrive after this key in the KV section).
+const maxLayerArray = 8192
+
+// readUintOrArray reads either a scalar integer or an array of integers,
+// returning every value widened to int. Some converters emit a key like
+// head_count_kv as a plain scalar in the common (uniform) case and as a
+// real per-layer array when layers differ (Gemma's SWA vs. global layers).
+func readUintOrArray(r *bufio.Reader, vt uint32, fileSize int64) ([]int, error) {
+	if vt != typeArray {
+		u, err := readTypedUint(r, vt)
+		if err != nil {
+			return nil, err
+		}
+		return []int{int(u)}, nil
+	}
+	var elemType uint32
+	if err := binary.Read(r, binary.LittleEndian, &elemType); err != nil {
+		return nil, err
+	}
+	var count uint64
+	if err := binary.Read(r, binary.LittleEndian, &count); err != nil {
+		return nil, err
+	}
+	if count > maxLayerArray {
+		return nil, fmt.Errorf("implausible array count %d", count)
+	}
+	size, ok := scalarSize[elemType]
+	if !ok || elemType == typeBool {
+		return nil, fmt.Errorf("expected numeric array element, got type %d", elemType)
+	}
+	if int64(count)*size > fileSize {
+		return nil, fmt.Errorf("array of %d elements exceeds file size", count)
+	}
+	out := make([]int, count)
+	for i := range out {
+		u, err := readTypedUint(r, elemType)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = int(u)
+	}
+	return out, nil
+}
+
+// readBoolArray reads a GGUF bool array, retaining every element (bounded
+// by maxLayerArray).
+func readBoolArray(r *bufio.Reader, vt uint32, fileSize int64) ([]bool, error) {
+	if vt != typeArray {
+		return nil, fmt.Errorf("expected array, got type %d", vt)
+	}
+	var elemType uint32
+	if err := binary.Read(r, binary.LittleEndian, &elemType); err != nil {
+		return nil, err
+	}
+	if elemType != typeBool {
+		return nil, fmt.Errorf("expected bool array element, got type %d", elemType)
+	}
+	var count uint64
+	if err := binary.Read(r, binary.LittleEndian, &count); err != nil {
+		return nil, err
+	}
+	if count > maxLayerArray || int64(count) > fileSize {
+		return nil, fmt.Errorf("implausible bool array count %d", count)
+	}
+	out := make([]bool, count)
+	for i := range out {
+		var b uint8
+		if err := binary.Read(r, binary.LittleEndian, &b); err != nil {
+			return nil, err
+		}
+		out[i] = b != 0
+	}
+	return out, nil
 }
 
 // skipValue consumes one value of type vt without retaining it.
