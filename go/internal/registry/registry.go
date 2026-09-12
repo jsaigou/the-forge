@@ -381,7 +381,11 @@ func (s *catalogSnapshot) resolveLogos(cfgLogo, cfgLogoDark string, mdl store.Mo
 }
 
 // resolveModalities (Sprint J1) narrows a model's architectural modalities
-// to what one specific config can actually deliver:
+// to what one specific config can actually deliver. The precedence itself
+// now lives in store.ResolveModalities (2026-09-13, so a0's /v1/models and
+// this package's cards can never disagree) — this is a thin adapter that
+// resolves the mmproj-missing lookup against this snapshot's artifact map
+// and re-shapes the result into this package's []ModalityGap wire type:
 //
 //  1. "text" is always enabled — every config can do plain text.
 //  2. An explicit cfg.Modalities override wins verbatim, even an empty one
@@ -393,37 +397,12 @@ func (s *catalogSnapshot) resolveLogos(cfgLogo, cfgLogoDark string, mdl store.Mo
 //     unavailable too ("mmproj file missing on disk") rather than silently
 //     claiming a capability the config can't currently serve.
 func (s *catalogSnapshot) resolveModalities(c store.Config, mdl store.Model) (enabled []string, unavailable []ModalityGap) {
-	nonText := func(mods []string) []string {
-		out := make([]string, 0, len(mods))
-		for _, m := range mods {
-			if m != "text" {
-				out = append(out, m)
-			}
-		}
-		return out
+	a, ok := s.artifactByID[c.MMProjArtifactID]
+	res := store.ResolveModalities(c, mdl, ok && a.Missing)
+	for _, m := range res.Unavailable {
+		unavailable = append(unavailable, ModalityGap{ID: m, Reason: res.Reason})
 	}
-
-	if c.Modalities != nil {
-		enabled = append([]string{"text"}, nonText(*c.Modalities)...)
-		return enabled, nil
-	}
-
-	if c.MMProjArtifactID == 0 {
-		for _, m := range nonText(mdl.Modalities) {
-			unavailable = append(unavailable, ModalityGap{ID: m, Reason: "no mmproj linked"})
-		}
-		return []string{"text"}, unavailable
-	}
-
-	if a, ok := s.artifactByID[c.MMProjArtifactID]; ok && a.Missing {
-		for _, m := range nonText(mdl.Modalities) {
-			unavailable = append(unavailable, ModalityGap{ID: m, Reason: "mmproj file missing on disk"})
-		}
-		return []string{"text"}, unavailable
-	}
-
-	enabled = append([]string{"text"}, nonText(mdl.Modalities)...)
-	return enabled, nil
+	return res.Enabled, unavailable
 }
 
 // benchesFor unions a model's benchmarks (capability scores — intrinsic to

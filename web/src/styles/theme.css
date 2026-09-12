@@ -34,6 +34,12 @@
      light reads clearly distinct from Temp (green→fuchsia) and GPU (orange),
      and is less saturated than the previously-rejected #3A86FF. */
   --ring-vram: #6FA3C8;
+  /* RoutingTree "operator bypass" link — was var(--reserved), which is a
+     shared multi-use token (slot-reservation badges, card borders) and, at
+     the low saturation it needs for those roles, read as gray rather than
+     blue on this diagram (operator feedback 2026-09-13). Its own token so
+     recoloring it never ripples into --reserved's other consumers. */
+  --route-bypass: #3a8fe0;
   --heat-deep: color-mix(in srgb, var(--heat) 55%, black);
   --tab-active: #7c5cff;
   --load-btn-bg: var(--heat); --load-btn-text: #100a06;
@@ -117,6 +123,7 @@
     --reserved: color-mix(in srgb, var(--cool) 65%, white);
     --ok: #17a34a;
     --ring-vram: #33658A;
+    --route-bypass: #1a5fb4;
     --tab-active: #00b4d8;
     --navy-electric: #1421c4;
     --load-btn-bg: var(--navy-electric); --load-btn-text: #fff;
@@ -157,6 +164,7 @@
      light reads clearly distinct from Temp (green→fuchsia) and GPU (orange),
      and is less saturated than the previously-rejected #3A86FF. */
   --ring-vram: #6FA3C8;
+  --route-bypass: #3a8fe0;
   --heat-deep: color-mix(in srgb, var(--heat) 55%, black);
   --tab-active: #7c5cff;
   --load-btn-bg: var(--heat); --load-btn-text: #100a06;
@@ -188,6 +196,7 @@
   --reserved: color-mix(in srgb, var(--cool) 65%, white);
   --ok: #17a34a;
   --ring-vram: #33658A;
+  --route-bypass: #1a5fb4;
   --tab-active: #00b4d8;
   --navy-electric: #1421c4;
   --load-btn-bg: var(--navy-electric); --load-btn-text: #fff;
@@ -1248,13 +1257,24 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
    marks BOTH compressing states (healthy teal, degraded amber). */
 .rtree-link.compressing { filter: drop-shadow(0 0 5px var(--cool)); }
 .rtree-link.degraded { filter: drop-shadow(0 0 5px var(--heat-2)); }
-.rtree-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 0 0 12px; font-size: 11px; color: var(--text-dim); }
+/* Anchored below the last provider row inside .rtree, `top` set inline per
+   the live provider count (operator feedback 2026-09-13 — pinning this to
+   `bottom:0` let it climb up over the provider column whenever the model
+   column was tall enough to leave a gap there shorter than the legend).
+   A 2-column grid (was a single stacked column) roughly halves the
+   legend's own height so it fits a typical few-provider gap; a panel
+   backdrop keeps it legible since the SVG's link curves do pass behind it. */
+.rtree-legend {
+  position: absolute; left: 0; max-width: min(100%, 340px);
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px;
+  padding: 8px 10px; border-radius: 8px;
+  background: var(--panel-2); font-size: 11px; color: var(--text-dim);
+}
 .rtree-lg { display: inline-flex; align-items: center; gap: 6px; }
-.rtree-lg-line { display: inline-block; width: 26px; height: 0; border-top: 3px solid; border-radius: 2px; }
-.rtree-lg-line.direct { border-top-color: var(--ok); }
+.rtree-lg-line { display: inline-block; width: 26px; height: 0; border-top: 3px solid; border-radius: 2px; flex: none; }
 .rtree-lg-line.compressing { border-top-color: var(--cool); filter: drop-shadow(0 0 3px var(--cool)); }
 .rtree-lg-line.degraded { border-top-color: var(--heat-2); filter: drop-shadow(0 0 3px var(--heat-2)); }
-.rtree-lg-line.bypassed { border-top-color: var(--reserved); }
+.rtree-lg-line.bypassed { border-top-color: var(--route-bypass); }
 .rtree-lg-line.autobypass { border-top-color: var(--heat); border-top-style: dashed; border-top-width: 2px; }
 .rtree-lg-line.failing { border-top-color: var(--crit); }
 .rtree-lg-line.disabled { border-top-color: var(--text-mute); opacity: .3; }
@@ -1266,8 +1286,8 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
    glance in both themes. A repeating-linear-gradient dash is rendered crisply
    at any size, unlike the browser's border-dash algorithm at small scales. */
 .rtree-lg-line.unreachable { height: 3px; border-top: none; background-image: repeating-linear-gradient(to right, var(--crit) 0 5px, transparent 5px 9px); }
-.rtree-lg-note { color: var(--text-mute); font-size: 10.5px; margin-left: auto; }
-@media (max-width: 560px) { .rtree { overflow-x: auto; } .rtree-lg-note { margin-left: 0; width: 100%; } }
+.rtree-lg-note { grid-column: 1 / -1; color: var(--text-mute); font-size: 10.5px; }
+@media (max-width: 560px) { .rtree { overflow-x: auto; } }
 @media (prefers-reduced-motion: reduce) {
   .rtree-lpress circle { animation: none; }
 }
