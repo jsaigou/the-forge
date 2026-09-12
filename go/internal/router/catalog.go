@@ -226,6 +226,22 @@ type ModelsResponse struct {
 	Data   []ModelEntry `json:"data"`
 }
 
+// ModelArchitecture is an OpenRouter/llama-swap-style inline modality block
+// (2026-09-13), shaped specifically for the OpenCode discovery plugin's
+// "llama-swap" modelInfoFormat, which reads architecture.input_modalities /
+// architecture.output_modalities off this same /v1/models response with no
+// second request.
+//
+// VOCABULARY TRAP: that reader only recognizes
+// text|image|audio|video|pdf and silently drops anything else — the
+// catalog's own vocabulary is text|vision|audio, so "vision" MUST be
+// mapped to "image" here (see openCodeModalities) or vision support
+// disappears from OpenCode with no error anywhere.
+type ModelArchitecture struct {
+	InputModalities  []string `json:"input_modalities,omitempty"`
+	OutputModalities []string `json:"output_modalities,omitempty"`
+}
+
 // ModelEntry is one entry in the /v1/models list.
 type ModelEntry struct {
 	ID            string `json:"id"`
@@ -233,6 +249,176 @@ type ModelEntry struct {
 	Created       int64  `json:"created"`
 	OwnedBy       string `json:"owned_by"`
 	ContextLength int    `json:"context_length,omitempty"`
+
+	// Name is the catalog Model's display name, emitted ONLY when it is
+	// unambiguous across the whole listing — two Configs of one Model
+	// (e.g. gemma4-26b-a4b / gemma4-26b-a4b-nothink) would otherwise render
+	// as two identically-named entries in a consumer's model picker. Empty
+	// means the consumer falls back to formatting the id itself. See
+	// assignUniqueDisplayNames.
+	Name string `json:"name,omitempty"`
+
+	// Architecture carries input/output modalities for this entry. nil
+	// (omitted from the JSON) means "unknown", NOT "text only" — a catalog
+	// read failure must never make a0 actively claim a vision-capable
+	// model can't see. See modalitySnapshot.
+	Architecture *ModelArchitecture `json:"architecture,omitempty"`
+}
+
+// modalitySnapshot holds the extra catalog reads /v1/models needs to answer
+// "what input can this entry actually accept" — separate from the
+// offerings/configs reads BuildModelsResponse already does, since neither
+// of those rows carries a Model directly (an Offering has ModelID; a
+// Config has VariantID, one hop further from Model via Variant). ok is
+// false if ANY read failed — callers then omit `architecture` entirely
+// (a read failure must never be read as "text only", see ModelEntry.Architecture).
+type modalitySnapshot struct {
+	ok            bool
+	modelByID     map[int64]store.Model
+	modelIDByVar  map[int64]int64 // Variant.ID -> Variant.ModelID
+	mmprojMissing map[int64]bool  // Artifact.ID -> Missing (mmproj artifacts only)
+}
+
+// loadModalitySnapshot reads ListModels + ListVariants + ListArtifacts —
+// three small full-table reads (tens of rows each, live) inside
+// BuildModelsResponse's existing 2s context budget. /v1/models is a listing
+// endpoint, not the chat hot path.
+func loadModalitySnapshot(ctx context.Context, storeCat store.Catalog) modalitySnapshot {
+	models, err := storeCat.ListModels(ctx)
+	if err != nil {
+		return modalitySnapshot{}
+	}
+	variants, err := storeCat.ListVariants(ctx)
+	if err != nil {
+		return modalitySnapshot{}
+	}
+	artifacts, err := storeCat.ListArtifacts(ctx)
+	if err != nil {
+		return modalitySnapshot{}
+	}
+
+	s := modalitySnapshot{
+		ok:            true,
+		modelByID:     make(map[int64]store.Model, len(models)),
+		modelIDByVar:  make(map[int64]int64, len(variants)),
+		mmprojMissing: make(map[int64]bool, len(artifacts)),
+	}
+	for _, m := range models {
+		s.modelByID[m.ID] = m
+	}
+	for _, v := range variants {
+		s.modelIDByVar[v.ID] = v.ModelID
+	}
+	for _, a := range artifacts {
+		if a.ArtifactType == "mmproj" {
+			s.mmprojMissing[a.ID] = a.Missing
+		}
+	}
+	return s
+}
+
+// offeringModalities returns the model-level architectural modalities for a
+// remote offering. store.Offering has no modality column of its own —
+// remote-provider vision can only come from the joined Model via o.ModelID;
+// there is no mmproj narrowing for a remote provider (that's a local-config
+// concept). nil when the snapshot is unusable or the model is unknown.
+func (s modalitySnapshot) offeringModalities(o store.Offering) []string {
+	if !s.ok {
+		return nil
+	}
+	mdl, ok := s.modelByID[o.ModelID]
+	if !ok {
+		return nil
+	}
+	return append([]string{"text"}, nonTextModalities(mdl.Modalities)...)
+}
+
+// configModalities returns what this specific Config can actually deliver,
+// via store.ResolveModalities — the same precedence the PWA's ConfigCard
+// shows (registry.resolveModalities), so a0 and the dashboard can never
+// disagree. nil when the snapshot is unusable or the config's model can't
+// be resolved.
+func (s modalitySnapshot) configModalities(c store.Config) []string {
+	if !s.ok {
+		return nil
+	}
+	modelID, ok := s.modelIDByVar[c.VariantID]
+	if !ok {
+		return nil
+	}
+	mdl, ok := s.modelByID[modelID]
+	if !ok {
+		return nil
+	}
+	missing := s.mmprojMissing[c.MMProjArtifactID] // false for id 0 / unknown id, correctly
+	res := store.ResolveModalities(c, mdl, missing)
+	return res.Enabled
+}
+
+// nonTextModalities drops "text" out of a modality list (offeringModalities
+// re-adds it explicitly first, mirroring store.ResolveModalities' own
+// convention of always leading with "text").
+func nonTextModalities(mods []string) []string {
+	out := make([]string, 0, len(mods))
+	for _, m := range mods {
+		if m != "text" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// openCodeModalities maps the catalog's own vocabulary (text|vision|audio)
+// to the input-modality names the OpenCode discovery plugin's "llama-swap"
+// enricher actually recognizes (text|image|audio|video|pdf — verified
+// against the plugin's real source, not just its docs). "vision" becomes
+// "image"; anything unrecognized is dropped rather than passed through, so
+// a future catalog modality can't silently leak an unrecognized token onto
+// the wire. nil in -> nil out.
+func openCodeModalities(storeMods []string) []string {
+	if storeMods == nil {
+		return nil
+	}
+	out := make([]string, 0, len(storeMods))
+	for _, m := range storeMods {
+		switch m {
+		case "text", "audio":
+			out = append(out, m)
+		case "vision":
+			out = append(out, "image")
+		}
+	}
+	return out
+}
+
+// architectureFor wraps openCodeModalities into the wire type. Output
+// modalities are always ["text"] — nothing a0 routes emits image or audio
+// on the chat-completions path. nil in -> nil out (propagates "unknown").
+func architectureFor(storeMods []string) *ModelArchitecture {
+	input := openCodeModalities(storeMods)
+	if input == nil {
+		return nil
+	}
+	return &ModelArchitecture{InputModalities: input, OutputModalities: []string{"text"}}
+}
+
+// assignUniqueDisplayNames sets Name on each entry whose candidate name is
+// both non-empty and unique across the whole listing, and leaves entries
+// whose candidate collides (or is empty/unknown) at their zero value so the
+// consumer falls back to formatting the id itself (D4 — see
+// ModelEntry.Name). candidates is index-parallel to data.
+func assignUniqueDisplayNames(data []ModelEntry, candidates []string) {
+	counts := make(map[string]int, len(candidates))
+	for _, name := range candidates {
+		if name != "" {
+			counts[name]++
+		}
+	}
+	for i, name := range candidates {
+		if name != "" && counts[name] == 1 {
+			data[i].Name = name
+		}
+	}
 }
 
 // BuildModelsResponse builds an OpenAI-shaped /v1/models payload — one entry
@@ -254,12 +440,25 @@ type ModelEntry struct {
 // providers' wire names still route as aliases converging on the same
 // primary). providers nil (provider store unwired) skips the enablement
 // filter — pre-0032 behavior for skeleton mode.
+//
+// Modalities (2026-09-13): each entry's Architecture is single-sourced from
+// store.ResolveModalities (the same rule the PWA's cards use), never
+// computed twice. A read failure anywhere in loadModalitySnapshot means
+// every entry ships with Architecture == nil ("unknown") rather than a0
+// actively asserting a vision-capable model is text-only — see
+// modalitySnapshot and ModelEntry.Architecture.
 func BuildModelsResponse(ctx context.Context, storeCat store.Catalog, providers []store.ProviderRow) ModelsResponse {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
 	data := make([]ModelEntry, 0)
+	var nameCandidates []string
 	seen := map[string]bool{}
+
+	var modSnap modalitySnapshot
+	if storeCat != nil {
+		modSnap = loadModalitySnapshot(ctx, storeCat)
+	}
 
 	// Store-backed Offerings (MODEL CATALOG Phase 2). Selection (which
 	// offering is each model group's primary) is shared with offeringChain
@@ -318,7 +517,9 @@ func BuildModelsResponse(ctx context.Context, storeCat store.Catalog, providers 
 				if o.ContextLength > 0 {
 					entry.ContextLength = o.ContextLength
 				}
+				entry.Architecture = architectureFor(modSnap.offeringModalities(o))
 				data = append(data, entry)
+				nameCandidates = append(nameCandidates, modSnap.modelByID[o.ModelID].Name)
 				seen[o.WireModel] = true
 			}
 		}
@@ -351,12 +552,16 @@ func BuildModelsResponse(ctx context.Context, storeCat store.Catalog, providers 
 				if c.NCtx > 0 {
 					entry.ContextLength = c.NCtx
 				}
+				entry.Architecture = architectureFor(modSnap.configModalities(c))
 				data = append(data, entry)
+				modelID := modSnap.modelIDByVar[c.VariantID]
+				nameCandidates = append(nameCandidates, modSnap.modelByID[modelID].Name)
 				seen[c.Name] = true
 			}
 		}
 	}
 
+	assignUniqueDisplayNames(data, nameCandidates)
 	return ModelsResponse{Object: "list", Data: data}
 }
 
