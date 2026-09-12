@@ -5,8 +5,10 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -270,15 +272,29 @@ func TestBuildModelsResponse_NilStoreCatalog(t *testing.T) {
 	}
 }
 
+// seedConfigOpts widens seedCatalogConfig for the modality tests below
+// without touching any of its existing call sites (variadic, all fields
+// optional/zero-valued by default).
+type seedConfigOpts struct {
+	modelModalities []string  // nil -> store default (["text"])
+	withMMProj      bool      // create an mmproj artifact and link it
+	mmprojMissing   bool      // only meaningful if withMMProj
+	cfgModalities   *[]string // nil -> derive; non-nil (incl. empty) -> explicit override
+}
+
 // seedCatalogConfig creates the minimal Model → Variant → Artifact(weight) →
 // Config chain needed to satisfy the configs table's FK constraints
 // (name, variant_id, weight_artifact_id, engine_id all NOT NULL), mirroring
 // TestCatalogFullRoundTrip in internal/store/catalog_test.go. Returns the new
 // config's ID.
-func seedCatalogConfig(t *testing.T, cat store.Catalog, name string, nCtx int, visibility string) int64 {
+func seedCatalogConfig(t *testing.T, cat store.Catalog, name string, nCtx int, visibility string, opts ...seedConfigOpts) int64 {
 	t.Helper()
+	var o seedConfigOpts
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	ctx := context.Background()
-	mdlID, err := cat.CreateModel(ctx, store.Model{Name: name})
+	mdlID, err := cat.CreateModel(ctx, store.Model{Name: name, Modalities: o.modelModalities})
 	if err != nil {
 		t.Fatalf("CreateModel: %v", err)
 	}
@@ -305,9 +321,20 @@ func seedCatalogConfig(t *testing.T, cat store.Catalog, name string, nCtx int, v
 	if err != nil {
 		t.Fatalf("EngineByName: %v", err)
 	}
+	var mmprojID int64
+	if o.withMMProj {
+		mmprojID, err = cat.CreateArtifact(ctx, store.Artifact{
+			VariantID: varID, FormatID: f.ID, FilePath: name + "-mmproj.gguf",
+			IsAuxiliary: true, ArtifactType: "mmproj", Missing: o.mmprojMissing,
+		})
+		if err != nil {
+			t.Fatalf("CreateArtifact (mmproj): %v", err)
+		}
+	}
 	cfgID, err := cat.CreateConfig(ctx, store.Config{
 		Name: name, VariantID: varID, WeightArtifactID: weightID,
-		EngineID: eng.ID, NCtx: nCtx, Visibility: visibility,
+		EngineID: eng.ID, MMProjArtifactID: mmprojID, NCtx: nCtx, Visibility: visibility,
+		Modalities: o.cfgModalities,
 	})
 	if err != nil {
 		t.Fatalf("CreateConfig: %v", err)
@@ -381,4 +408,316 @@ func TestBuildModelsResponse_CatalogConfigs(t *testing.T) {
 	if got := byID["gemma4-31b"].OwnedBy; got != "deepseek" {
 		t.Errorf("dedup 'gemma4-31b' owned_by: got %q, want 'deepseek' (offering wins)", got)
 	}
+}
+
+// ── /v1/models modalities (2026-09-13) ────────────────────────────────────
+
+func TestBuildModelsResponse_ConfigVisionModalities(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cat := db.Catalog()
+
+	seedCatalogConfig(t, cat, "gemma4-vision", 262144, "visible", seedConfigOpts{
+		modelModalities: []string{"text", "vision"},
+		withMMProj:      true,
+	})
+
+	resp := BuildModelsResponse(context.Background(), cat, nil)
+	e := mustFindEntry(t, resp, "gemma4-vision")
+	if e.Architecture == nil {
+		t.Fatal("Architecture is nil, want a vision-capable entry")
+	}
+	if !stringSlicesEqualCatalog(e.Architecture.InputModalities, []string{"text", "image"}) {
+		t.Errorf("InputModalities = %v, want [text image]", e.Architecture.InputModalities)
+	}
+	if !stringSlicesEqualCatalog(e.Architecture.OutputModalities, []string{"text"}) {
+		t.Errorf("OutputModalities = %v, want [text]", e.Architecture.OutputModalities)
+	}
+}
+
+func TestBuildModelsResponse_ConfigNoMMProjIsTextOnly(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cat := db.Catalog()
+
+	seedCatalogConfig(t, cat, "vision-model-no-mmproj", 8192, "visible", seedConfigOpts{
+		modelModalities: []string{"text", "vision"},
+		withMMProj:      false,
+	})
+
+	resp := BuildModelsResponse(context.Background(), cat, nil)
+	e := mustFindEntry(t, resp, "vision-model-no-mmproj")
+	if e.Architecture == nil {
+		t.Fatal("Architecture is nil, want an explicit text-only entry")
+	}
+	if !stringSlicesEqualCatalog(e.Architecture.InputModalities, []string{"text"}) {
+		t.Errorf("InputModalities = %v, want [text] (no mmproj linked)", e.Architecture.InputModalities)
+	}
+}
+
+func TestBuildModelsResponse_ConfigMMProjMissingIsTextOnly(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cat := db.Catalog()
+
+	seedCatalogConfig(t, cat, "vision-model-missing-mmproj", 8192, "visible", seedConfigOpts{
+		modelModalities: []string{"text", "vision"},
+		withMMProj:      true,
+		mmprojMissing:   true,
+	})
+
+	resp := BuildModelsResponse(context.Background(), cat, nil)
+	e := mustFindEntry(t, resp, "vision-model-missing-mmproj")
+	if e.Architecture == nil || !stringSlicesEqualCatalog(e.Architecture.InputModalities, []string{"text"}) {
+		t.Errorf("Architecture = %+v, want text-only (mmproj file missing on disk)", e.Architecture)
+	}
+}
+
+func TestBuildModelsResponse_ConfigExplicitOverrideWins(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cat := db.Catalog()
+
+	visionOverride := []string{"text", "vision"}
+	seedCatalogConfig(t, cat, "override-forces-vision", 8192, "visible", seedConfigOpts{
+		modelModalities: nil, // text-only model
+		withMMProj:      false,
+		cfgModalities:   &visionOverride,
+	})
+
+	emptyOverride := []string{}
+	seedCatalogConfig(t, cat, "override-forces-text-only", 8192, "visible", seedConfigOpts{
+		modelModalities: []string{"text", "vision"},
+		withMMProj:      true,
+		cfgModalities:   &emptyOverride,
+	})
+
+	resp := BuildModelsResponse(context.Background(), cat, nil)
+
+	visEntry := mustFindEntry(t, resp, "override-forces-vision")
+	if visEntry.Architecture == nil || !stringSlicesEqualCatalog(visEntry.Architecture.InputModalities, []string{"text", "image"}) {
+		t.Errorf("override-forces-vision Architecture = %+v, want [text image]", visEntry.Architecture)
+	}
+
+	textEntry := mustFindEntry(t, resp, "override-forces-text-only")
+	if textEntry.Architecture == nil || !stringSlicesEqualCatalog(textEntry.Architecture.InputModalities, []string{"text"}) {
+		t.Errorf("override-forces-text-only Architecture = %+v, want [text] (empty override still wins)", textEntry.Architecture)
+	}
+}
+
+func TestBuildModelsResponse_OfferingModalitiesFromModel(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	cat := db.Catalog()
+
+	db.Routing().SaveProvider(ctx, store.ProviderRow{
+		Name: "deepseek", APIKey: "sk-test", Enabled: true, CreatedAt: time.Now(),
+	})
+	deepseek, _, _ := db.Routing().ProviderByName(ctx, "deepseek")
+
+	visionMdl, _ := cat.CreateModel(ctx, store.Model{Name: "deepseek-vision-model", Modalities: []string{"text", "vision"}})
+	cat.CreateOffering(ctx, store.Offering{
+		ModelID: visionMdl, ProviderID: deepseek.ID,
+		WireModel: "deepseek-vision-offering", Enabled: true,
+	})
+
+	textMdl, _ := cat.CreateModel(ctx, store.Model{Name: "deepseek-text-model"})
+	cat.CreateOffering(ctx, store.Offering{
+		ModelID: textMdl, ProviderID: deepseek.ID,
+		WireModel: "deepseek-text-offering", Enabled: true,
+	})
+
+	rows, _ := db.Routing().Providers(ctx)
+	resp := BuildModelsResponse(ctx, cat, rows)
+
+	vis := mustFindEntry(t, resp, "deepseek-vision-offering")
+	if vis.Architecture == nil || !stringSlicesEqualCatalog(vis.Architecture.InputModalities, []string{"text", "image"}) {
+		t.Errorf("deepseek-vision-offering Architecture = %+v, want [text image]", vis.Architecture)
+	}
+
+	txt := mustFindEntry(t, resp, "deepseek-text-offering")
+	if txt.Architecture == nil || !stringSlicesEqualCatalog(txt.Architecture.InputModalities, []string{"text"}) {
+		t.Errorf("deepseek-text-offering Architecture = %+v, want [text]", txt.Architecture)
+	}
+}
+
+// TestBuildModelsResponse_VisionIsNeverOnTheWire is the single most
+// important test in this group: the OpenCode discovery plugin's
+// "llama-swap" modality parser only recognizes text|image|audio|video|pdf
+// and silently drops anything else. If a0 ever regresses to emitting the
+// catalog's native "vision" token instead of mapping it to "image", this
+// test is the only thing that catches it — the JSON would still be
+// perfectly valid, just silently ignored downstream.
+func TestBuildModelsResponse_VisionIsNeverOnTheWire(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cat := db.Catalog()
+
+	// Deliberately avoid "vision" anywhere in the config/model NAME itself
+	// (the id/name are also in the JSON) so the only possible source of the
+	// literal string "vision" in the response is an un-mapped modality token.
+	seedCatalogConfig(t, cat, "attach-wire-check", 8192, "visible", seedConfigOpts{
+		modelModalities: []string{"text", "vision"},
+		withMMProj:      true,
+	})
+
+	resp := BuildModelsResponse(context.Background(), cat, nil)
+	body, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(body), "vision") {
+		t.Errorf("response JSON contains the literal string \"vision\" — must be mapped to \"image\": %s", body)
+	}
+	if !strings.Contains(string(body), "image") {
+		t.Errorf("response JSON never contains \"image\" for a vision-capable model: %s", body)
+	}
+}
+
+func TestBuildModelsResponse_DisplayNameUniqueOnly(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	cat := db.Catalog()
+
+	// Two Configs sharing one Model (mirrors gemma4-26b-a4b /
+	// gemma4-26b-a4b-nothink both pointing at "Gemma 4 26B A4B (MTP)") —
+	// both must come back with an empty Name (D4), never a duplicated one.
+	mdlID, err := cat.CreateModel(ctx, store.Model{Name: "Shared Model"})
+	if err != nil {
+		t.Fatalf("CreateModel: %v", err)
+	}
+	seedSiblingConfig(t, cat, mdlID, "shared-config-a", "visible")
+	seedSiblingConfig(t, cat, mdlID, "shared-config-b", "visible")
+
+	// A third config with its own, unshared Model must get its Name.
+	seedCatalogConfig(t, cat, "solo-config", 8192, "visible")
+
+	resp := BuildModelsResponse(ctx, cat, nil)
+
+	if got := mustFindEntry(t, resp, "shared-config-a").Name; got != "" {
+		t.Errorf("shared-config-a Name = %q, want empty (ambiguous)", got)
+	}
+	if got := mustFindEntry(t, resp, "shared-config-b").Name; got != "" {
+		t.Errorf("shared-config-b Name = %q, want empty (ambiguous)", got)
+	}
+	if got := mustFindEntry(t, resp, "solo-config").Name; got != "solo-config" {
+		t.Errorf("solo-config Name = %q, want %q (unique)", got, "solo-config")
+	}
+}
+
+// seedSiblingConfig creates a second Config pointed at an EXISTING model —
+// the two-configs-one-model shape assignUniqueDisplayNames needs to be
+// tested against, which seedCatalogConfig (one model per config) can't
+// produce on its own.
+func seedSiblingConfig(t *testing.T, cat store.Catalog, modelID int64, name, visibility string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	varID, err := cat.CreateVariant(ctx, store.Variant{ModelID: modelID, Name: name})
+	if err != nil {
+		t.Fatalf("CreateVariant: %v", err)
+	}
+	f, err := cat.FormatByName(ctx, "GGUF")
+	if err != nil {
+		t.Fatalf("FormatByName: %v", err)
+	}
+	weightID, err := cat.CreateArtifact(ctx, store.Artifact{
+		VariantID: varID, FormatID: f.ID, FilePath: name + ".gguf", ArtifactType: "weight",
+	})
+	if err != nil {
+		t.Fatalf("CreateArtifact: %v", err)
+	}
+	eng, err := cat.EngineByName(ctx, "llama.cpp")
+	if err != nil {
+		t.Fatalf("EngineByName: %v", err)
+	}
+	cfgID, err := cat.CreateConfig(ctx, store.Config{
+		Name: name, VariantID: varID, WeightArtifactID: weightID,
+		EngineID: eng.ID, Visibility: visibility,
+	})
+	if err != nil {
+		t.Fatalf("CreateConfig: %v", err)
+	}
+	return cfgID
+}
+
+// errListModelsCatalog wraps a real store.Catalog and injects a ListModels
+// failure — everything else passes through untouched via embedding, so no
+// method list needs duplicating as the interface grows.
+type errListModelsCatalog struct{ store.Catalog }
+
+func (errListModelsCatalog) ListModels(context.Context) ([]store.Model, error) {
+	return nil, errors.New("boom")
+}
+
+// TestBuildModelsResponse_ModalityReadErrorOmitsArchitecture is the D5
+// guard: a catalog read failure must make a0 omit Architecture entirely
+// (unknown), never assert text-only — that would silently disable real
+// vision during a transient DB hiccup.
+func TestBuildModelsResponse_ModalityReadErrorOmitsArchitecture(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cat := db.Catalog()
+
+	seedCatalogConfig(t, cat, "vision-during-outage", 8192, "visible", seedConfigOpts{
+		modelModalities: []string{"text", "vision"},
+		withMMProj:      true,
+	})
+
+	resp := BuildModelsResponse(context.Background(), errListModelsCatalog{cat}, nil)
+	e := mustFindEntry(t, resp, "vision-during-outage")
+	if e.Architecture != nil {
+		t.Errorf("Architecture = %+v, want nil (unknown) during a catalog read failure", e.Architecture)
+	}
+	if e.ContextLength != 8192 {
+		t.Errorf("ContextLength = %d, want 8192 — listing itself must survive a modality-read failure", e.ContextLength)
+	}
+}
+
+func mustFindEntry(t *testing.T, resp ModelsResponse, id string) ModelEntry {
+	t.Helper()
+	for _, e := range resp.Data {
+		if e.ID == id {
+			return e
+		}
+	}
+	t.Fatalf("entry %q not found in /v1/models response: %+v", id, resp.Data)
+	return ModelEntry{}
+}
+
+func stringSlicesEqualCatalog(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

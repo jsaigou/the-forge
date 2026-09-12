@@ -190,7 +190,10 @@ func TestModels_List(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	seedCatalogConfig(t, db.Catalog(), "gemma4-26b-mtp", 8192, "visible")
+	seedCatalogConfig(t, db.Catalog(), "gemma4-26b-mtp", 8192, "visible", seedConfigOpts{
+		modelModalities: []string{"text", "vision"},
+		withMMProj:      true,
+	})
 
 	srv := NewWithDeps(Deps{Cfg: testCfg(nil, nil), StoreCatalog: db.Catalog(), Auth: &stubAuth{validToken: "x"}})
 
@@ -215,6 +218,13 @@ func TestModels_List(t *testing.T) {
 	}
 	if resp.Data[0].ContextLength != 8192 {
 		t.Errorf("context_length = %d, want 8192", resp.Data[0].ContextLength)
+	}
+	// End-to-end through the real HTTP handler (not just BuildModelsResponse
+	// directly, per catalog_test.go's coverage): a vision-wired config's
+	// JSON carries the OpenCode-plugin-compatible architecture block.
+	arch := resp.Data[0].Architecture
+	if arch == nil || len(arch.InputModalities) != 2 || arch.InputModalities[0] != "text" || arch.InputModalities[1] != "image" {
+		t.Errorf("architecture.input_modalities = %+v, want [text image]", arch)
 	}
 }
 

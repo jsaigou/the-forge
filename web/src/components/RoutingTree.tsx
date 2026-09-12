@@ -29,8 +29,10 @@
 //   compressing   teal solid + glow    compressing, resource health ok
 //   degraded      amber solid + glow   compressing but restart-looping or
 //                                      leaking memory — still passing traffic
-//   bypassed      slate solid          operator passthrough (global or this
+//   bypassed      blue solid           operator passthrough (global or this
 //                                      proxy) — direct by deliberate choice
+//                                      (own --route-bypass token, not
+//                                      --reserved — see theme.css)
 //   autobypass    orange dashed        compressor DOWN; Sprint 8's per-request
 //                                      auto-bypass is routing these straight
 //                                      to the real upstream, uncompressed
@@ -43,10 +45,28 @@
 //
 // readOnly (the Dashboard copy) suppresses the admin-only long-press
 // enable/disable interaction; Settings → Routing keeps it.
+//
+// Model layout toggle (operator feedback 2026-09-13): providers (left) are
+// always alphabetical — that's an invariant, not a mode. Models (right) can
+// either stay plain A-Z (default, unchanged from before this toggle existed)
+// or be regrouped to cluster near their primary provider's row — "primary"
+// mirrors offeringPreference.ts's own rule (lowest priority among enabled
+// offerings of enabled providers, same tiebreak), so grouping can never
+// disagree with the "preferred" badge shown elsewhere. Grouping is a pure
+// display reorder — it doesn't change any link's color/state/priority.
+//
+// Legend placement: moved off its own full-width row (operator feedback
+// 2026-09-13) into the diagram's bottom-left corner, which — since real
+// deployments always have far fewer providers than models — sits empty
+// below the last provider row. It renders after the node maps (last in DOM)
+// so it paints above the SVG's link curves, which do pass through that
+// corner; a panel backdrop keeps it legible over them.
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { creatorIconSlug } from "../lib/creatorIcon";
+import { groupOfferingsByModel } from "../lib/offeringPreference";
 import { providerIconSlug } from "../lib/providerPresets";
+import { RangeToggle } from "./RangeToggle";
 import {
   useCatalogModels,
   useCatalogOfferings,
@@ -57,11 +77,18 @@ import {
 } from "../lib/queries";
 import type { CatalogOffering, CompressorProxy, InfraService } from "../lib/types";
 
+const LAYOUT_MODES = [
+  { key: "az", label: "A–Z" },
+  { key: "group", label: "Group" },
+] as const;
+type LayoutMode = (typeof LAYOUT_MODES)[number]["key"];
+
 const COMPRESSOR_ROW_PREFIX = "Compressor (";
 
 type LinkVisual = { cls: string; color: string; opacity: number; dash?: string };
 
 export function RoutingTree({ readOnly = false }: { readOnly?: boolean }) {
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>("az");
   const offerings = useCatalogOfferings();
   const models = useCatalogModels();
   const providers = useProviders();
@@ -70,6 +97,13 @@ export function RoutingTree({ readOnly = false }: { readOnly?: boolean }) {
   const infraServices = useInfraServices();
 
   const offeringList = offerings.data ?? [];
+  // Dashboard feedback (2026-09-13): the read-only Dashboard copy hides
+  // disabled offerings (and, transitively, any provider/model left with
+  // nothing enabled) entirely rather than showing them grayed out — an
+  // at-a-glance operations view shouldn't include inert routes. Settings →
+  // Routing (readOnly=false) keeps everything visible, since seeing and
+  // managing what's disabled is the point of that view.
+  const visibleOfferings = readOnly ? offeringList.filter((o) => o.enabled) : offeringList;
   const modelList = models.data ?? [];
   const providerList = providers.data?.providers ?? [];
   const providerByName = new Map(providerList.map((p) => [p.name, p]));
@@ -111,10 +145,32 @@ export function RoutingTree({ readOnly = false }: { readOnly?: boolean }) {
     return "";
   }
 
-  const providerNames = [...new Set(offeringList.map((o) => o.provider))].sort();
-  const modelIds = [...new Set(offeringList.map((o) => o.model_id))].sort((a, b) => {
+  // Providers are always alphabetical — an invariant, not part of the
+  // layout toggle below (see file header).
+  const providerNames = [...new Set(visibleOfferings.map((o) => o.provider))].sort();
+  const providerIndex = new Map(providerNames.map((n, i) => [n, i]));
+  // "Group" mode's per-model primary provider — same rule as
+  // offeringPreference.ts's preferredOfferingIds (lowest priority among
+  // enabled offerings of enabled providers, tiebreak provider name then id),
+  // so a model's group can never disagree with the "preferred" badge shown
+  // elsewhere. Falls back to the group's first entry (any offering) for a
+  // model with nothing routable, so it still lands in a deterministic spot
+  // instead of being excluded from grouping.
+  const providerEnabled = (name: string) => providerByName.get(name)?.enabled ?? true;
+  const offeringsByModel = groupOfferingsByModel(visibleOfferings);
+  function primaryProvider(modelId: number): string {
+    const group = offeringsByModel.get(modelId) ?? [];
+    const routable = group.find((o) => o.enabled && providerEnabled(o.provider));
+    return (routable ?? group[0])?.provider ?? "";
+  }
+  const modelIds = [...new Set(visibleOfferings.map((o) => o.model_id))].sort((a, b) => {
     const na = modelById.get(a)?.name ?? `#${a}`;
     const nb = modelById.get(b)?.name ?? `#${b}`;
+    if (layoutMode === "group") {
+      const ia = providerIndex.get(primaryProvider(a)) ?? Number.MAX_SAFE_INTEGER;
+      const ib = providerIndex.get(primaryProvider(b)) ?? Number.MAX_SAFE_INTEGER;
+      if (ia !== ib) return ia - ib;
+    }
     return na.localeCompare(nb);
   });
 
@@ -125,7 +181,17 @@ export function RoutingTree({ readOnly = false }: { readOnly?: boolean }) {
   const RIGHT_X = 532;
   const W = 700;
   const rows = Math.max(providerNames.length, modelIds.length);
-  const H = Math.max(rows * ROW_H + PAD * 2, 80);
+  // Legend sits below the last provider row (see the legend div's own
+  // comment) rather than pinned to the diagram's bottom edge — operator
+  // feedback 2026-09-13: anchoring to the bottom made it climb up over the
+  // provider column whenever models outnumbered providers by enough that
+  // the empty gap below the last provider row was shorter than the legend
+  // itself. LEGEND_H is a fixed estimate (7 two-column entries + 1
+  // full-width note), reserved in H so the legend never overflows past the
+  // diagram's own bottom edge either.
+  const LEGEND_TOP = PAD + providerNames.length * ROW_H + 8;
+  const LEGEND_H = 118;
+  const H = Math.max(rows * ROW_H + PAD * 2, 80, LEGEND_TOP + LEGEND_H);
   const midX = (LEFT_X + RIGHT_X) / 2;
 
   const providerY = new Map(providerNames.map((n, i) => [n, PAD + i * ROW_H + ROW_H / 2]));
@@ -187,7 +253,7 @@ export function RoutingTree({ readOnly = false }: { readOnly?: boolean }) {
     if (!service) return { cls: "direct", color: "var(--ok)", opacity: 0.9 };
     // Operator passthrough (global or per-proxy) — direct by deliberate
     // choice, distinct from Sprint 8's failure-driven auto-bypass above.
-    if (state === "bypassed") return { cls: "bypassed", color: "var(--reserved)", opacity: 0.8 };
+    if (state === "bypassed") return { cls: "bypassed", color: "var(--route-bypass)", opacity: 0.8 };
     // Still compressing, but the process is restart-looping or leaking
     // (Sprint 4's resource health) — traffic passes, health is not ok.
     if (health === "restarting" || health === "memory_growth") {
@@ -201,27 +267,20 @@ export function RoutingTree({ readOnly = false }: { readOnly?: boolean }) {
   if (offeringList.length === 0) {
     return <div className="empty-note">No offerings configured — nothing to map yet.</div>;
   }
+  if (visibleOfferings.length === 0) {
+    return <div className="empty-note">All offerings are currently disabled.</div>;
+  }
 
   const lpressCircumference = 2 * Math.PI * 17;
 
   return (
     <>
-      <div className="rtree-legend" role="doc-tip">
-        <span className="rtree-lg"><i className="rtree-lg-line direct" /> direct</span>
-        <span className="rtree-lg"><i className="rtree-lg-line compressing" /> compressing</span>
-        <span className="rtree-lg"><i className="rtree-lg-line degraded" /> compressing · degraded</span>
-        <span className="rtree-lg"><i className="rtree-lg-line bypassed" /> operator bypass</span>
-        <span className="rtree-lg"><i className="rtree-lg-line autobypass" /> auto-bypassed (compressor down)</span>
-        <span className="rtree-lg"><i className="rtree-lg-line failing" /> failing (compressor + upstream down)</span>
-        <span className="rtree-lg"><i className="rtree-lg-line unreachable" /> provider unreachable</span>
-        <span className="rtree-lg"><i className="rtree-lg-line disabled" /> disabled</span>
-        <span className="rtree-lg-note">
-          thicker = higher priority{readOnly ? "" : " · hold a provider node to enable/disable"}
-        </span>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <RangeToggle options={LAYOUT_MODES} value={layoutMode} onChange={setLayoutMode} />
       </div>
       <div className={`rtree${readOnly ? " rtree-readonly" : ""}`} style={{ position: "relative", width: "100%", maxWidth: 720, height: H, margin: "0 auto" }}>
         <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block", pointerEvents: "none" }}>
-          {offeringList.map((o) => {
+          {visibleOfferings.map((o) => {
             const py = providerY.get(o.provider);
             const my = modelY.get(o.model_id);
             if (py === undefined || my === undefined) return null;
@@ -281,6 +340,29 @@ export function RoutingTree({ readOnly = false }: { readOnly?: boolean }) {
             </div>
           );
         })}
+        {/* Anchored below the last provider row (LEGEND_TOP, computed above
+            H), after the node maps so it paints above the SVG's link curves
+            (see file header). "direct" (no compressor anywhere in the path)
+            is dropped from this legend: with the shared "external" proxy
+            covering every provider that has no dedicated one, every
+            currently-enabled route always has SOME compressor in its path
+            on this deployment, so that line/color never actually appears —
+            it'd be pure noise. linkState's `direct` case itself stays (a
+            defensive fallback if that ever stops being true, e.g. the
+            operator disables the shared external proxy), it's just no
+            longer documented in the key since it can't happen today. */}
+        <div className="rtree-legend" role="doc-tip" style={{ top: LEGEND_TOP }}>
+          <span className="rtree-lg"><i className="rtree-lg-line compressing" /> compressing</span>
+          <span className="rtree-lg"><i className="rtree-lg-line degraded" /> compressing · degraded</span>
+          <span className="rtree-lg"><i className="rtree-lg-line bypassed" /> operator bypass</span>
+          <span className="rtree-lg"><i className="rtree-lg-line autobypass" /> auto-bypassed (compressor down)</span>
+          <span className="rtree-lg"><i className="rtree-lg-line failing" /> failing (compressor + upstream down)</span>
+          <span className="rtree-lg"><i className="rtree-lg-line unreachable" /> provider unreachable</span>
+          <span className="rtree-lg"><i className="rtree-lg-line disabled" /> disabled</span>
+          <span className="rtree-lg-note">
+            thicker = higher priority{readOnly ? "" : " · hold a provider node to enable/disable"}
+          </span>
+        </div>
       </div>
     </>
   );
