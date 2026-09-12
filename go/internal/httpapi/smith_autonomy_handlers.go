@@ -13,16 +13,19 @@ package httpapi
 // does, the same "always the safe direction" posture reject/checkpoint-abort
 // use elsewhere in this API. Because the decision depends on the request
 // BODY (which must be parsed first), it can't be expressed as a route-level
-// requireAssurance(...) middleware wrap the way every other step-up-gated
-// route in this file is — so this handler evaluates the policy directly,
-// duplicating requireAssurance's core check rather than complicating that
-// shared middleware with a body-dependent special case.
+// requireAssurance(...)/requireStrictAssurance(...) middleware wrap the way
+// every other step-up-gated route in this file is — so this handler calls
+// the shared evaluateAssurance helper directly on the escalating path.
+//
+// It deliberately uses the requireStrictAssurance shape (no bearer bypass),
+// not requireAssurance's blanket one: escalating smith's standing autonomy
+// is at least as sensitive as key management (#37), since it's the switch
+// that lets smith execute system-modifying procedures unattended.
 
 import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/jsaigou/the-forge/internal/authz"
 	"github.com/jsaigou/the-forge/internal/smith"
@@ -128,26 +131,25 @@ func (s *Server) handleSmithAutonomyPut(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusUnauthorized, "Authentication required")
 			return
 		}
-		if ident.KeyID == "" && s.deps.PolicyStore != nil {
-			pctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			policy, err := s.deps.PolicyStore.Load(pctx)
-			cancel()
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "policy load failed")
-				return
-			}
-			ttl := s.deps.StepUpTTL
-			if ttl == 0 {
-				ttl = authz.DefaultStepUpTTL
-			}
-			eval := authz.NewPolicyEvaluator(policy, ttl, time.Now)
-			decision := eval.Evaluate(authz.ResourceActionSmithAutonomy, ident.Assurance, ident.AssuranceAt)
-			if !decision.Allowed {
-				writeJSON(w, http.StatusForbidden, map[string]string{
-					"error": "step_up_required", "required": string(decision.Required), "resource": decision.Resource,
-				})
-				return
-			}
+		// No bearer bypass here — unlike requireAssurance's blanket one for
+		// ordinary a0/MCP traffic, escalating smith's standing autonomy is at
+		// least as sensitive as key management (#37's requireStrictAssurance
+		// carve-out), since it's the switch that lets smith execute
+		// system-modifying procedures unattended. Every identity is
+		// evaluated through the same evaluateAssurance path requireAssurance/
+		// requireStrictAssurance use; a bearer identity carries no session
+		// assurance, so it always fails a password-or-above resource here —
+		// only a stepped-up browser session can flip this switch on.
+		allowed, decision, err := s.evaluateAssurance(ctx, ident, authz.ResourceActionSmithAutonomy)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "policy load failed")
+			return
+		}
+		if !allowed {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "step_up_required", "required": string(decision.Required), "resource": decision.Resource,
+			})
+			return
 		}
 	}
 
