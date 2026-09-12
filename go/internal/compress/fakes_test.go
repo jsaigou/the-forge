@@ -61,6 +61,23 @@ func (f fakeScorerFunc) Score(inputIDs, attentionMask []int64) ([]float32, error
 	return f(inputIDs, attentionMask)
 }
 
+// ScoreBatch is unused by scoreChunk (the only caller that receives a
+// fakeScorerFunc in this package's tests) but required to satisfy the
+// widened Scorer interface — implemented as one Score call per item so a
+// future test that does exercise it still gets a coherent per-sequence
+// result.
+func (f fakeScorerFunc) ScoreBatch(inputIDs, attentionMask [][]int64) ([][]float32, error) {
+	out := make([][]float32, len(inputIDs))
+	for i := range inputIDs {
+		s, err := f(inputIDs[i], attentionMask[i])
+		if err != nil {
+			return nil, err
+		}
+		out[i] = s
+	}
+	return out, nil
+}
+
 func (f fakeScorer) Score(inputIDs, _ []int64) ([]float32, error) {
 	scores := make([]float32, len(inputIDs))
 	for i, id := range inputIDs {
@@ -77,6 +94,22 @@ func (f fakeScorer) Score(inputIDs, _ []int64) ([]float32, error) {
 		}
 	}
 	return scores, nil
+}
+
+// ScoreBatch delegates to Score per sequence — this fake's job is testing
+// this package's own batching/grouping/ordering logic (scoreEncodings), not
+// simulating a real batched-inference implementation's padding math (that's
+// onnxscorer's job, tested separately against the real model on ForgeHost).
+func (f fakeScorer) ScoreBatch(inputIDs, attentionMask [][]int64) ([][]float32, error) {
+	out := make([][]float32, len(inputIDs))
+	for i := range inputIDs {
+		s, err := f.Score(inputIDs[i], attentionMask[i])
+		if err != nil {
+			return nil, err
+		}
+		out[i] = s
+	}
+	return out, nil
 }
 
 func newTestEngine(tok fakeTokenizer, sc fakeScorer, cfgOverrides ...func(*Config)) *Engine {

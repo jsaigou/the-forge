@@ -1122,6 +1122,7 @@ func (c *Collector) recordCompressorSavings(ctx context.Context) {
 			OverheadSumMsDelta:            deltaF(cur.OverheadSum, prev.OverheadSum),
 			RequestsByProviderDelta:       diffLabelMap(cur.RequestsByProvider, prev.RequestsByProvider),
 			RequestsByModelDelta:          diffLabelMap(cur.RequestsByModel, prev.RequestsByModel),
+			MessagesByOutcomeSizeDelta:    diffLabelMap(cur.MessagesByOutcomeSize, prev.MessagesByOutcomeSize),
 			CacheReadTokensDelta:          diffLabelMap(cur.CacheReadTokens, prev.CacheReadTokens),
 			CacheWriteTokensDelta:         diffLabelMap(cur.CacheWriteTokens, prev.CacheWriteTokens),
 			UncachedTokensDelta:           diffLabelMap(cur.UncachedTokens, prev.UncachedTokens),
@@ -1143,6 +1144,10 @@ func (c *Collector) recordCompressorSavings(ctx context.Context) {
 		if cur.OverheadCount > 0 {
 			min, max := cur.OverheadMin, cur.OverheadMax
 			sample.OverheadMinMsSinceStart, sample.OverheadMaxMsSinceStart = &min, &max
+		}
+		if cur.OverheadP50 > 0 {
+			p50, p90, p99 := cur.OverheadP50, cur.OverheadP90, cur.OverheadP99
+			sample.OverheadP50MsRecent, sample.OverheadP90MsRecent, sample.OverheadP99MsRecent = &p50, &p90, &p99
 		}
 		if len(cur.TransformTimingMax) > 0 {
 			sample.TransformTimingMaxSinceStart = copyFloatMap(cur.TransformTimingMax)

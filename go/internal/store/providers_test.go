@@ -370,3 +370,72 @@ func TestProviderEnabledCountryRoundTrip(t *testing.T) {
 		t.Error("Compressor.Providers: enabled should be false after disable")
 	}
 }
+
+// TestProviderPeakWindowsRoundTrip guards all four provider read paths
+// against a missed peak_windows SELECT column — routing.go's Providers()
+// and providerBy() (backing both ProviderByID and ProviderByName), plus
+// providers.go's List(). The last of those feeds the Settings UI behind a
+// full-replace PUT (RemoteOfferings.tsx's own doc comment on the same
+// hazard for offerings), so a column missed there would load an empty
+// editor and let an operator silently delete a real schedule on save.
+func TestProviderPeakWindowsRoundTrip(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+
+	const windows = `{"windows":[{"days":[1,2,3,4,5],"start":"01:00","end":"04:00"}]}`
+	if err := db.Routing().SaveProvider(ctx, ProviderRow{
+		Name: "deepseek", APIKey: "sk-d", TargetURL: "https://api.deepseek.com/v1",
+		Enabled: true, PeakWindows: windows, CreatedAt: ts(2000),
+	}); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+
+	routingRows, err := db.Routing().Providers(ctx)
+	if err != nil {
+		t.Fatalf("Routing.Providers: %v", err)
+	}
+	if len(routingRows) != 1 || routingRows[0].PeakWindows != windows {
+		t.Errorf("Routing.Providers PeakWindows = %q, want %q", routingRows[0].PeakWindows, windows)
+	}
+
+	byName, ok, err := db.Routing().ProviderByName(ctx, "deepseek")
+	if err != nil || !ok {
+		t.Fatalf("ProviderByName: ok=%v err=%v", ok, err)
+	}
+	if byName.PeakWindows != windows {
+		t.Errorf("ProviderByName PeakWindows = %q, want %q", byName.PeakWindows, windows)
+	}
+
+	byID, ok, err := db.Routing().ProviderByID(ctx, byName.ID)
+	if err != nil || !ok {
+		t.Fatalf("ProviderByID: ok=%v err=%v", ok, err)
+	}
+	if byID.PeakWindows != windows {
+		t.Errorf("ProviderByID PeakWindows = %q, want %q", byID.PeakWindows, windows)
+	}
+
+	listRows, err := db.Providers().List(ctx)
+	if err != nil {
+		t.Fatalf("Providers.List: %v", err)
+	}
+	if len(listRows) != 1 || listRows[0].PeakWindows != windows {
+		t.Errorf("Providers.List PeakWindows = %q, want %q", listRows[0].PeakWindows, windows)
+	}
+
+	// A full-replace SaveProvider (the same idiom the Settings PUT handler
+	// uses) that omits PeakWindows must clear it, not silently leave the
+	// old value behind under some UPDATE-skips-empty-string quirk.
+	if err := db.Routing().SaveProvider(ctx, ProviderRow{
+		ID: byName.ID, Name: "deepseek", APIKey: "sk-d", TargetURL: "https://api.deepseek.com/v1",
+		Enabled: true, CreatedAt: ts(2000),
+	}); err != nil {
+		t.Fatalf("SaveProvider (clear): %v", err)
+	}
+	cleared, ok, err := db.Routing().ProviderByName(ctx, "deepseek")
+	if err != nil || !ok {
+		t.Fatalf("ProviderByName after clear: ok=%v err=%v", ok, err)
+	}
+	if cleared.PeakWindows != "" {
+		t.Errorf("PeakWindows not cleared: %q", cleared.PeakWindows)
+	}
+}

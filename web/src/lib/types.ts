@@ -893,6 +893,13 @@ export interface Provider {
   // Provider-level data residency ("" / undefined = unknown).
   country?: string;
   data_residency_group?: string;
+  // Peak pricing sprint (2026-09-12): peak_windows is the raw JSON-encoded
+  // schedule (edited as text — see PeakWindowsEditor), undefined/"" = no
+  // peak/off-peak concept for this provider. peak_active_now is computed
+  // server-side against the real clock — never re-derive the window math
+  // in the frontend.
+  peak_windows?: string;
+  peak_active_now: boolean;
 }
 
 export interface ProvidersResponse {
@@ -955,6 +962,10 @@ export interface ProviderUpdateRequest {
   enabled?: boolean;
   country?: string;
   data_residency_group?: string;
+  // Peak pricing sprint (2026-09-12): raw JSON-encoded internal/pricing.
+  // Windows schedule; "" clears it. Validated server-side (PeakWindowsEditor
+  // surfaces the parse error rather than re-implementing the grammar here).
+  peak_windows?: string;
 }
 
 // POST /api/v1/providers/{name}/discover-billing response (product/QA
@@ -1486,6 +1497,14 @@ export interface CatalogOffering {
   // routing sprint, 2026-08-06): LOWEST value wins; default 100 = "no
   // preference" (ties break by provider name).
   priority: number;
+  // Peak-tier rates (peak pricing sprint, 2026-09-12): undefined/null on
+  // any of the three = no peak differential for that field, falls back to
+  // the base rate above — same precedent as price_cached_in_per_1m.
+  // Meaningless (never applied) unless the owning provider has a
+  // peak_windows schedule configured — see CatalogProviderRef.
+  price_in_per_1m_peak?: number | null;
+  price_out_per_1m_peak?: number | null;
+  price_cached_in_per_1m_peak?: number | null;
 }
 
 export interface CatalogBenchmark {
@@ -1667,16 +1686,31 @@ export interface CompressorSummaryProxy {
   // money_saved_est FX-converted to the response's display_currency
   // (2026-07-31 fix — this endpoint used to never convert).
   money_saved_display?: number;
-  // tps_source/tps_mode describe the SINGLE LARGEST contributor to
-  // time_saved_seconds_est (by share of cached requests this window) — see
-  // prefill_breakdown for the full per-model accounting. Every source here
-  // is a real measurement; "fallback" no longer exists.
+
+  // compression_time_saved_seconds_est is the LOCAL analogue driven by
+  // Compressor's own token-dropping (tokens_saved) rather than a
+  // prompt-cache hit (requests_cached, above). Added 2026-09-11:
+  // requests_cached has been structurally 0 in production since the Go
+  // rewrite (forge-compress never increments
+  // compress_requests_cached_total), so time_saved_seconds_est has never
+  // actually fired — this is the field that does. Same per-model
+  // apportionment/TPS lookups as time_saved_seconds_est (they share
+  // prefill_breakdown/tps_source/tps_mode below).
+  compression_time_saved_seconds_est?: number;
+  compression_money_saved_est?: number;
+  compression_money_saved_currency?: string;
+  compression_money_saved_display?: number;
+
+  // tps_source/tps_mode describe the SINGLE LARGEST contributor (by share
+  // of this window's requests) to EITHER estimate above — the apportionment
+  // is identical, so the biggest-contributor model is the same for both.
+  // Every source here is a real measurement; "fallback" no longer exists.
   tps_source?: "profile_depth_curve" | "observed" | "profile_scalar" | "catalog" | "live";
   tps_mode?: string;
-  // prefill_breakdown is the full per-model accounting behind
-  // time_saved_seconds_est: every model that contributed cached requests
-  // this window AND had a resolvable real prefill TPS, sorted by share
-  // descending. Local-only.
+  // prefill_breakdown is the full per-model accounting shared by both
+  // time_saved_seconds_est and compression_time_saved_seconds_est: every
+  // model that contributed requests this window AND had a resolvable real
+  // prefill TPS, sorted by share descending. Local-only.
   prefill_breakdown?: {
     mode: string;
     share: number; // 0-1, this model's share of the proxy's requests this window

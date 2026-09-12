@@ -194,6 +194,56 @@ func TestCompress_MultiChunkAggregation(t *testing.T) {
 	}
 }
 
+// TestCompress_BatchSizeDoesNotChangeResult is the batch-vs-unbatched
+// correctness bar from the 2026-09-11 speed work: BatchSize is purely a
+// performance knob — grouping chunks into fewer, larger Scorer.ScoreBatch
+// calls must never change WHICH words survive. Runs identical multi-chunk
+// content (400 words, 3 tokens/word — several chunks per chunk_test.go) with
+// a real content-dependent (not position-dependent) keep policy through
+// BatchSize 1, 3 (doesn't evenly divide the chunk count), and a value
+// larger than the total chunk count (single batch), and asserts
+// byte-identical output every time. (This exercises this package's own
+// batching/ordering orchestration, not onnxscorer's real padding math —
+// fakeScorer.ScoreBatch delegates to Score per item by construction, so
+// true numeric batch-vs-unbatched equivalence for the real ONNX model still
+// needs verifying against onnxscorer directly, which needs the cgo-linked
+// native build — see docs/v5-headroom-replacement.md's recurring build
+// note.)
+func TestCompress_BatchSizeDoesNotChangeResult(t *testing.T) {
+	words := make([]string, 400)
+	for i := range words {
+		words[i] = base26Word(i)
+	}
+	content := strings.Join(words, " ")
+	tok := fakeTokenizer{tokensPerWord: func(string) int { return 3 }}
+	// Content-dependent: keep every word whose global index is even. Real
+	// (not positional-within-chunk) so the same word gets the same verdict
+	// regardless of which chunk/batch it lands in.
+	sc := fakeScorer{keepWordIndex: func(wi int) bool { return wi%2 == 0 }}
+
+	var results []Result
+	for _, batchSize := range []int{1, 3, 1000} {
+		e := newTestEngine(tok, sc, func(c *Config) {
+			c.ByteThreshold = 0
+			c.MinWords = 1
+			c.BatchSize = batchSize
+		})
+		res, err := e.Compress(content)
+		if err != nil {
+			t.Fatalf("BatchSize=%d: %v", batchSize, err)
+		}
+		results = append(results, res)
+	}
+	for i := 1; i < len(results); i++ {
+		if results[i].Compressed != results[0].Compressed {
+			t.Errorf("BatchSize changed the compressed output:\n batch 1 result: %q\n later result:   %q", results[0].Compressed, results[i].Compressed)
+		}
+		if results[i].OriginalTokens != results[0].OriginalTokens || results[i].CompressedTokens != results[0].CompressedTokens {
+			t.Errorf("BatchSize changed token counts: %+v vs %+v", results[0], results[i])
+		}
+	}
+}
+
 // TestCompress_PathologicalSingleWordNeverOversizesScorerCall reproduces
 // the 2026-08-20 deepseek OOM incident end to end: a single word (no
 // whitespace boundary chunkWords can cut on) whose own token count blows

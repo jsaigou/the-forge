@@ -334,11 +334,20 @@ type compressorCounters struct {
 	TTFBCount, TTFBSum, TTFBMin, TTFBMax                 float64
 	LatencyCount, LatencySum, LatencyMin, LatencyMax     float64
 	OverheadCount, OverheadSum, OverheadMin, OverheadMax float64
+	// OverheadP50/P90/P99 (forge-compress only, absent on legacy proxies —
+	// an honest 0/false via parsePromScalar's discarded ok below) are
+	// percentiles of a bounded recent-sample ring, not a lifetime gauge —
+	// see CompressorSample.OverheadP50MsRecent's doc comment.
+	OverheadP50, OverheadP90, OverheadP99 float64
 	// RequestsByProvider / RequestsByModel are request COUNTS keyed by
 	// label value (compressor_requests_by_{provider,model}) — no token
 	// dimension is exposed per label.
 	RequestsByProvider map[string]float64
 	RequestsByModel    map[string]float64
+	// MessagesByOutcomeSize is per-MESSAGE counts keyed by a composite
+	// "outcome:size_tier" label (compress_messages_total{outcome_size}) —
+	// forge-compress only, absent on legacy proxies.
+	MessagesByOutcomeSize map[string]float64
 	// Provider cache metrics — compress_cache_read_tokens_total{provider},
 	// compress_uncached_input_tokens_total{provider}, etc. Available since
 	// at least 0.30.0 but lazily registered (only appear after first
@@ -393,8 +402,12 @@ func (l *LlamaClient) scrapeCompressorCounters(ctx context.Context, port int) (*
 	c.OverheadSum, _ = parsePromScalar(text, "compress_overhead_ms_sum")
 	c.OverheadMin, _ = parsePromScalar(text, "compress_overhead_ms_min")
 	c.OverheadMax, _ = parsePromScalar(text, "compress_overhead_ms_max")
+	c.OverheadP50, _ = parsePromScalar(text, "compress_overhead_ms_p50")
+	c.OverheadP90, _ = parsePromScalar(text, "compress_overhead_ms_p90")
+	c.OverheadP99, _ = parsePromScalar(text, "compress_overhead_ms_p99")
 	c.RequestsByProvider = parsePromByLabel(text, "compress_requests_by_provider", "provider")
 	c.RequestsByModel = parsePromByLabel(text, "compress_requests_by_model", "model")
+	c.MessagesByOutcomeSize = parsePromByLabel(text, "compress_messages_total", "outcome_size")
 	c.CacheReadTokens = parsePromByLabel(text, "compress_cache_read_tokens_total", "provider")
 	c.CacheWriteTokens = parsePromByLabel(text, "compress_cache_write_tokens_total", "provider")
 	c.UncachedTokens = parsePromByLabel(text, "compress_uncached_input_tokens_total", "provider")
