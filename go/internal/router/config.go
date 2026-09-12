@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/pricing"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -80,6 +81,19 @@ type Backend struct {
 	PriceOutPer1M      float64
 	PriceCachedInPer1M *float64 // nil = provider's cache-hit discount unmodelled
 	PriceCurrency      string
+
+	// Peak pricing (2026-09-12): PriceInPer1MPeak/PriceOutPer1MPeak/
+	// PriceCachedInPer1MPeak carry the offering's peak-tier rates (nil per
+	// field = no peak differential, falls back to the base rate above) and
+	// PeakWindows is the owning provider's parsed schedule — both copied
+	// alongside the base prices at offeringChain's single copy point, so
+	// computeCostNative can pick a tier per-request with no extra DB read.
+	// PeakWindows.Windows is empty for a foundry_slot backend and for any
+	// remote provider with no configured schedule.
+	PriceInPer1MPeak       *float64
+	PriceOutPer1MPeak      *float64
+	PriceCachedInPer1MPeak *float64
+	PeakWindows            pricing.Windows
 }
 
 // Route is one [[router.routes]] entry: a logical model name maps to an

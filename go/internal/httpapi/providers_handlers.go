@@ -84,6 +84,8 @@ func (s *Server) handleProvidersList(w http.ResponseWriter, r *http.Request) {
 			Enabled:            p.Enabled,
 			Country:            p.Country,
 			DataResidencyGroup: p.DataResidencyGroup,
+			PeakWindows:        p.PeakWindows,
+			PeakActiveNow:      p.PeakActiveNow,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)

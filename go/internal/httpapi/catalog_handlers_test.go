@@ -777,10 +777,12 @@ func TestCatalogOfferingCRUD(t *testing.T) {
 		t.Errorf("expected 1 offering, got %d", len(list))
 	}
 
-	// Update — also sets price_cached_in_per_1m, which must round-trip
-	// through Get/Update (a real pre-existing gap: only ListOfferings used
-	// to read this column back).
-	body = `{"model_id":` + itoa(pq.modelID) + `,"provider":"testprov","wire_model":"test-model-v2","price_in_per_1m":0.6,"price_out_per_1m":1.6,"price_cached_in_per_1m":0.06,"currency":"EUR","context_length":65536,"enabled":false}`
+	// Update — also sets price_cached_in_per_1m and the three peak fields,
+	// which must round-trip through Get/Update (a real pre-existing gap:
+	// only ListOfferings used to read the cached column back; the peak
+	// pricing sprint, 2026-09-12, added the peak trio through the same
+	// full-replace body).
+	body = `{"model_id":` + itoa(pq.modelID) + `,"provider":"testprov","wire_model":"test-model-v2","price_in_per_1m":0.6,"price_out_per_1m":1.6,"price_cached_in_per_1m":0.06,"price_in_per_1m_peak":1.2,"price_out_per_1m_peak":3.2,"price_cached_in_per_1m_peak":0.12,"currency":"EUR","context_length":65536,"enabled":false}`
 	w = do(t, s, authedRequest("PUT", "/api/v1/catalog/offerings/"+itoa(o.ID), bytes.NewBufferString(body)))
 	if w.Code != 200 {
 		t.Fatalf("update offering = %d: %s", w.Code, w.Body.String())
@@ -790,8 +792,17 @@ func TestCatalogOfferingCRUD(t *testing.T) {
 	if updated.PriceCachedInPer1M == nil || *updated.PriceCachedInPer1M != 0.06 {
 		t.Errorf("price_cached_in_per_1m after update = %v, want 0.06", updated.PriceCachedInPer1M)
 	}
+	if updated.PriceInPer1MPeak == nil || *updated.PriceInPer1MPeak != 1.2 {
+		t.Errorf("price_in_per_1m_peak after update = %v, want 1.2", updated.PriceInPer1MPeak)
+	}
+	if updated.PriceOutPer1MPeak == nil || *updated.PriceOutPer1MPeak != 3.2 {
+		t.Errorf("price_out_per_1m_peak after update = %v, want 3.2", updated.PriceOutPer1MPeak)
+	}
+	if updated.PriceCachedInPer1MPeak == nil || *updated.PriceCachedInPer1MPeak != 0.12 {
+		t.Errorf("price_cached_in_per_1m_peak after update = %v, want 0.12", updated.PriceCachedInPer1MPeak)
+	}
 
-	// Get — must reflect the same value, not just the update response.
+	// Get — must reflect the same values, not just the update response.
 	w = do(t, s, authedRequest("GET", "/api/v1/catalog/offerings/"+itoa(o.ID), nil))
 	if w.Code != 200 {
 		t.Fatalf("get offering = %d: %s", w.Code, w.Body.String())
@@ -800,6 +811,9 @@ func TestCatalogOfferingCRUD(t *testing.T) {
 	decodeJSON(t, w.Body, &fetched)
 	if fetched.PriceCachedInPer1M == nil || *fetched.PriceCachedInPer1M != 0.06 {
 		t.Errorf("price_cached_in_per_1m on GET = %v, want 0.06", fetched.PriceCachedInPer1M)
+	}
+	if fetched.PriceInPer1MPeak == nil || *fetched.PriceInPer1MPeak != 1.2 {
+		t.Errorf("price_in_per_1m_peak on GET = %v, want 1.2", fetched.PriceInPer1MPeak)
 	}
 
 	// Delete.
@@ -832,6 +846,15 @@ func TestCatalogOfferingValidation(t *testing.T) {
 	w = do(t, s, authedRequest("POST", "/api/v1/catalog/offerings", bytes.NewBufferString(body)))
 	if w.Code != 422 {
 		t.Fatalf("nonexistent model = %d, want 422", w.Code)
+	}
+
+	// Negative peak price (peak pricing sprint, 2026-09-12) — sign only is
+	// validated; a peak rate below the base rate is deliberately allowed
+	// (that's the provider's own pricing policy, not this app's to enforce).
+	body = `{"model_id":` + itoa(pq.modelID) + `,"provider":"testprov","wire_model":"test-neg-peak","price_in_per_1m_peak":-0.1}`
+	w = do(t, s, authedRequest("POST", "/api/v1/catalog/offerings", bytes.NewBufferString(body)))
+	if w.Code != 422 {
+		t.Fatalf("negative price_in_per_1m_peak = %d, want 422", w.Code)
 	}
 }
 

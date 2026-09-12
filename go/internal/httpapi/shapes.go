@@ -596,6 +596,15 @@ type providerJSON struct {
 	TargetURL string `json:"target_url,omitempty"`
 	StatusURL string `json:"status_url,omitempty"`
 	OrgID     string `json:"org_id,omitempty"`
+
+	// PeakWindows (peak pricing sprint, 2026-09-12, additive): this
+	// provider's raw JSON-encoded internal/pricing.Windows schedule (e.g.
+	// DeepSeek's weekday UTC peak hours), editable via PUT. "" = no
+	// peak/off-peak concept for this provider. PeakActiveNow is computed
+	// server-side (never ported to TypeScript) so the FE can show a "peak
+	// now" badge without re-implementing the window math.
+	PeakWindows   string `json:"peak_windows,omitempty"`
+	PeakActiveNow bool   `json:"peak_active_now"`
 }
 
 type providersResponse struct {

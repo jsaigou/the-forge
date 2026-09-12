@@ -13,6 +13,7 @@ import (
 	"github.com/jsaigou/the-forge/internal/config"
 	"github.com/jsaigou/the-forge/internal/engine"
 	"github.com/jsaigou/the-forge/internal/fx"
+	"github.com/jsaigou/the-forge/internal/pricing"
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/store"
 )
@@ -466,6 +467,72 @@ func TestCompressorSummaryPerModelSum(t *testing.T) {
 	}
 }
 
+// TestCompressorSummaryCompressionTimeSavedPerModelSum is the
+// TestCompressorSummaryPerModelSum, but for CompressionTimeSavedSecondsEst
+// (TokensSaved-apportioned) instead of TimeSavedSecondsEst
+// (RequestsCached-apportioned) — same per-model apportionment math, driven
+// by the field that actually has real data in production. RequestsCached is
+// deliberately left at 0 here (it is structurally 0 in production —
+// forge-compress never increments compress_requests_cached_total), so this
+// also regression-tests that the compression-based estimate does not
+// require any cache hits to fire.
+func TestCompressorSummaryCompressionTimeSavedPerModelSum(t *testing.T) {
+	s, db := serverWithCompressorStore(t)
+	seedProxy(t, db, "local", "")
+	pq := seedCatalogPrereqs(t, db)
+	seedTestConfig(t, db, pq, "fast-mode")
+	seedTestConfig(t, db, pq, "slow-mode")
+	now := time.Now().UTC()
+
+	for i := 0; i < 10; i++ {
+		if err := db.PrefillStats().AddObservation(context.Background(), mustConfigID(t, db, "fast-mode"), "fpA", 1000, 1); err != nil { // 1000 tps
+			t.Fatalf("AddObservation fast-mode: %v", err)
+		}
+		if err := db.PrefillStats().AddObservation(context.Background(), mustConfigID(t, db, "slow-mode"), "fpB", 100, 1); err != nil { // 100 tps
+			t.Fatalf("AddObservation slow-mode: %v", err)
+		}
+	}
+
+	// 100 requests total: 75 fast-mode, 25 slow-mode. RequestsCached=0 (the
+	// real production value), TokensSaved=40,000 apportioned 75/25 by
+	// request share, same as the cached-tokens case above.
+	if err := db.Routing().RecordSavingsSample(context.Background(), store.CompressorSavingsSampleRow{
+		TS: now, ProxyID: mustProxyID(t, db, "local"), TokensIn: 100000, Requests: 100, RequestsCached: 0, TokensSaved: 40000,
+	}, []store.CompressorLabelSample{
+		{TS: now, ProxyID: mustProxyID(t, db, "local"), LabelKey: "model", LabelValue: "fast-mode", Metric: "requests", Delta: 75},
+		{TS: now, ProxyID: mustProxyID(t, db, "local"), LabelKey: "model", LabelValue: "slow-mode", Metric: "requests", Delta: 25},
+	}); err != nil {
+		t.Fatalf("RecordSavingsSample: %v", err)
+	}
+
+	w := do(t, s, authedRequest("GET", "/api/v1/compressor/summary?window=1h", nil))
+	var resp compressorSummaryResponse
+	decodeJSON(t, w.Body, &resp)
+	p := resp.Proxies[0]
+	if p.TimeSavedSecondsEst != nil {
+		t.Errorf("time_saved_seconds_est = %v, want nil (RequestsCached=0)", *p.TimeSavedSecondsEst)
+	}
+	if p.CompressionTimeSavedSecondsEst == nil {
+		t.Fatal("compression_time_saved_seconds_est = nil, want populated")
+	}
+	// fast-mode: 40,000*0.75=30,000 tokens / 1000 tps = 30s.
+	// slow-mode: 40,000*0.25=10,000 tokens / 100 tps = 100s.
+	// Sum = 130s.
+	want := 130.0
+	if *p.CompressionTimeSavedSecondsEst != want {
+		t.Errorf("compression_time_saved_seconds_est = %v, want %v (per-model sum)", *p.CompressionTimeSavedSecondsEst, want)
+	}
+	if p.CompressionMoneySavedEst == nil {
+		t.Error("compression_money_saved_est = nil, want populated alongside the time figure")
+	}
+	if len(p.PrefillBreakdown) != 2 {
+		t.Fatalf("prefill_breakdown = %+v, want 2 entries (shared by both estimates)", p.PrefillBreakdown)
+	}
+	if p.TPSMode != "fast-mode" {
+		t.Errorf("tps_mode = %q, want fast-mode (largest share)", p.TPSMode)
+	}
+}
+
 // TestCompressorSummaryTimeSavedCanExceedWindow: A1-A4 run CONCURRENTLY, so
 // aggregate compute-seconds saved can legitimately exceed the wall-clock
 // window (up to ~4x on this hardware) — this must NOT be clamped to the
@@ -757,6 +824,62 @@ func TestCompressorSummaryRemoteCompressionSavedBlendedRate(t *testing.T) {
 	wantSaved := 0.91 // 1M tokens saved * 0.91/1M
 	if got := *p.CompressionSavedNative; got < wantSaved-1e-9 || got > wantSaved+1e-9 {
 		t.Errorf("compression_saved_native = %v, want %v", got, wantSaved)
+	}
+}
+
+// TestCompressorSummaryRemoteCompressionSavedTierWeighted confirms the
+// blended input rate weights each event at ITS OWN price tier (peak or
+// off-peak) rather than blending at today's/the offering's base rate —
+// exactly the "boundary-crossing window" case the peak pricing sprint
+// (2026-09-12) exists for. Two events on the same offering, one recorded
+// peak and one off-peak, must produce a token-weighted average of the two
+// TIER rates, not two copies of the base rate.
+func TestCompressorSummaryRemoteCompressionSavedTierWeighted(t *testing.T) {
+	s, db := serverWithCompressorStore(t)
+	seedProxy(t, db, "deepseek", "deepseek")
+	pq := seedCatalogPrereqs(t, db)
+
+	peakIn := 0.30
+	if _, err := db.Catalog().CreateOffering(context.Background(), store.Offering{
+		ModelID: pq.modelID, ProviderID: mustProviderID(t, db, "deepseek"), WireModel: "deepseek-flash",
+		PriceInPer1M: 0.15, PriceOutPer1M: 0.60, PriceInPer1MPeak: &peakIn,
+		Currency: "USD", Enabled: true,
+	}); err != nil {
+		t.Fatalf("CreateOffering: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := db.Routing().RecordSavingsSample(context.Background(), store.CompressorSavingsSampleRow{
+		TS: now, ProxyID: mustProxyID(t, db, "deepseek"), TokensIn: 3000, TokensSaved: 1_000_000, Requests: 2, RequestsCached: 1,
+	}, nil); err != nil {
+		t.Fatalf("RecordSavingsSample: %v", err)
+	}
+	// 500k tokens billed at the peak tier (0.30), 500k at off-peak (0.15) —
+	// blending at the base rate alone would give 0.15 for both; per-event
+	// tier weighting gives (500000*0.30 + 500000*0.15) / 1000000 = 0.225.
+	if err := db.Usage().Record(context.Background(), store.UsageEvent{
+		TS: now, Kind: "external_request", Model: "deepseek-flash", ProviderID: mustProviderIDPtr(t, db, "deepseek"),
+		PromptTokens: 500_000, CompletionTokens: 10, PriceTier: pricing.TierPeak,
+	}); err != nil {
+		t.Fatalf("Usage.Record peak: %v", err)
+	}
+	if err := db.Usage().Record(context.Background(), store.UsageEvent{
+		TS: now, Kind: "external_request", Model: "deepseek-flash", ProviderID: mustProviderIDPtr(t, db, "deepseek"),
+		PromptTokens: 500_000, CompletionTokens: 10, PriceTier: pricing.TierOffPeak,
+	}); err != nil {
+		t.Fatalf("Usage.Record off-peak: %v", err)
+	}
+
+	w := do(t, s, authedRequest("GET", "/api/v1/compressor/summary?window=1h", nil))
+	var resp compressorSummaryResponse
+	decodeJSON(t, w.Body, &resp)
+	p := resp.Proxies[0]
+	if p.CompressionRatePer1M == nil {
+		t.Fatalf("compression_rate_per_1m = nil, want populated")
+	}
+	want := 0.225
+	if got := *p.CompressionRatePer1M; got < want-1e-9 || got > want+1e-9 {
+		t.Errorf("compression_rate_per_1m = %v, want %v (per-event tier weighted)", got, want)
 	}
 }
 

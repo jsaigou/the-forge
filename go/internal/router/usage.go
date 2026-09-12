@@ -22,6 +22,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/pricing"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -210,26 +211,54 @@ func parseStreamingUsage(tail []byte) (prompt, completion, cached int64, ok bool
 }
 
 // computeCostNative prices promptTokens/completionTokens/cachedTokens
-// against resolved's per-1M rates. ok=false ("" PriceCurrency) means no
-// offering matched this request — the caller must not fabricate a cost.
-// When the provider discounts cache hits but PriceCachedInPer1M is nil
-// (unmodelled), cached tokens are priced at the full input rate — a
-// documented upper bound, never an under-estimate.
-func computeCostNative(resolved ResolvedBackend, promptTokens, completionTokens, cachedTokens int64) (cost float64, ok bool) {
+// against resolved's per-1M rates, picking the price tier in force at t
+// (the response-completion time — see recordExternalUsage). ok=false (""
+// PriceCurrency) means no offering matched this request — the caller must
+// not fabricate a cost. When the provider discounts cache hits but the
+// chosen tier's cached rate is nil (unmodelled), cached tokens are priced
+// at the full input rate — a documented upper bound, never an under-estimate.
+//
+// Tier resolution is deliberately at record time, not request-start time:
+// nothing upstream of this function ever uses price for routing decisions
+// (select.go sorts by priority only), and pinning the tier here means the
+// stored cost and the tier derivable from the stored event timestamp can
+// never disagree — the one property compressor_summary_handlers.go's
+// historical re-pricing (estimateRemoteCacheDiscountSaved /
+// estimateRemoteCompressionSaved) depends on. A request whose response
+// completes just after a tier boundary is therefore billed entirely at the
+// new tier, even though most of the work happened in the old one — a
+// reproducible, auditable rule, recorded on the event as tier, rather than
+// a guess at DeepSeek's own internal accounting for boundary-crossers.
+func computeCostNative(resolved ResolvedBackend, promptTokens, completionTokens, cachedTokens int64, t time.Time) (cost float64, tier string, ok bool) {
 	if resolved.PriceCurrency == "" {
-		return 0, false
+		return 0, "", false
 	}
+	tier = resolved.PeakWindows.TierAt(t)
+
+	priceIn, priceOut, priceCachedIn := resolved.PriceInPer1M, resolved.PriceOutPer1M, resolved.PriceCachedInPer1M
+	if tier == pricing.TierPeak {
+		if resolved.PriceInPer1MPeak != nil {
+			priceIn = *resolved.PriceInPer1MPeak
+		}
+		if resolved.PriceOutPer1MPeak != nil {
+			priceOut = *resolved.PriceOutPer1MPeak
+		}
+		if resolved.PriceCachedInPer1MPeak != nil {
+			priceCachedIn = resolved.PriceCachedInPer1MPeak
+		}
+	}
+
 	billableIn := promptTokens
-	if cachedTokens > 0 && resolved.PriceCachedInPer1M != nil {
+	if cachedTokens > 0 && priceCachedIn != nil {
 		billableIn = promptTokens - cachedTokens
 		if billableIn < 0 {
 			billableIn = 0
 		}
-		cost += float64(cachedTokens) / 1e6 * *resolved.PriceCachedInPer1M
+		cost += float64(cachedTokens) / 1e6 * *priceCachedIn
 	}
-	cost += float64(billableIn) / 1e6 * resolved.PriceInPer1M
-	cost += float64(completionTokens) / 1e6 * resolved.PriceOutPer1M
-	return cost, true
+	cost += float64(billableIn) / 1e6 * priceIn
+	cost += float64(completionTokens) / 1e6 * priceOut
+	return cost, tier, true
 }
 
 // recordExternalUsage builds and persists one kind="external_request"
@@ -258,8 +287,9 @@ func (s *Server) recordExternalUsage(resolved ResolvedBackend, model string, buf
 		prompt, completion, cached, ok = parseNonStreamingUsage(buf)
 	}
 
+	now := time.Now()
 	ev := store.UsageEvent{
-		TS: time.Now(), Kind: "external_request",
+		TS: now, Kind: "external_request",
 		Model: resolved.WireModel, ProviderID: nonZeroInt64Ptr(resolved.ProviderID),
 	}
 	if !ok {
@@ -272,9 +302,13 @@ func (s *Server) recordExternalUsage(resolved ResolvedBackend, model string, buf
 		if cached > 0 {
 			ev.CachedPromptTokens = &cached
 		}
-		if cost, ok := computeCostNative(resolved, prompt, completion, cached); ok {
+		// now (not a separately-captured time) both stamps ev.TS above and
+		// selects the price tier below, by construction — see
+		// computeCostNative's doc comment for why that must be one value.
+		if cost, tier, ok := computeCostNative(resolved, prompt, completion, cached, now); ok {
 			ev.CostNative = &cost
 			ev.CostCurrency = resolved.PriceCurrency
+			ev.PriceTier = tier
 		}
 	}
 
