@@ -1232,6 +1232,12 @@ function useCatalogMutations() {
     qc.invalidateQueries({ queryKey: qk.status });
     qc.invalidateQueries({ queryKey: qk.modelCards("7d") });
     qc.invalidateQueries({ queryKey: qk.configCards("7d") });
+    // Peak pricing sprint (2026-09-12): an offering/provider price edit
+    // previously left the Dashboard Cost tab and the provider price line
+    // stale until their own unrelated refetch — a catalog edit changes what
+    // those surfaces should show right now.
+    qc.invalidateQueries({ queryKey: ["cost"] });
+    qc.invalidateQueries({ queryKey: qk.providers });
   };
   return { invalidateAll };
 }

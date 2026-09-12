@@ -29,6 +29,7 @@ func TestUsageRecordAndEventsRoundTripNewFields(t *testing.T) {
 		TS: now, Kind: "external_request", Model: "wire-m", ProviderID: &deepseekID,
 		PromptTokens: 1000, CompletionTokens: 200,
 		CostNative: &cost, CostCurrency: "USD", CachedPromptTokens: &cached,
+		PriceTier: "peak",
 	}); err != nil {
 		t.Fatalf("Record metered: %v", err)
 	}
@@ -89,6 +90,12 @@ func TestUsageRecordAndEventsRoundTripNewFields(t *testing.T) {
 	}
 	if metered.Unmetered {
 		t.Error("metered row: Unmetered = true, want false")
+	}
+	if metered.PriceTier != "peak" {
+		t.Errorf("metered row PriceTier = %q, want %q", metered.PriceTier, "peak")
+	}
+	if inference.PriceTier != "" {
+		t.Errorf("inference row PriceTier = %q, want empty", inference.PriceTier)
 	}
 }
 

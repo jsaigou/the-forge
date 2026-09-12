@@ -260,6 +260,15 @@ type UsageEvent struct {
 	// pre-existing call site (OnTokenSample, load/unload events) is
 	// automatically correct without being touched.
 	Unmetered bool
+
+	// PriceTier (peak pricing sprint, 2026-09-12) records which tier —
+	// "peak"/"off_peak"/"flat" (internal/pricing.Tier* constants) — was in
+	// force when CostNative was computed, so historical reporting can price
+	// past events accurately without re-deriving from today's rates, and an
+	// operator can audit a recorded cost against the provider's invoice.
+	// "" when CostNative is nil (pricing wasn't resolvable) or for any row
+	// written before this migration.
+	PriceTier string
 }
 
 type ModeHistoryEntry struct {
@@ -469,6 +478,12 @@ type CompressorSavingsSampleRow struct {
 	OverheadCount                int64
 	OverheadSumMs                float64
 	OverheadMinMs, OverheadMaxMs *float64
+	// OverheadP50Ms/P90Ms/P99Ms are percentiles of the proxy's own recent
+	// (bounded-ring, NOT lifetime) overhead samples — a latest-snapshot
+	// gauge like Min/Max above, never summed/averaged across a window. nil
+	// below the 10-sample floor. See collector.CompressorSample's matching
+	// doc comment for why "recent" (not "since start") here.
+	OverheadP50Ms, OverheadP90Ms, OverheadP99Ms *float64
 }
 
 // CompressorLabelSample is one interval's per-(proxy,label) delta for a
@@ -512,9 +527,17 @@ type CompressorProxySummary struct {
 	OverheadCount                int64
 	OverheadSumMs                float64
 	OverheadMinMs, OverheadMaxMs *float64
+	// OverheadP50Ms/P90Ms/P99Ms: latest window sample's percentiles (never
+	// summed/averaged) — see CompressorSavingsSampleRow's matching field.
+	OverheadP50Ms, OverheadP90Ms, OverheadP99Ms *float64
 
 	RequestsByProvider map[string]int64
 	RequestsByModel    map[string]int64
+	// MessagesByOutcomeSize is per-MESSAGE counts (not per-request) keyed by
+	// a composite "outcome:size_tier" label value — from
+	// compress_messages_total{outcome_size}. See
+	// cmd/forge-compress/messages.go's messageOutcomeSize.
+	MessagesByOutcomeSize map[string]int64
 
 	// Per-provider cache token breakdowns (from compress_cache_read_tokens_total,
 	// compress_uncached_input_tokens_total, etc.).
@@ -638,6 +661,15 @@ type ProviderRow struct {
 	Country            string
 	DataResidencyGroup string
 	CreatedAt          time.Time
+	// PeakWindows (peak pricing sprint, 2026-09-12, 0078_peak_pricing.sql)
+	// is a JSON-encoded internal/pricing.Windows: this provider's recurring
+	// UTC peak-hours schedule (e.g. DeepSeek's weekday 01:00-04:00 +
+	// 06:00-10:00). Lives on the provider, not the offering, because a
+	// peak schedule is a fact about the provider's billing policy shared
+	// by every offering it serves. ""/unset means no peak/off-peak concept
+	// — every request is priced at the offering's base rate
+	// unconditionally (internal/pricing.Windows.TierAt returns "flat").
+	PeakWindows string
 }
 
 type SavingsTotal struct {

@@ -56,6 +56,18 @@ func (fakeScorer) Score(inputIDs, _ []int64) ([]float32, error) {
 	return scores, nil
 }
 
+func (f fakeScorer) ScoreBatch(inputIDs, attentionMask [][]int64) ([][]float32, error) {
+	out := make([][]float32, len(inputIDs))
+	for i := range inputIDs {
+		s, err := f.Score(inputIDs[i], attentionMask[i])
+		if err != nil {
+			return nil, err
+		}
+		out[i] = s
+	}
+	return out, nil
+}
+
 func testEngine() *compress.Engine {
 	return &compress.Engine{
 		Tokenizer: fakeTokenizer{},

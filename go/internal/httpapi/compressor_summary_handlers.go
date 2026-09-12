@@ -43,6 +43,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/pricing"
 	"github.com/jsaigou/the-forge/internal/profile"
 	"github.com/jsaigou/the-forge/internal/store"
 )
@@ -95,9 +96,23 @@ type compressorSummaryProxyJSON struct {
 	OverheadMeanMs          *float64 `json:"overhead_mean_ms"`
 	OverheadMinMsSinceStart *float64 `json:"overhead_min_ms_since_start"`
 	OverheadMaxMsSinceStart *float64 `json:"overhead_max_ms_since_start"`
+	// OverheadP50/P90/P99Ms are percentiles of the proxy's RECENT overhead
+	// samples (bounded ring, not lifetime — see
+	// collector.CompressorSample.OverheadP50MsRecent) — added 2026-09-11
+	// because the mean alone was found to hide a bimodal real-traffic
+	// shape. nil below the 10-sample floor, never a fabricated 0.
+	OverheadP50Ms *float64 `json:"overhead_p50_ms,omitempty"`
+	OverheadP90Ms *float64 `json:"overhead_p90_ms,omitempty"`
+	OverheadP99Ms *float64 `json:"overhead_p99_ms,omitempty"`
 
 	RequestsByProvider map[string]int64 `json:"requests_by_provider,omitempty"`
 	RequestsByModel    map[string]int64 `json:"requests_by_model,omitempty"`
+	// MessagesByOutcomeSize is per-MESSAGE (not per-request) counts keyed by
+	// a composite "outcome:size_tier" label value (e.g. "compressed:huge")
+	// — see cmd/forge-compress/messages.go's messageOutcomeSize. Answers
+	// whether compression's value is concentrated in a few huge messages or
+	// spread evenly, directly from real production traffic.
+	MessagesByOutcomeSize map[string]int64 `json:"messages_by_outcome_size,omitempty"`
 
 	// Provider cache token metrics (from compress_cache_read_tokens_total,
 	// compress_uncached_input_tokens_total, etc. — available since headroom-ai
@@ -132,9 +147,34 @@ type compressorSummaryProxyJSON struct {
 	// (cost.RateCurrency) to the response's DisplayCurrency. Nil whenever
 	// MoneySavedEst is nil.
 	MoneySavedDisplay *float64 `json:"money_saved_display,omitempty"`
-	// TPSSource/TPSMode describe the single largest contributor to
-	// TimeSavedSecondsEst (by share of cached requests) — see
-	// PrefillBreakdown for the full per-model picture.
+
+	// CompressionTimeSavedSecondsEst is the LOCAL analogue of the remote
+	// arm's real CompressionSavedNative below: local prefill time avoided by
+	// Compressor's own token-dropping (TokensSaved), NOT by a prompt-cache
+	// hit (that's TimeSavedSecondsEst above). Unlike TimeSavedSecondsEst,
+	// this needs no RequestsCached×avgTokensPerRequest estimation step — it
+	// is TokensSaved apportioned per model by request share (the same
+	// apportionment TimeSavedSecondsEst already uses, since Compressor only
+	// gives per-model REQUEST counts, not per-model token counts) divided by
+	// that model's real prefill TPS. Added 2026-09-11: RequestsCached has
+	// been structurally 0 in production since the Go rewrite (forge-compress
+	// never increments compress_requests_cached_total), so
+	// TimeSavedSecondsEst has never actually fired — this field is the one
+	// that can.
+	CompressionTimeSavedSecondsEst *float64 `json:"compression_time_saved_seconds_est,omitempty"`
+	CompressionMoneySavedEst       *float64 `json:"compression_money_saved_est,omitempty"`
+	CompressionMoneySavedCurrency  string   `json:"compression_money_saved_currency,omitempty"`
+	// CompressionMoneySavedDisplay is CompressionMoneySavedEst FX-converted
+	// from CompressionMoneySavedCurrency to the response's DisplayCurrency.
+	// Nil whenever CompressionMoneySavedEst is nil.
+	CompressionMoneySavedDisplay *float64 `json:"compression_money_saved_display,omitempty"`
+
+	// TPSSource/TPSMode describe the single largest contributor (by share of
+	// this window's requests) to EITHER local estimate above — the same
+	// per-model apportionment and TPS lookups feed both TimeSavedSecondsEst
+	// and CompressionTimeSavedSecondsEst, so the "biggest contributor" model
+	// is identical for both; see PrefillBreakdown for the full per-model
+	// picture (also shared by both estimates).
 	TPSSource string `json:"tps_source,omitempty"`
 	TPSMode   string `json:"tps_mode,omitempty"`
 	// PrefillBreakdown is the full per-model accounting behind
@@ -260,6 +300,7 @@ func (s *Server) handleCompressorSummary(w http.ResponseWriter, r *http.Request)
 			Requests: p.Requests, RequestsCached: p.RequestsCached,
 			RequestsFailed: p.RequestsFailed, RequestsRateLimited: p.RequestsRateLimited,
 			RequestsByProvider: p.RequestsByProvider, RequestsByModel: p.RequestsByModel,
+			MessagesByOutcomeSize: p.MessagesByOutcomeSize,
 			CacheReadTokens:           p.CacheReadTokens,
 			UncachedTokens:            p.UncachedTokens,
 			CacheBusts:                p.CacheBusts,
@@ -281,6 +322,7 @@ func (s *Server) handleCompressorSummary(w http.ResponseWriter, r *http.Request)
 		j.LatencyMinMsSinceStart, j.LatencyMaxMsSinceStart = p.LatencyMinMs, p.LatencyMaxMs
 		j.OverheadMeanMs = meanMs(p.OverheadSumMs, p.OverheadCount)
 		j.OverheadMinMsSinceStart, j.OverheadMaxMsSinceStart = p.OverheadMinMs, p.OverheadMaxMs
+		j.OverheadP50Ms, j.OverheadP90Ms, j.OverheadP99Ms = p.OverheadP50Ms, p.OverheadP90Ms, p.OverheadP99Ms
 
 		if kind == "local" {
 			c, m := s.estimateCompressorTimeSaved(ctx, &j, p, display)
@@ -305,30 +347,55 @@ func meanMs(sum float64, count int64) *float64 {
 	return &v
 }
 
-// estimateCompressorTimeSaved fills j's TimeSavedSecondsEst/MoneySavedEst from
-// p as a SUM over models (2026-08-06 rewrite — see the package doc). Compressor
-// gives per-model REQUEST counts, not per-model token counts, so each
-// model's cached-token share is apportioned by its share of this proxy's
-// requests. Summing (that model's apportioned cached tokens ÷ that model's
-// OWN real prefill TPS) per model is the correct math; blending every
-// model's TPS into one average and dividing the whole window's cached
-// tokens by it once is not — the whole reason a per-window aggregate
-// dominant-model figure produced a fabricated-looking result before.
+// estimateCompressorTimeSaved fills j's local time/money-saved estimates —
+// TWO independent figures, both computed as a SUM over models (2026-08-06
+// rewrite of the original; 2026-09-11 added the second figure — see the
+// package doc and CompressionTimeSavedSecondsEst's own doc comment):
+//
+//  1. TimeSavedSecondsEst — prompt-cache-hit avoided re-prefill, apportioned
+//     from RequestsCached. Structurally 0 in production today (forge-compress
+//     never increments compress_requests_cached_total), kept computed anyway
+//     in case that ever changes — cheap, and the code path is exercised by
+//     tests either way.
+//  2. CompressionTimeSavedSecondsEst — Compressor's own token-dropping
+//     (TokensSaved), the one that actually fires today.
+//
+// Compressor gives per-model REQUEST counts, not per-model token counts, so
+// both figures apportion their window-total token count by each model's
+// share of this proxy's requests. Summing (that model's apportioned tokens ÷
+// that model's OWN real prefill TPS) per model is the correct math; blending
+// every model's TPS into one average and dividing the whole window's tokens
+// by it once is not — the whole reason a per-window aggregate dominant-model
+// figure produced a fabricated-looking result before (a flat 50 tok/s
+// fallback once reported "493 hours saved in a 168-hour window"). Both
+// figures share one pass over p.RequestsByModel and one lookupPrefillTPS
+// call per model — no extra I/O for the second figure.
 //
 // Money uses the same wall-power cost model as /api/v1/cost/summary, so the
-// two "what did this cost/save me" figures agree on their unit economics.
+// "what did this cost/save me" figures agree on their unit economics.
 // estimateCompressorTimeSaved returns (conversion, missing) — whether a
-// non-trivial FX conversion was needed for MoneySavedDisplay, and whether the
-// rate for it was missing (caller aggregates these into the response-level
-// fx_stale). Both are false on every early return, since no money was
-// computed yet in those cases.
+// non-trivial FX conversion was needed for either *Display field, and
+// whether the rate for it was missing (caller aggregates these into the
+// response-level fx_stale). Both are false when neither figure produced
+// money.
 func (s *Server) estimateCompressorTimeSaved(ctx context.Context, j *compressorSummaryProxyJSON, p store.CompressorProxySummary, display string) (conversion, missing bool) {
-	if p.Requests <= 0 || p.RequestsCached <= 0 {
-		return false, false // nothing cached this window — leave the estimate fields absent
+	if p.Requests <= 0 {
+		return false, false
 	}
 	avgTokensPerRequest := float64(p.TokensIn) / float64(p.Requests)
-	cachedTokens := float64(p.RequestsCached) * avgTokensPerRequest
-	j.TokensSavedEst = &cachedTokens
+
+	haveCached := p.RequestsCached > 0
+	var cachedTokens float64
+	if haveCached {
+		cachedTokens = float64(p.RequestsCached) * avgTokensPerRequest
+		j.TokensSavedEst = &cachedTokens
+	}
+	haveCompression := p.TokensSaved > 0
+	compressedTokens := float64(p.TokensSaved)
+
+	if !haveCached && !haveCompression {
+		return false, false // nothing cached and nothing compressed this window
+	}
 
 	var totalRequests int64
 	for _, n := range p.RequestsByModel {
@@ -338,7 +405,7 @@ func (s *Server) estimateCompressorTimeSaved(ctx context.Context, j *compressorS
 		return false, false // no per-model breakdown at all — can't apportion or look anything up
 	}
 
-	var timeSaved float64
+	var timeSaved, compressionTimeSaved float64
 	var breakdown []compressorPrefillModelJSON
 	var best compressorPrefillModelJSON
 	var bestShare float64
@@ -351,44 +418,61 @@ func (s *Server) estimateCompressorTimeSaved(ctx context.Context, j *compressorS
 		// "qwen36-mtp"). Resolve it back to a mode name first.
 		mode := s.resolveModePathAlias(rawMode)
 		share := float64(reqCount) / float64(totalRequests)
-		modelCachedTokens := cachedTokens * share
 
 		tps, source, ok := s.lookupPrefillTPS(ctx, mode, avgTokensPerRequest)
 		if !ok {
 			// Anomaly, not a routine gap (package doc): a model contributing
-			// cached requests to this window necessarily ran, so its prefill
+			// requests to this window necessarily ran, so its prefill
 			// counters were scraped. Landing here means something upstream
 			// is actually broken — log it and omit the contribution rather
 			// than guess.
-			log.Printf("compressor summary: no real prefill TPS for mode %q (raw %q, proxy %q) despite %d cached-eligible requests this window — omitted from local time-saved",
+			log.Printf("compressor summary: no real prefill TPS for mode %q (raw %q, proxy %q) despite %d contributing requests this window — omitted from local time-saved",
 				mode, rawMode, j.Proxy, reqCount)
 			continue
 		}
-		timeSaved += modelCachedTokens / tps
+		if haveCached {
+			timeSaved += (cachedTokens * share) / tps
+		}
+		if haveCompression {
+			compressionTimeSaved += (compressedTokens * share) / tps
+		}
 		breakdown = append(breakdown, compressorPrefillModelJSON{Mode: mode, Share: round6(share), TPS: round6(tps), Source: source})
 		if share > bestShare {
 			best, bestShare = breakdown[len(breakdown)-1], share
 		}
 	}
-	if timeSaved <= 0 {
+	if timeSaved <= 0 && compressionTimeSaved <= 0 {
 		return false, false // every contributing model was an anomaly — nothing real to report
 	}
 	sort.Slice(breakdown, func(i, k int) bool { return breakdown[i].Share > breakdown[k].Share })
 	j.PrefillBreakdown = breakdown
-	j.TimeSavedSecondsEst = &timeSaved
 	j.TPSSource = best.Source
 	j.TPSMode = best.Mode
 
 	cost := s.resolvedCost()
 	wallKW := cost.WallWatts(cost.PowerKW*1000) / 1000
-	moneyNative := timeSaved / 3600 * wallKW * cost.RatePerKWh
-	j.MoneySavedEst = &moneyNative
-	j.MoneySavedCurrency = cost.RateCurrency
 
-	converted, missing := s.convert(ctx, moneyNative, cost.RateCurrency, display)
-	d := round6(converted)
-	j.MoneySavedDisplay = &d
-	return display != cost.RateCurrency, missing
+	if timeSaved > 0 {
+		j.TimeSavedSecondsEst = &timeSaved
+		moneyNative := timeSaved / 3600 * wallKW * cost.RatePerKWh
+		j.MoneySavedEst = &moneyNative
+		j.MoneySavedCurrency = cost.RateCurrency
+		converted, m := s.convert(ctx, moneyNative, cost.RateCurrency, display)
+		d := round6(converted)
+		j.MoneySavedDisplay = &d
+		conversion, missing = conversion || display != cost.RateCurrency, missing || m
+	}
+	if compressionTimeSaved > 0 {
+		j.CompressionTimeSavedSecondsEst = &compressionTimeSaved
+		moneyNative := compressionTimeSaved / 3600 * wallKW * cost.RatePerKWh
+		j.CompressionMoneySavedEst = &moneyNative
+		j.CompressionMoneySavedCurrency = cost.RateCurrency
+		converted, m := s.convert(ctx, moneyNative, cost.RateCurrency, display)
+		d := round6(converted)
+		j.CompressionMoneySavedDisplay = &d
+		conversion, missing = conversion || display != cost.RateCurrency, missing || m
+	}
+	return conversion, missing
 }
 
 // resolveModePathAlias maps a raw model weight path back to the catalog mode
@@ -526,12 +610,14 @@ func absFloat(v float64) float64 {
 }
 
 // remoteOfferingContext holds one window's usage_events plus the offering
-// price list, shared by estimateRemoteCacheDiscountSaved and
-// estimateRemoteCompressionSaved so both read Events/ListOfferings once per
-// request instead of once per remote proxy.
+// price list and each provider's peak schedule, shared by
+// estimateRemoteCacheDiscountSaved and estimateRemoteCompressionSaved so
+// both read Events/ListOfferings/Providers once per request instead of once
+// per remote proxy.
 type remoteOfferingContext struct {
-	events     []store.UsageEvent
-	priceByKey map[string]store.Offering // keyed "<provider>/<wire_model>"
+	events            []store.UsageEvent
+	priceByKey        map[string]store.Offering  // keyed "<provider>/<wire_model>"
+	windowsByProvider map[string]pricing.Windows // keyed provider name
 }
 
 func (s *Server) loadRemoteOfferingContext(ctx context.Context, since time.Time) (*remoteOfferingContext, bool) {
@@ -550,7 +636,51 @@ func (s *Server) loadRemoteOfferingContext(ctx context.Context, since time.Time)
 	for _, o := range offerings {
 		priceByKey[o.ProviderName+"/"+o.WireModel] = o
 	}
-	return &remoteOfferingContext{events: events, priceByKey: priceByKey}, true
+	windowsByProvider := map[string]pricing.Windows{}
+	if s.deps.Routing != nil {
+		if providers, err := s.deps.Routing.Providers(ctx); err == nil {
+			for _, p := range providers {
+				w, err := pricing.Parse(p.PeakWindows)
+				if err != nil {
+					continue // malformed row — treat as no windows, never block the estimate
+				}
+				windowsByProvider[p.Name] = w
+			}
+		}
+	}
+	return &remoteOfferingContext{events: events, priceByKey: priceByKey, windowsByProvider: windowsByProvider}, true
+}
+
+// eventTier returns the price tier a usage event was actually billed at,
+// preferring the tier recorded on the event itself (router/usage.go's
+// recordExternalUsage — the source of truth, since it's stamped at the
+// same instant as the cost) and falling back to evaluating the provider's
+// current schedule against the event's own timestamp only for rows written
+// before the peak-pricing sprint (2026-09-12), which have no recorded tier.
+func eventTier(ev store.UsageEvent, windowsByProvider map[string]pricing.Windows) string {
+	if ev.PriceTier != "" {
+		return ev.PriceTier
+	}
+	return windowsByProvider[ev.ProviderName].TierAt(ev.TS)
+}
+
+// offeringPriceIn/offeringPriceCachedIn select an offering's base vs. peak
+// rate for tier — same per-field-nil-falls-back-to-base semantics as
+// router/usage.go's computeCostNative, duplicated here (rather than shared)
+// because this package re-prices HISTORICAL events for reporting, not live
+// requests, and takes a store.Offering rather than a ResolvedBackend.
+func offeringPriceIn(o store.Offering, tier string) float64 {
+	if tier == pricing.TierPeak && o.PriceInPer1MPeak != nil {
+		return *o.PriceInPer1MPeak
+	}
+	return o.PriceInPer1M
+}
+
+func offeringPriceCachedIn(o store.Offering, tier string) *float64 {
+	if tier == pricing.TierPeak && o.PriceCachedInPer1MPeak != nil {
+		return o.PriceCachedInPer1MPeak
+	}
+	return o.PriceCachedInPer1M
 }
 
 // estimateRemoteCacheDiscountSaved fills j's CacheDiscountSaved* fields for
@@ -574,10 +704,15 @@ func (s *Server) estimateRemoteCacheDiscountSaved(ctx context.Context, j *compre
 		}
 		allCachedTokens += *ev.CachedPromptTokens
 		o, ok := roc.priceByKey[ev.ProviderName+"/"+ev.Model]
-		if !ok || o.PriceCachedInPer1M == nil {
-			continue // provider/model has no modelled cache-hit discount — token still counted above
+		if !ok {
+			continue
 		}
-		saved += float64(*ev.CachedPromptTokens) / 1e6 * (o.PriceInPer1M - *o.PriceCachedInPer1M)
+		tier := eventTier(ev, roc.windowsByProvider)
+		priceCachedIn := offeringPriceCachedIn(o, tier)
+		if priceCachedIn == nil {
+			continue // provider/model has no modelled cache-hit discount at this tier — token still counted above
+		}
+		saved += float64(*ev.CachedPromptTokens) / 1e6 * (offeringPriceIn(o, tier) - *priceCachedIn)
 		pricedTokens += *ev.CachedPromptTokens
 		currency = o.Currency
 	}
@@ -628,7 +763,11 @@ func (s *Server) estimateRemoteCompressionSaved(ctx context.Context, j *compress
 		} else if currency != o.Currency {
 			mixedCurrency = true
 		}
-		tokenWeightedRate += float64(ev.PromptTokens) * o.PriceInPer1M
+		// Each event weighted at ITS OWN tier's rate before blending — with
+		// time-varying prices, blending at today's rate then applying it to
+		// the whole window would misprice every event that ran at the other
+		// tier.
+		tokenWeightedRate += float64(ev.PromptTokens) * offeringPriceIn(o, eventTier(ev, roc.windowsByProvider))
 		totalTokens += ev.PromptTokens
 	}
 	if totalTokens == 0 || mixedCurrency {

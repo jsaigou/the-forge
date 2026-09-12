@@ -120,6 +120,10 @@ func TestProvisionWritesEnvAndStarts(t *testing.T) {
 		"OPENAI_TARGET_API_URL=https://api.deepseek.com/v1",
 		"COMPRESS_PROXY_TOKEN=sekret",
 		"COMPRESS_PORT=8792",
+		// Regression for the 2026-09-11 finding: COMPRESS_MAX_INFLIGHT was
+		// never written here, so every deployed proxy silently ran at the
+		// binary's own hardcoded default of 2 regardless of intent.
+		"COMPRESS_MAX_INFLIGHT=4",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("env file missing %q, got:\n%s", want, got)

@@ -57,15 +57,46 @@ type Config struct {
 	// untouched rather than paying compression latency for a token saving
 	// smaller than the latency cost. Sprint 2's measured net-positive
 	// crossover recommended 2KB as the default (docs/v5-headroom-replacement.md
-	// Sprint 2 result, Probe A).
+	// Sprint 2 result, Probe A). Found stale 2026-09-11: that crossover was
+	// measured against a small fixture ladder, nowhere near real DeepSeek
+	// traffic's actual message sizes (avg ~31K tokens/request this session's
+	// investigation measured, code elsewhere cites up to ~262K) — the byte
+	// threshold alone doesn't gate the real cost driver, which is scoring
+	// hundreds of chunks with no economy of scale (see BatchSize).
 	ByteThreshold int
+	// BatchSize bounds how many chunk encodings are sent to Scorer.ScoreBatch
+	// in one native call. Added 2026-09-11: v1 scored one chunk per call,
+	// sequentially. <= 1 behaves as one call per chunk (degrades to the old
+	// shape, still correct, just not exploiting batching).
+	//
+	// Measured live on ForgeHost's real model/hardware, same session (100
+	// sequential ~510-token calls vs. one 100-item ScoreBatch call): this is
+	// a real but MODEST win (~1.2x), not a transformative one — the
+	// bottleneck here is CPU FLOPs for the matmul itself, not per-call
+	// dispatch overhead, so batching doesn't unlock new parallelism the way
+	// it would for a workload with real per-call fixed costs. The same
+	// sweep also disproved this comment's original speculation that a
+	// small ~510-token chunk wouldn't need 16 intra-op threads: it very
+	// much does (COMPRESS_ONNX_INTRA_THREADS=16 measured 5x faster per call
+	// than 1 thread, and was the ONLY thread count where batching helped at
+	// all — every lower thread count made both the sequential AND the
+	// batched path slower). Don't retune that value down without
+	// re-measuring. The bigger remaining lever for real messages is
+	// avoiding redundant recompute of unchanged earlier conversation turns
+	// (a bounded content-hash cache) — deliberately not built here, since
+	// it reopens a decision (docs/v5-headroom-replacement.md decision 1,
+	// "stateless, no cache") made specifically to kill a past OOM class;
+	// see the compressor investigation's plan for why that needs an
+	// explicit go-ahead rather than being bundled into this change.
+	BatchSize int
 }
 
 // DefaultConfig returns the values this initiative's own research settled
 // on: ScoreThreshold 0.5 (Kompress's own default), MinWords 10 (Kompress's
-// own early-return), ByteThreshold 2048 (Sprint 2 Probe A).
+// own early-return), ByteThreshold 2048 (Sprint 2 Probe A), BatchSize 16
+// (an untuned starting point — see BatchSize's own doc comment).
 func DefaultConfig() Config {
-	return Config{ScoreThreshold: 0.5, MinWords: 10, ByteThreshold: 2048}
+	return Config{ScoreThreshold: 0.5, MinWords: 10, ByteThreshold: 2048, BatchSize: 16}
 }
 
 // Encoding is one Tokenizer result: token ids plus, for every entry, the
@@ -100,13 +131,25 @@ type Tokenizer interface {
 	EncodeWords(words []string) (Encoding, error)
 }
 
-// Scorer runs the Kompress ONNX model for one chunk (batch size 1 — this
-// engine never batches; "one forward pass per request" is a deliberate v1
-// scope decision, docs/v5-headroom-replacement.md decision 1), returning
-// one score per input position. The real implementation (onnxscorer) wraps
-// onnxruntime_go via cgo; tests use a fake.
+// Scorer runs the Kompress ONNX model. The real implementation (onnxscorer)
+// wraps onnxruntime_go via cgo; tests use a fake.
 type Scorer interface {
+	// Score runs one chunk (batch size 1). Retained for the pathological
+	// single-huge-word case chunkWords' doc comment describes (chunk.go's
+	// scoreChunk) — the normal multi-chunk path uses ScoreBatch instead
+	// (2026-09-11: v1's "one forward pass per request" scope decision,
+	// docs/v5-headroom-replacement.md decision 1, was found this session to
+	// be the root cause of real production latency/fail-open problems on
+	// large real-world messages — sequential batch-of-1 calls have no
+	// economy of scale, unlike a real batched forward pass).
 	Score(inputIDs, attentionMask []int64) ([]float32, error)
+	// ScoreBatch runs multiple sequences in one native call. Sequences may
+	// have different lengths — callers pass each sequence's own unpadded
+	// inputIDs/attentionMask; the implementation (onnxscorer) handles
+	// padding internally and returns one []float32 per sequence, each
+	// exactly len(inputIDs[i]) long — padding never leaks into the result.
+	// len(returned) == len(inputIDs) always, in the same order.
+	ScoreBatch(inputIDs, attentionMask [][]int64) ([][]float32, error)
 }
 
 // Engine is the stateless compressor itself: no cache, no lineage, no CCR
@@ -196,17 +239,36 @@ func (e *Engine) Compress(content string) (Result, error) {
 	}
 	chunks := chunkWords(words, tokensPerWord)
 
-	kept := make([]bool, len(words))
+	// Tokenize every chunk up front, sequentially — batching the SCORING
+	// step below needs no concurrent tokenizer calls, which sidesteps
+	// hftokenizer/daulet-tokenizers' undocumented thread-safety entirely
+	// (2026-09-11 investigation found this package's real concurrency
+	// story: the scorer is verified safe for concurrent/batched calls, the
+	// tokenizer is not documented either way — so this deliberately never
+	// calls it from more than one goroutine).
+	encodings := make([]Encoding, len(chunks))
+	chunkWordOffset := make([]int, len(chunks))
 	wordOffset := 0
-	for _, chunk := range chunks {
+	for i, chunk := range chunks {
 		enc, err := e.Tokenizer.EncodeWords(chunk)
 		if err != nil {
 			return Result{}, err
 		}
-		scores, err := scoreChunk(e.Scorer, enc)
-		if err != nil {
-			return Result{}, err
-		}
+		encodings[i] = enc
+		chunkWordOffset[i] = wordOffset
+		wordOffset += len(chunk)
+	}
+
+	allScores, err := scoreEncodings(e.Scorer, encodings, e.Config.BatchSize)
+	if err != nil {
+		return Result{}, err
+	}
+
+	kept := make([]bool, len(words))
+	for ci, chunk := range chunks {
+		enc := encodings[ci]
+		scores := allScores[ci]
+		wo := chunkWordOffset[ci]
 		// Word kept if ANY of its sub-tokens scores above threshold —
 		// mirrors the original's word_ids/mask_list aggregation
 		// (kompress_compressor.py: "for idx, wid in enumerate(word_ids):
@@ -216,7 +278,7 @@ func (e *Engine) Compress(content string) (Result, error) {
 				continue
 			}
 			if scores[i] > e.Config.ScoreThreshold {
-				kept[wordOffset+wi] = true
+				kept[wo+wi] = true
 			}
 		}
 		// Hard override: must-keep words survive regardless of model
@@ -228,10 +290,9 @@ func (e *Engine) Compress(content string) (Result, error) {
 				return Result{}, err
 			}
 			if mk {
-				kept[wordOffset+i] = true
+				kept[wo+i] = true
 			}
 		}
-		wordOffset += len(chunk)
 	}
 
 	// Real content-token count of the whole input, specials excluded —

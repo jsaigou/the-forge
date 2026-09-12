@@ -47,26 +47,48 @@ import type { CompressorSummaryProxy } from "../lib/types";
 // model with no resolvable TPS is omitted (logged server-side as an
 // anomaly), which can legitimately leave this chip blank even when tokens
 // were cached — see local.hasTime below.
+//
+// 2026-09-11: this chip has shown "no data" for local traffic since the Go
+// rewrite, root-caused this session — requests_cached (what time_saved_seconds_est
+// above is apportioned from) is structurally 0 in production; forge-compress
+// never increments compress_requests_cached_total. The real local win (up to
+// 10 of 15 minutes on some tasks, per the operator's own early testing) comes
+// from Compressor's own token-dropping, priced by the new
+// compression_time_saved_seconds_est (apportioned from the real tokens_saved
+// count, same per-model TPS math). Both mechanisms are genuinely additive —
+// a cache hit and a compressed prompt are different ways the same request
+// can avoid prefill work — so this chip sums both rather than picking one.
 
 function sumLocal(proxies: CompressorSummaryProxy[]) {
-  let tokensSaved = 0;
+  let tokensCachedEst = 0;
+  let tokensCompressed = 0;
   let timeSavedS = 0;
-  let hasTokens = false;
+  let hasCachedTokens = false;
+  let hasCompressedTokens = false;
   let hasTime = false;
   const sources = new Set<string>();
   for (const p of proxies) {
     if (p.kind !== "local") continue;
     if (p.tokens_saved_est != null) {
-      tokensSaved += p.tokens_saved_est;
-      hasTokens = true;
+      tokensCachedEst += p.tokens_saved_est;
+      hasCachedTokens = true;
+    }
+    if (p.tokens_saved > 0) {
+      tokensCompressed += p.tokens_saved;
+      hasCompressedTokens = true;
     }
     if (p.time_saved_seconds_est != null) {
       timeSavedS += p.time_saved_seconds_est;
       hasTime = true;
     }
+    if (p.compression_time_saved_seconds_est != null) {
+      timeSavedS += p.compression_time_saved_seconds_est;
+      hasTime = true;
+    }
     if (p.tps_source) sources.add(p.tps_source);
   }
-  return { tokensSaved, hasTokens, timeSavedS, hasTime, sources };
+  const hasTokens = hasCachedTokens || hasCompressedTokens;
+  return { tokensCachedEst, hasCachedTokens, tokensCompressed, hasCompressedTokens, hasTokens, timeSavedS, hasTime, sources };
 }
 
 function sumExternal(proxies: CompressorSummaryProxy[]) {
@@ -122,10 +144,15 @@ export function CompressorSavingsChips({ window_ }: { window_: string }) {
   const external = sumExternal(proxies);
 
   const localTitle = !local.hasTokens
-    ? "No cached local requests this window"
+    ? "No cached or compressed local requests this window"
     : local.hasTime
-      ? `${formatTokens(local.tokensSaved)} tokens not re-prefilled, estimated against real prefill TPS via ${Array.from(local.sources).join(", ")}`
-      : "No model with cached requests this window had a real measured prefill TPS — time estimate unavailable";
+      ? [
+          local.hasCompressedTokens ? `${formatTokens(local.tokensCompressed)} tokens dropped by compression` : null,
+          local.hasCachedTokens ? `${formatTokens(local.tokensCachedEst)} tokens not re-prefilled (cache hit, estimated)` : null,
+        ]
+          .filter(Boolean)
+          .join(" + ") + `, avoided-prefill time estimated against real prefill TPS via ${Array.from(local.sources).join(", ")}`
+      : "No model with cached/compressed requests this window had a real measured prefill TPS — time estimate unavailable";
 
   const externalTitle = !external.hasTokens
     ? "No compressed external requests this window"

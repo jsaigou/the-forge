@@ -2,6 +2,8 @@
 
 package compress
 
+import "fmt"
+
 // maxChunkTokens matches the ONNX model's declared max_length used at
 // inference (512 — kompress_compressor.py's tokenizer(..., max_length=512)
 // call).
@@ -101,4 +103,70 @@ func scoreChunk(scorer Scorer, enc Encoding) ([]float32, error) {
 		scores = append(scores, batch...)
 	}
 	return scores, nil
+}
+
+// scoreEncodings scores multiple chunk encodings, grouping those that
+// individually fit within maxChunkTokens into real batched Scorer.ScoreBatch
+// calls (up to batchSize encodings per call — a batchSize <= 1 degrades to
+// one call per chunk, same shape as v1, still correct) instead of v1's
+// sequential one-call-per-chunk loop. Any chunk whose own encoding already
+// exceeds maxChunkTokens (the pathological single-huge-word case chunkWords'
+// doc comment describes) is never batched — it falls through to
+// scoreChunk's existing single-item sub-batching, unchanged, since that path
+// already bounds the Scorer's per-call input size for exactly this case
+// (the 2026-08-20 OOM incident's shape).
+//
+// Returns one []float32 per input encoding, in the same order — order is
+// preserved regardless of how encodings were grouped into batches.
+func scoreEncodings(scorer Scorer, encs []Encoding, batchSize int) ([][]float32, error) {
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	out := make([][]float32, len(encs))
+	var pendingIdx []int
+	var pendingIDs, pendingMask [][]int64
+
+	flush := func() error {
+		if len(pendingIdx) == 0 {
+			return nil
+		}
+		scores, err := scorer.ScoreBatch(pendingIDs, pendingMask)
+		if err != nil {
+			return err
+		}
+		if len(scores) != len(pendingIdx) {
+			return fmt.Errorf("compress: ScoreBatch returned %d results for %d inputs", len(scores), len(pendingIdx))
+		}
+		for j, idx := range pendingIdx {
+			out[idx] = scores[j]
+		}
+		pendingIdx, pendingIDs, pendingMask = nil, nil, nil
+		return nil
+	}
+
+	for i, enc := range encs {
+		if len(enc.IDs) > maxChunkTokens {
+			if err := flush(); err != nil {
+				return nil, err
+			}
+			scores, err := scoreChunk(scorer, enc)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = scores
+			continue
+		}
+		pendingIdx = append(pendingIdx, i)
+		pendingIDs = append(pendingIDs, enc.IDs)
+		pendingMask = append(pendingMask, enc.AttentionMask)
+		if len(pendingIdx) >= batchSize {
+			if err := flush(); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := flush(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

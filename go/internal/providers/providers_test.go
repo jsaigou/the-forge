@@ -113,6 +113,52 @@ func TestListNoProvidersReturnsEmpty(t *testing.T) {
 	}
 }
 
+// TestListPeakWindows covers the peak pricing sprint's (2026-09-12)
+// PeakWindows/PeakActiveNow fields: the raw schedule passes through
+// unchanged, PeakActiveNow is computed against the injected clock (not wall
+// time), and a provider with no schedule reports false rather than erroring.
+func TestListPeakWindows(t *testing.T) {
+	const windows = `{"windows":[{"days":[1,2,3,4,5],"start":"01:00","end":"04:00"}]}`
+	cat := newFakeCatalog([]store.ProviderRow{
+		{Name: "deepseek", APIKey: "sk-d", Enabled: true, PeakWindows: windows},
+		{Name: "aiand", APIKey: "sk-a", Enabled: true},
+	})
+	// Tuesday 02:00 UTC — inside deepseek's window.
+	inWindow := time.Date(2026, 9, 15, 2, 0, 0, 0, time.UTC)
+	svc := New(Deps{Catalog: cat, now: func() time.Time { return inWindow }})
+
+	out, err := svc.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	byName := map[string]Provider{}
+	for _, p := range out {
+		byName[p.Name] = p
+	}
+	if byName["deepseek"].PeakWindows != windows {
+		t.Errorf("deepseek PeakWindows = %q, want %q", byName["deepseek"].PeakWindows, windows)
+	}
+	if !byName["deepseek"].PeakActiveNow {
+		t.Error("deepseek PeakActiveNow = false, want true (injected clock is inside the window)")
+	}
+	if byName["aiand"].PeakActiveNow {
+		t.Error("aiand PeakActiveNow = true, want false (no schedule configured)")
+	}
+
+	// Same schedule, clock moved outside the window.
+	outsideWindow := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	svc2 := New(Deps{Catalog: cat, now: func() time.Time { return outsideWindow }})
+	out2, err := svc2.List(context.Background())
+	if err != nil {
+		t.Fatalf("List (outside window): %v", err)
+	}
+	for _, p := range out2 {
+		if p.Name == "deepseek" && p.PeakActiveNow {
+			t.Error("deepseek PeakActiveNow = true at noon, want false")
+		}
+	}
+}
+
 // ── Test: DeepSeek + AI& with live probes ───────────────────────────────────
 //
 // Mirrors ForgeHost's real config (health live-verified 2026-07-22): DeepSeek

@@ -61,12 +61,29 @@ type CompressorSample struct {
 	OverheadSumMsDelta      float64
 	OverheadMinMsSinceStart *float64
 	OverheadMaxMsSinceStart *float64
+	// OverheadP50/P90/P99MsRecent are percentiles of the proxy's own recent
+	// (bounded ring, not lifetime) overhead samples — nil below the 10-sample
+	// floor (cmd/forge-compress/metrics.go's percentileMinSamples), same
+	// null-not-zero convention as the Min/Max gauges above. Unlike those,
+	// "recent" here does NOT mean "since process start" — it's the last
+	// ~256 requests, since the mean alone was found (2026-09-11) to hide a
+	// bimodal shape: most messages barely pay the compression tax, a few
+	// huge ones pay a lot.
+	OverheadP50MsRecent *float64
+	OverheadP90MsRecent *float64
+	OverheadP99MsRecent *float64
 
 	// RequestsByProviderDelta / RequestsByModelDelta are request COUNTS per
 	// label value, not token counts — Compressor's compressor_requests_by_{
 	// provider,model} metrics carry no token dimension.
 	RequestsByProviderDelta map[string]int64
 	RequestsByModelDelta    map[string]int64
+	// MessagesByOutcomeSizeDelta is per-MESSAGE (not per-request) counts
+	// keyed by a composite "outcome:size_tier" label value (e.g.
+	// "compressed:huge") — see cmd/forge-compress/messages.go's
+	// messageOutcomeSize. Added 2026-09-11 to make compression's real
+	// value visible by content-size tier instead of only as a blended mean.
+	MessagesByOutcomeSizeDelta map[string]int64
 
 	// Provider cache metrics (scraped from compress_cache_read_tokens_total,
 	// compress_uncached_input_tokens_total, etc. — labelled by provider).

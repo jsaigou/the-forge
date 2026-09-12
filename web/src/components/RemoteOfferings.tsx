@@ -21,7 +21,7 @@
 // enabled-only view.
 import { useState } from "react";
 import { OfferingForm, useCatalogProviders } from "./catalog/OfferingForm";
-import { countryFlag } from "../lib/format";
+import { countryFlag, formatCurrencyPrecise } from "../lib/format";
 import { groupOfferingsByModel, preferredOfferingIds } from "../lib/offeringPreference";
 import { presetFor, providerIconSlug } from "../lib/providerPresets";
 import {
@@ -103,24 +103,14 @@ export function RemoteOfferings() {
   // rather than a bare {enabled} patch, or it would silently blank the rest
   // of the row (the exact "Full-replace curl verification hazard" from the
   // 2026-08-05 incident, but reachable from this button too if skipped).
+  // Spread the existing record rather than hand-enumerating columns (was a
+  // latent hazard fixed in the peak pricing sprint, 2026-09-12: a
+  // hand-enumerated body silently drops any field added after it was
+  // written — Settings → Routing's submitPatch already used this pattern).
   function handleToggleEnabled(o: CatalogOffering) {
     clearError();
-    update.mutate({
-      id: o.id,
-      o: {
-        model_id: o.model_id,
-        variant_id: o.variant_id,
-        provider: o.provider,
-        wire_model: o.wire_model,
-        price_in_per_1m: o.price_in_per_1m,
-        price_out_per_1m: o.price_out_per_1m,
-        price_cached_in_per_1m: o.price_cached_in_per_1m,
-        currency: o.currency,
-        context_length: o.context_length,
-        enabled: !o.enabled,
-        priority: o.priority,
-      },
-    }, { onError: showError });
+    const { id, ...rest } = o;
+    update.mutate({ id, o: { ...rest, enabled: !o.enabled } }, { onError: showError });
   }
 
   return (
@@ -239,9 +229,17 @@ function RemoteModelRow({
                 {o.enabled && providerDisabled && <span className="chip" style={{ color: "var(--warn)" }}>disabled — not routing</span>}
               </div>
               <div className="ro-line3">
-                <span>{o.price_in_per_1m} {o.currency}/M in · {o.price_out_per_1m} out</span>
+                <span>
+                  {formatCurrencyPrecise(o.price_in_per_1m, o.currency)}/M in · {formatCurrencyPrecise(o.price_out_per_1m, o.currency)} out
+                  {(o.price_in_per_1m_peak != null || o.price_out_per_1m_peak != null) && (
+                    <> (peak {formatCurrencyPrecise(o.price_in_per_1m_peak ?? o.price_in_per_1m, o.currency)}/{formatCurrencyPrecise(o.price_out_per_1m_peak ?? o.price_out_per_1m, o.currency)})</>
+                  )}
+                </span>
                 {o.context_length > 0 && <span>· {o.context_length.toLocaleString()} ctx</span>}
                 <span className="chip" style={{ color: "var(--text-mute)" }} title="Relative preference — lower is served first">priority {o.priority}</span>
+                {row?.peak_active_now && (
+                  <span className="chip" style={{ color: "var(--warn)" }} title="This provider's peak pricing window is active right now">peak now</span>
+                )}
               </div>
             </div>
             {canAdmin && (

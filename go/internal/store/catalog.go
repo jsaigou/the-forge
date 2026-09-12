@@ -267,6 +267,20 @@ type Offering struct {
 	// computation must then price cached tokens at the full PriceInPer1M
 	// rate (a documented upper bound, never an under-estimate).
 	PriceCachedInPer1M *float64
+
+	// PriceInPer1MPeak/PriceOutPer1MPeak/PriceCachedInPer1MPeak (peak
+	// pricing sprint, 2026-09-12) are the rates in force during the
+	// provider's peak window (ProviderRow.PeakWindows) — e.g. DeepSeek's
+	// weekday UTC peak hours, currently 2x off-peak. nil on any of the
+	// three means "no peak differential for this field" and falls back to
+	// its base (PriceInPer1M/PriceOutPer1M/PriceCachedInPer1M) rate — same
+	// per-field-nil convention as PriceCachedInPer1M itself, deliberately
+	// not a single "has peak pricing" flag (a flag can disagree with the
+	// data). Meaningless when the owning provider has no PeakWindows
+	// configured; see internal/pricing.Windows.
+	PriceInPer1MPeak       *float64
+	PriceOutPer1MPeak      *float64
+	PriceCachedInPer1MPeak *float64
 }
 
 // ── Annotations ──────────────────────────────────────────────────────────────
@@ -1106,11 +1120,14 @@ func (v catalogView) CreateOffering(ctx context.Context, o Offering) (int64, err
 	res, err := v.d.sql.ExecContext(ctx,
 		`INSERT INTO offerings (model_id, variant_id, provider_id, wire_model,
 		   price_in_per_1m, price_out_per_1m, currency, context_length, enabled,
-		   price_cached_in_per_1m, priority)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   price_cached_in_per_1m, priority,
+		   price_in_per_1m_peak, price_out_per_1m_peak, price_cached_in_per_1m_peak)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		o.ModelID, nullInt64(o.VariantID), o.ProviderID, o.WireModel,
 		o.PriceInPer1M, o.PriceOutPer1M, o.Currency, o.ContextLength,
-		boolInt(o.Enabled), floatPtrArg(o.PriceCachedInPer1M), o.Priority)
+		boolInt(o.Enabled), floatPtrArg(o.PriceCachedInPer1M), o.Priority,
+		floatPtrArg(o.PriceInPer1MPeak), floatPtrArg(o.PriceOutPer1MPeak),
+		floatPtrArg(o.PriceCachedInPer1MPeak))
 	if err != nil {
 		return 0, fmt.Errorf("store: catalog.create_offering: %w", err)
 	}
@@ -1120,22 +1137,27 @@ func (v catalogView) CreateOffering(ctx context.Context, o Offering) (int64, err
 
 const offeringSelectCols = `o.id, o.model_id, o.variant_id, o.provider_id, rp.name, o.wire_model,
 		   o.price_in_per_1m, o.price_out_per_1m, o.currency, o.context_length, o.enabled,
-		   o.price_cached_in_per_1m, o.priority
+		   o.price_cached_in_per_1m, o.priority,
+		   o.price_in_per_1m_peak, o.price_out_per_1m_peak, o.price_cached_in_per_1m_peak
 		 FROM offerings o JOIN router_providers rp ON rp.id = o.provider_id`
 
 func scanOffering(s scanner) (Offering, error) {
 	var o Offering
 	var varID sql.NullInt64
 	var enabled int64
-	var priceCachedIn sql.NullFloat64
+	var priceCachedIn, priceInPeak, priceOutPeak, priceCachedInPeak sql.NullFloat64
 	if err := s.Scan(&o.ID, &o.ModelID, &varID, &o.ProviderID, &o.ProviderName, &o.WireModel,
 		&o.PriceInPer1M, &o.PriceOutPer1M, &o.Currency, &o.ContextLength,
-		&enabled, &priceCachedIn, &o.Priority); err != nil {
+		&enabled, &priceCachedIn, &o.Priority,
+		&priceInPeak, &priceOutPeak, &priceCachedInPeak); err != nil {
 		return Offering{}, err
 	}
 	o.VariantID = intOf(varID)
 	o.Enabled = enabled != 0
 	o.PriceCachedInPer1M = nullFloat64Ptr(priceCachedIn)
+	o.PriceInPer1MPeak = nullFloat64Ptr(priceInPeak)
+	o.PriceOutPer1MPeak = nullFloat64Ptr(priceOutPeak)
+	o.PriceCachedInPer1MPeak = nullFloat64Ptr(priceCachedInPeak)
 	return o, nil
 }
 
@@ -1775,11 +1797,14 @@ func (v catalogView) UpdateOffering(ctx context.Context, o Offering) error {
 	res, err := v.d.sql.ExecContext(ctx,
 		`UPDATE offerings SET model_id=?, variant_id=?, provider_id=?, wire_model=?,
 		   price_in_per_1m=?, price_out_per_1m=?, currency=?, context_length=?,
-		   enabled=?, price_cached_in_per_1m=?, priority=?
+		   enabled=?, price_cached_in_per_1m=?, priority=?,
+		   price_in_per_1m_peak=?, price_out_per_1m_peak=?, price_cached_in_per_1m_peak=?
 		 WHERE id=?`,
 		o.ModelID, nullInt64(o.VariantID), o.ProviderID, o.WireModel,
 		o.PriceInPer1M, o.PriceOutPer1M, o.Currency, o.ContextLength,
-		boolInt(o.Enabled), floatPtrArg(o.PriceCachedInPer1M), o.Priority, o.ID)
+		boolInt(o.Enabled), floatPtrArg(o.PriceCachedInPer1M), o.Priority,
+		floatPtrArg(o.PriceInPer1MPeak), floatPtrArg(o.PriceOutPer1MPeak),
+		floatPtrArg(o.PriceCachedInPer1MPeak), o.ID)
 	if err != nil {
 		return fmt.Errorf("store: catalog.update_offering: %w", err)
 	}

@@ -19,13 +19,13 @@ func (v usageView) Record(ctx context.Context, e UsageEvent) error {
 	_, err := v.d.sql.ExecContext(ctx,
 		`INSERT INTO usage_events (ts, kind, model, slot, provider_id,
 		   prompt_tokens, completion_tokens, cost_usd, detail,
-		   cost_native, cost_currency, cached_prompt_tokens, unmetered)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   cost_native, cost_currency, cached_prompt_tokens, unmetered, price_tier)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		unixOf(orNow(e.TS)), e.Kind, nullStr(e.Model), nullStr(e.Slot),
 		intPtrArg(e.ProviderID), e.PromptTokens, e.CompletionTokens, e.CostUSD,
 		nullStr(e.Detail),
 		floatPtrArg(e.CostNative), nullStr(e.CostCurrency), intPtrArg(e.CachedPromptTokens),
-		boolInt(e.Unmetered),
+		boolInt(e.Unmetered), nullStr(e.PriceTier),
 	)
 	if err != nil {
 		return fmt.Errorf("store: usage.record: %w", err)
@@ -43,7 +43,7 @@ func (v usageView) Events(ctx context.Context, since time.Time, limit int) ([]Us
 		`SELECT ue.ts, ue.kind, ue.model, ue.slot, ue.provider_id, rp.name,
 		        ue.prompt_tokens, ue.completion_tokens,
 		        ue.cost_usd, ue.detail, ue.cost_native, ue.cost_currency,
-		        ue.cached_prompt_tokens, ue.unmetered
+		        ue.cached_prompt_tokens, ue.unmetered, ue.price_tier
 		 FROM usage_events ue
 		 LEFT JOIN router_providers rp ON rp.id = ue.provider_id
 		 WHERE ue.ts >= ? ORDER BY ue.ts DESC, ue.id DESC LIMIT ?`,
@@ -56,13 +56,13 @@ func (v usageView) Events(ctx context.Context, since time.Time, limit int) ([]Us
 	for rows.Next() {
 		var e UsageEvent
 		var ts int64
-		var model, slot, providerName, detail, costCurrency sql.NullString
+		var model, slot, providerName, detail, costCurrency, priceTier sql.NullString
 		var providerID, prompt, completion, cachedPromptTokens sql.NullInt64
 		var cost, costNative sql.NullFloat64
 		var unmetered int64
 		if err := rows.Scan(&ts, &e.Kind, &model, &slot, &providerID, &providerName,
 			&prompt, &completion, &cost, &detail,
-			&costNative, &costCurrency, &cachedPromptTokens, &unmetered); err != nil {
+			&costNative, &costCurrency, &cachedPromptTokens, &unmetered, &priceTier); err != nil {
 			return nil, fmt.Errorf("store: usage.events: %w", err)
 		}
 		e.TS = timeOf(sql.NullInt64{Int64: ts, Valid: true})
@@ -78,6 +78,7 @@ func (v usageView) Events(ctx context.Context, since time.Time, limit int) ([]Us
 		e.CostCurrency = strOf(costCurrency)
 		e.CachedPromptTokens = nullInt64Ptr(cachedPromptTokens)
 		e.Unmetered = unmetered != 0
+		e.PriceTier = strOf(priceTier)
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {

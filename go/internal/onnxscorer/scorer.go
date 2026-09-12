@@ -141,3 +141,106 @@ func (s *Scorer) Score(inputIDs, attentionMask []int64) ([]float32, error) {
 	copy(scores, data)
 	return scores, nil
 }
+
+// ScoreBatch implements compress.Scorer: one real batched forward pass over
+// multiple sequences of possibly different lengths (2026-09-11 — v1 only
+// ever had Score, batch-of-1; see compress.Scorer's doc comment for why
+// that was found to be a real production problem, not just a theoretical
+// inefficiency). Sequences are padded to the batch's own max length —
+// input_ids padded with 0, attention_mask padded with 0 — for the single
+// Run() call, then each sequence's scores are trimmed back to its own real
+// (unpadded) length before returning; padding never leaks into the
+// caller-visible result. Relies on the standard transformer property that a
+// 0 attention_mask fully excludes a position from self-attention, so real
+// (non-padded) positions' scores are unaffected by what value pads the
+// unused tail.
+//
+// Verified live on ForgeHost the same session, against the real deployed model
+// (chopratejas/kompress-v2-base int8) and real tokenizer output, including
+// CJK content: 6 varied-length real samples (6 to 302 tokens) batched
+// together produced ZERO keep/drop-decision (score > 0.5) mismatches
+// against the unbatched Score() path — max raw float32 diff ~0.12,
+// consistent with ordinary batched-matmul accumulation-order noise, never
+// crossing the threshold. A separate timing sweep on the same host found
+// the real speedup from batching alone is modest (~1.2x at
+// COMPRESS_ONNX_INTRA_THREADS=16) — see compress.Config.BatchSize's doc
+// comment for the full result and why reducing intra-op threads to "make
+// room" for batch parallelism was tried and made things worse, not better.
+func (s *Scorer) ScoreBatch(inputIDs, attentionMask [][]int64) ([][]float32, error) {
+	if len(inputIDs) != len(attentionMask) {
+		return nil, fmt.Errorf("onnxscorer: batch input_ids length %d != attention_mask length %d", len(inputIDs), len(attentionMask))
+	}
+	if len(inputIDs) == 0 {
+		return nil, nil
+	}
+	if len(inputIDs) == 1 {
+		// No padding needed for a batch of one — reuse Score directly
+		// rather than duplicating its single-sequence tensor-building path.
+		scores, err := s.Score(inputIDs[0], attentionMask[0])
+		if err != nil {
+			return nil, err
+		}
+		return [][]float32{scores}, nil
+	}
+
+	maxLen := 0
+	for i := range inputIDs {
+		if len(inputIDs[i]) != len(attentionMask[i]) {
+			return nil, fmt.Errorf("onnxscorer: batch item %d: input_ids length %d != attention_mask length %d", i, len(inputIDs[i]), len(attentionMask[i]))
+		}
+		if len(inputIDs[i]) > maxLen {
+			maxLen = len(inputIDs[i])
+		}
+	}
+	if maxLen == 0 {
+		return make([][]float32, len(inputIDs)), nil
+	}
+
+	batch := len(inputIDs)
+	flatIDs := make([]int64, batch*maxLen)
+	flatMask := make([]int64, batch*maxLen)
+	for i := range inputIDs {
+		copy(flatIDs[i*maxLen:], inputIDs[i])
+		copy(flatMask[i*maxLen:], attentionMask[i])
+		// The remainder of each row stays zero-valued (Go's zero-init) —
+		// 0 input_ids id, 0 attention_mask — see the doc comment above.
+	}
+
+	shape := ort.NewShape(int64(batch), int64(maxLen))
+	idsTensor, err := ort.NewTensor(shape, flatIDs)
+	if err != nil {
+		return nil, fmt.Errorf("onnxscorer: build batch input_ids tensor: %w", err)
+	}
+	defer idsTensor.Destroy()
+
+	maskTensor, err := ort.NewTensor(shape, flatMask)
+	if err != nil {
+		return nil, fmt.Errorf("onnxscorer: build batch attention_mask tensor: %w", err)
+	}
+	defer maskTensor.Destroy()
+
+	outputs := []ort.Value{nil}
+	if err := s.session.Run([]ort.Value{idsTensor, maskTensor}, outputs); err != nil {
+		return nil, fmt.Errorf("onnxscorer: batch run: %w", err)
+	}
+	out, ok := outputs[0].(*ort.Tensor[float32])
+	if !ok {
+		outputs[0].Destroy()
+		return nil, fmt.Errorf("onnxscorer: final_scores output is %T, want *Tensor[float32]", outputs[0])
+	}
+	defer out.Destroy()
+
+	data := out.GetData()
+	if len(data) != batch*maxLen {
+		return nil, fmt.Errorf("onnxscorer: batch output length %d, want %d (batch=%d, maxLen=%d)", len(data), batch*maxLen, batch, maxLen)
+	}
+
+	results := make([][]float32, batch)
+	for i := range inputIDs {
+		seqLen := len(inputIDs[i])
+		scores := make([]float32, seqLen)
+		copy(scores, data[i*maxLen:i*maxLen+seqLen])
+		results[i] = scores
+	}
+	return results, nil
+}

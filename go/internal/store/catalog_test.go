@@ -675,6 +675,89 @@ func TestListOfferingsPriceCachedInPer1M(t *testing.T) {
 	}
 }
 
+// TestOfferingPeakPricingRoundTrip guards offeringSelectCols/scanOffering
+// (the single shared scan behind ListOfferings/ListOfferingsForModel/
+// GetOffering) against a missed column for the three peak price fields —
+// exactly the class of bug that only fails at runtime, not compile time.
+func TestOfferingPeakPricingRoundTrip(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	cat := db.Catalog()
+
+	mdlID, err := cat.CreateModel(ctx, Model{Name: "TestModel"})
+	if err != nil {
+		t.Fatalf("CreateModel: %v", err)
+	}
+	if _, err := db.SQL().ExecContext(ctx,
+		`INSERT INTO router_providers (name, api_key, created_at) VALUES ('deepseek', 'key', 0)`); err != nil {
+		t.Fatalf("seed provider: %v", err)
+	}
+	providerID := testProviderID(t, db, "deepseek")
+
+	peakIn, peakOut, peakCached := 0.3, 1.2, 0.006
+	offID, err := cat.CreateOffering(ctx, Offering{
+		ModelID: mdlID, ProviderID: providerID, WireModel: "deepseek-flash",
+		PriceInPer1M: 0.15, PriceOutPer1M: 0.6, Currency: "USD", Enabled: true,
+		PriceInPer1MPeak: &peakIn, PriceOutPer1MPeak: &peakOut, PriceCachedInPer1MPeak: &peakCached,
+	})
+	if err != nil {
+		t.Fatalf("CreateOffering: %v", err)
+	}
+
+	assertPeak := func(t *testing.T, o Offering, label string) {
+		t.Helper()
+		if o.PriceInPer1MPeak == nil || *o.PriceInPer1MPeak != peakIn {
+			t.Errorf("%s: PriceInPer1MPeak = %v, want %v", label, o.PriceInPer1MPeak, peakIn)
+		}
+		if o.PriceOutPer1MPeak == nil || *o.PriceOutPer1MPeak != peakOut {
+			t.Errorf("%s: PriceOutPer1MPeak = %v, want %v", label, o.PriceOutPer1MPeak, peakOut)
+		}
+		if o.PriceCachedInPer1MPeak == nil || *o.PriceCachedInPer1MPeak != peakCached {
+			t.Errorf("%s: PriceCachedInPer1MPeak = %v, want %v", label, o.PriceCachedInPer1MPeak, peakCached)
+		}
+	}
+
+	got, err := cat.GetOffering(ctx, offID)
+	if err != nil {
+		t.Fatalf("GetOffering: %v", err)
+	}
+	assertPeak(t, got, "GetOffering")
+
+	list, err := cat.ListOfferings(ctx)
+	if err != nil {
+		t.Fatalf("ListOfferings: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("ListOfferings: got %d rows, want 1", len(list))
+	}
+	assertPeak(t, list[0], "ListOfferings")
+
+	forModel, err := cat.ListOfferingsForModel(ctx, mdlID)
+	if err != nil {
+		t.Fatalf("ListOfferingsForModel: %v", err)
+	}
+	if len(forModel) != 1 {
+		t.Fatalf("ListOfferingsForModel: got %d rows, want 1", len(forModel))
+	}
+	assertPeak(t, forModel[0], "ListOfferingsForModel")
+
+	// A NULL peak field must round-trip as nil, not a zero value — Update
+	// clears all three.
+	got.PriceInPer1MPeak = nil
+	got.PriceOutPer1MPeak = nil
+	got.PriceCachedInPer1MPeak = nil
+	if err := cat.UpdateOffering(ctx, got); err != nil {
+		t.Fatalf("UpdateOffering: %v", err)
+	}
+	cleared, err := cat.GetOffering(ctx, offID)
+	if err != nil {
+		t.Fatalf("GetOffering after clear: %v", err)
+	}
+	if cleared.PriceInPer1MPeak != nil || cleared.PriceOutPer1MPeak != nil || cleared.PriceCachedInPer1MPeak != nil {
+		t.Errorf("peak fields not cleared after UpdateOffering(nil): %+v", cleared)
+	}
+}
+
 // TestOfferingPriorityRoundTripAndOrdering covers the 0032 priority column:
 // it round-trips through Create/Get/Update, and ListOfferings orders by
 // (priority, provider, wire_model) — the exact order the router's group

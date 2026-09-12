@@ -177,6 +177,173 @@ func TestScoreChunk_UnderBudgetIsOneCall(t *testing.T) {
 	}
 }
 
+// recordingBatchScorer records every ScoreBatch call's batch size and
+// returns one all-zero-score slice per input sequence, matching each
+// sequence's own length. Score is never expected to be called by these
+// tests (scoreEncodings only falls back to it for an oversized single
+// encoding) — it panics if it is, so a wiring mistake fails loudly instead
+// of silently passing.
+type recordingBatchScorer struct {
+	batchSizes []int
+}
+
+func (r *recordingBatchScorer) Score(inputIDs, _ []int64) ([]float32, error) {
+	panic("recordingBatchScorer.Score called unexpectedly — scoreEncodings should batch this input")
+}
+
+func (r *recordingBatchScorer) ScoreBatch(inputIDs, attentionMask [][]int64) ([][]float32, error) {
+	if len(inputIDs) != len(attentionMask) {
+		panic("ids/mask batch length mismatch")
+	}
+	r.batchSizes = append(r.batchSizes, len(inputIDs))
+	out := make([][]float32, len(inputIDs))
+	for i, ids := range inputIDs {
+		// Score is the sequence's own index+1 (never 0), so tests can
+		// verify per-sequence results land back at the right position.
+		s := make([]float32, len(ids))
+		for j := range s {
+			s[j] = float32(i + 1)
+		}
+		out[i] = s
+	}
+	return out, nil
+}
+
+func TestScoreEncodings_GroupsUpToBatchSize(t *testing.T) {
+	// 10 small encodings, batchSize 4 -> batches of 4, 4, 2.
+	encs := make([]Encoding, 10)
+	for i := range encs {
+		encs[i] = Encoding{IDs: []int64{1, 2, 3}, AttentionMask: []int64{1, 1, 1}}
+	}
+	sc := &recordingBatchScorer{}
+	if _, err := scoreEncodings(sc, encs, 4); err != nil {
+		t.Fatal(err)
+	}
+	want := []int{4, 4, 2}
+	if len(sc.batchSizes) != len(want) {
+		t.Fatalf("ScoreBatch called %d times with sizes %v, want %d calls sized %v", len(sc.batchSizes), sc.batchSizes, len(want), want)
+	}
+	for i := range want {
+		if sc.batchSizes[i] != want[i] {
+			t.Errorf("batch %d size = %d, want %d (sizes: %v)", i, sc.batchSizes[i], want[i], sc.batchSizes)
+		}
+	}
+}
+
+func TestScoreEncodings_PreservesOrderAcrossBatches(t *testing.T) {
+	// 5 encodings, batchSize 2 -> 3 batches. Each result must land back at
+	// its ORIGINAL index regardless of which batch it was scored in.
+	encs := make([]Encoding, 5)
+	for i := range encs {
+		encs[i] = Encoding{IDs: []int64{1}, AttentionMask: []int64{1}}
+	}
+	sc := &recordingBatchScorer{}
+	scores, err := scoreEncodings(sc, encs, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scores) != 5 {
+		t.Fatalf("got %d results, want 5", len(scores))
+	}
+	// Batches are [0,1], [2,3], [4] — within-batch sequence index+1 gives
+	// scores 1,2 / 1,2 / 1 respectively, NOT a monotonically increasing
+	// global sequence — this pins down that scoreEncodings doesn't
+	// accidentally assume batch-local index == global index.
+	want := []float32{1, 2, 1, 2, 1}
+	for i, w := range want {
+		if len(scores[i]) != 1 || scores[i][0] != w {
+			t.Errorf("scores[%d] = %v, want [%v]", i, scores[i], w)
+		}
+	}
+}
+
+func TestScoreEncodings_OversizedEncodingBypassesBatchingWithoutDisruptingNeighbors(t *testing.T) {
+	// A middle encoding exceeds maxChunkTokens (the pathological
+	// single-huge-word case) — it must go through scoreChunk's existing
+	// single-item sub-batch path (via Score, not ScoreBatch), and must not
+	// get silently folded into a surrounding ScoreBatch call, nor prevent
+	// the normal encodings before/after it from still being batched
+	// together with each other.
+	normal := Encoding{IDs: []int64{1, 2}, AttentionMask: []int64{1, 1}}
+	oversized := Encoding{
+		IDs:           make([]int64, maxChunkTokens+10),
+		AttentionMask: make([]int64, maxChunkTokens+10),
+	}
+	for i := range oversized.IDs {
+		oversized.IDs[i] = int64(i)
+		oversized.AttentionMask[i] = 1
+	}
+	encs := []Encoding{normal, normal, oversized, normal, normal}
+
+	var scoreCalls, scoreBatchCalls int
+	var maxScoreBatchLen int
+	sc := fakeScorerFunc(func(inputIDs, attentionMask []int64) ([]float32, error) {
+		scoreCalls++
+		if len(inputIDs) > maxChunkTokens {
+			t.Fatalf("Score received %d tokens, want <= %d", len(inputIDs), maxChunkTokens)
+		}
+		return make([]float32, len(inputIDs)), nil
+	})
+	// Wrap to also count/inspect ScoreBatch calls, since fakeScorerFunc's
+	// own ScoreBatch just loops Score — swap in a small local wrapper that
+	// delegates but records.
+	wrapped := recordingWrapper{inner: sc, onBatch: func(n int) {
+		scoreBatchCalls++
+		if n > maxScoreBatchLen {
+			maxScoreBatchLen = n
+		}
+	}}
+
+	scores, err := scoreEncodings(wrapped, encs, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scores) != len(encs) {
+		t.Fatalf("got %d results, want %d", len(scores), len(encs))
+	}
+	if len(scores[2]) != len(oversized.IDs) {
+		t.Errorf("oversized encoding's score length = %d, want %d (must cover every token)", len(scores[2]), len(oversized.IDs))
+	}
+	// The oversized encoding forces a flush before/after it, so the 4
+	// normal encodings split into two ScoreBatch calls of 2 (indices 0,1
+	// then 3,4) rather than one call of 4 spanning across it.
+	if scoreBatchCalls != 2 {
+		t.Errorf("ScoreBatch called %d times, want 2 (flushed around the oversized encoding)", scoreBatchCalls)
+	}
+	if maxScoreBatchLen != 2 {
+		t.Errorf("largest ScoreBatch call = %d items, want 2 (never spans the oversized encoding)", maxScoreBatchLen)
+	}
+	// scoreChunk splits the oversized encoding into ceil((maxChunkTokens+10)/maxChunkTokens) = 2 Score calls.
+	if scoreCalls != 2 {
+		t.Errorf("Score called %d times, want 2 (scoreChunk's sub-batching of the oversized encoding)", scoreCalls)
+	}
+}
+
+// recordingWrapper adapts a fakeScorerFunc into a Scorer whose ScoreBatch
+// calls onBatch(len) before delegating per-item to the wrapped Score func —
+// lets a test both assert ScoreBatch call shape AND reuse fakeScorerFunc's
+// existing Score-call assertions.
+type recordingWrapper struct {
+	inner   fakeScorerFunc
+	onBatch func(n int)
+}
+
+func (r recordingWrapper) Score(inputIDs, attentionMask []int64) ([]float32, error) {
+	return r.inner(inputIDs, attentionMask)
+}
+
+func (r recordingWrapper) ScoreBatch(inputIDs, attentionMask [][]int64) ([][]float32, error) {
+	r.onBatch(len(inputIDs))
+	// Deliberately does NOT delegate to r.inner (Score) — that's reserved
+	// for scoreChunk's oversized-encoding sub-batching, so a test can count
+	// Score calls and ScoreBatch calls as two independent signals.
+	out := make([][]float32, len(inputIDs))
+	for i, ids := range inputIDs {
+		out[i] = make([]float32, len(ids))
+	}
+	return out, nil
+}
+
 func TestChunkWords_Empty(t *testing.T) {
 	if got := chunkWords(nil, nil); got != nil {
 		t.Errorf("chunkWords(nil, ...) = %v, want nil", got)

@@ -31,6 +31,16 @@ type offeringJSON struct {
 	// among the offerings of one model — lowest value wins; see
 	// store.Offering.Priority.
 	Priority int `json:"priority"`
+	// PriceInPer1MPeak/PriceOutPer1MPeak/PriceCachedInPer1MPeak (peak
+	// pricing sprint, 2026-09-12): rates during the owning provider's peak
+	// window (see ProviderRow.PeakWindows / GET /api/v1/providers'
+	// peak_windows). nil per field = no peak differential for that field,
+	// falls back to the base rate above — same precedent as
+	// PriceCachedInPer1M. Meaningless (never applied) when the provider has
+	// no peak window configured at all.
+	PriceInPer1MPeak       *float64 `json:"price_in_per_1m_peak,omitempty"`
+	PriceOutPer1MPeak      *float64 `json:"price_out_per_1m_peak,omitempty"`
+	PriceCachedInPer1MPeak *float64 `json:"price_cached_in_per_1m_peak,omitempty"`
 }
 
 func offeringToJSON(o store.Offering) offeringJSON {
@@ -40,6 +50,8 @@ func offeringToJSON(o store.Offering) offeringJSON {
 		PriceOutPer1M: o.PriceOutPer1M, PriceCachedInPer1M: o.PriceCachedInPer1M,
 		Currency: o.Currency, ContextLength: o.ContextLength, Enabled: o.Enabled,
 		Priority: o.Priority,
+		PriceInPer1MPeak: o.PriceInPer1MPeak, PriceOutPer1MPeak: o.PriceOutPer1MPeak,
+		PriceCachedInPer1MPeak: o.PriceCachedInPer1MPeak,
 	}
 }
 
@@ -135,6 +147,8 @@ func (s *Server) handleCatalogOfferingCreate(w http.ResponseWriter, r *http.Requ
 		PriceOutPer1M: b.PriceOutPer1M, PriceCachedInPer1M: b.PriceCachedInPer1M,
 		Currency: b.Currency, ContextLength: b.ContextLength, Enabled: b.Enabled,
 		Priority: priority,
+		PriceInPer1MPeak: b.PriceInPer1MPeak, PriceOutPer1MPeak: b.PriceOutPer1MPeak,
+		PriceCachedInPer1MPeak: b.PriceCachedInPer1MPeak,
 	})
 	if err != nil {
 		writeInternalError(w, err)
@@ -192,6 +206,8 @@ func (s *Server) handleCatalogOfferingUpdate(w http.ResponseWriter, r *http.Requ
 		PriceOutPer1M: b.PriceOutPer1M, PriceCachedInPer1M: b.PriceCachedInPer1M,
 		Currency: b.Currency, ContextLength: b.ContextLength, Enabled: b.Enabled,
 		Priority: priority,
+		PriceInPer1MPeak: b.PriceInPer1MPeak, PriceOutPer1MPeak: b.PriceOutPer1MPeak,
+		PriceCachedInPer1MPeak: b.PriceCachedInPer1MPeak,
 	})
 	if err != nil {
 		writeInternalError(w, err)
@@ -266,6 +282,12 @@ type offeringBody struct {
 	// (e.g. DeepSeek); nil/omitted means unmodelled — see store.Offering's
 	// doc comment.
 	PriceCachedInPer1M *float64 `json:"price_cached_in_per_1m"`
+	// PriceInPer1MPeak/PriceOutPer1MPeak/PriceCachedInPer1MPeak (2026-09-12):
+	// see offeringJSON's doc comment — same nil-per-field-falls-back-to-base
+	// semantics on write as on read.
+	PriceInPer1MPeak       *float64 `json:"price_in_per_1m_peak"`
+	PriceOutPer1MPeak      *float64 `json:"price_out_per_1m_peak"`
+	PriceCachedInPer1MPeak *float64 `json:"price_cached_in_per_1m_peak"`
 }
 
 // validateOffering checks field constraints + model/provider existence.
@@ -335,6 +357,19 @@ func (s *Server) validateOffering(ctx context.Context, b offeringBody, excludeID
 	}
 	if b.Currency != "" && !currencyRE.MatchString(b.Currency) {
 		fields["currency"] = "must be a 3-letter ISO 4217 code"
+	}
+	// Peak prices are validated for sign only — never against the base
+	// rate. Whether a provider's peak tier costs more or less than
+	// off-peak is the provider's own policy, not something this app should
+	// enforce as an invariant (see PriceInPer1MPeak's doc comment).
+	if b.PriceInPer1MPeak != nil && *b.PriceInPer1MPeak < 0 {
+		fields["price_in_per_1m_peak"] = "must be >= 0"
+	}
+	if b.PriceOutPer1MPeak != nil && *b.PriceOutPer1MPeak < 0 {
+		fields["price_out_per_1m_peak"] = "must be >= 0"
+	}
+	if b.PriceCachedInPer1MPeak != nil && *b.PriceCachedInPer1MPeak < 0 {
+		fields["price_cached_in_per_1m_peak"] = "must be >= 0"
 	}
 	return fields
 }

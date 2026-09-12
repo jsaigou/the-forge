@@ -42,6 +42,11 @@ func TestFrozenProviderShapes(t *testing.T) {
 	// them to verify they marshal under the documented JSON keys.
 	hasKeys(t, providerJSON{TargetURL: "x", StatusURL: "x", OrgID: "x"},
 		"target_url", "status_url", "org_id")
+	// Peak pricing sprint (2026-09-12): peak_windows is omitempty (absent
+	// when the provider has no schedule), peak_active_now is always present
+	// (a plain bool, always meaningful even when false/no-schedule).
+	hasKeys(t, providerJSON{}, "peak_active_now")
+	hasKeys(t, providerJSON{PeakWindows: "x"}, "peak_windows")
 	// Phase 7 (2026-08-13): models[] is now offerings-derived (provider_models
 	// was dead — 0 rows live, no write path — dropped in migration 0043).
 	// bill_currency -> currency (the offering's own, not the provider's) +

@@ -18,12 +18,18 @@ import (
 // succeed. Returns the real ModernBERT-tokenizer token counts summed
 // across every message actually run through the engine (0 for either if
 // nothing in the request was tokenizable/compressible), for the caller to
-// fold into the tokens_saved metric.
-func compressMessages(engine *compress.Engine, body map[string]any, budget time.Duration) (originalTokens, compressedTokens int64, failOpenTimeout, failOpenError int64) {
+// fold into the tokens_saved metric, plus outcomeSize: a per-message count
+// of "outcome:size_tier" composite labels (see messageOutcomeSize) for the
+// caller to fold into messagesByOutcomeSize — added 2026-09-11 so the
+// bimodal "compression barely matters on chatty messages, matters enormously
+// on huge ones" shape (the operator's own early-testing observation) is
+// directly visible in production telemetry instead of inferred from a mean.
+func compressMessages(engine *compress.Engine, body map[string]any, budget time.Duration) (originalTokens, compressedTokens int64, failOpenTimeout, failOpenError int64, outcomeSize map[string]int64) {
 	messagesRaw, ok := body["messages"].([]any)
 	if !ok {
-		return 0, 0, 0, 0
+		return 0, 0, 0, 0, nil
 	}
+	outcomeSize = make(map[string]int64)
 	for _, mRaw := range messagesRaw {
 		msg, ok := mRaw.(map[string]any)
 		if !ok {
@@ -43,8 +49,52 @@ func compressMessages(engine *compress.Engine, body map[string]any, budget time.
 		case "error":
 			failOpenError++
 		}
+		outcomeSize[messageOutcomeSize(res, reason, len(content))]++
 	}
-	return originalTokens, compressedTokens, failOpenTimeout, failOpenError
+	return originalTokens, compressedTokens, failOpenTimeout, failOpenError, outcomeSize
+}
+
+// messageOutcomeSize classifies one message into a composite
+// "outcome:size_tier" label value.
+//
+// outcome distinguishes gated_passthrough (below Engine.Config's
+// MinWords/ByteThreshold — the engine skips tokenization entirely, so
+// compress.Result.OriginalTokens stays 0, per that field's own doc comment)
+// from alldrop_passthrough (tokenization and scoring both ran, every word
+// scored below threshold — OriginalTokens is real/nonzero) using that
+// existing documented invariant, rather than adding a new field to
+// compress.Result just for this.
+func messageOutcomeSize(res compress.Result, reason string, contentBytes int) string {
+	var outcome string
+	switch {
+	case reason == "timeout":
+		outcome = "failopen_timeout"
+	case reason == "error":
+		outcome = "failopen_error"
+	case res.Passthrough && res.OriginalTokens == 0:
+		outcome = "gated_passthrough"
+	case res.Passthrough:
+		outcome = "alldrop_passthrough"
+	default:
+		outcome = "compressed"
+	}
+	return outcome + ":" + sizeTier(contentBytes)
+}
+
+// sizeTier buckets a message's raw content size — deliberately coarse (4
+// tiers) so the resulting label cardinality stays small regardless of
+// traffic volume.
+func sizeTier(bytes int) string {
+	switch {
+	case bytes < 2*1024:
+		return "small"
+	case bytes < 20*1024:
+		return "medium"
+	case bytes < 200*1024:
+		return "large"
+	default:
+		return "huge"
+	}
 }
 
 // compressOne runs engine.Compress with a wall-clock fail-open budget and

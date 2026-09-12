@@ -78,7 +78,7 @@ func (v providersView) List(ctx context.Context) ([]ProviderRow, error) {
 		`SELECT id, name, api_key, target_url, model, model2,
 		        bill_currency, status_url, credits_url, org_id,
 		        billing_enabled, billing_console_url, enabled, country,
-		        data_residency_group, created_at
+		        data_residency_group, created_at, peak_windows
 		 FROM router_providers WHERE deleted_at IS NULL ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("store: providers.list: %w", err)
@@ -92,15 +92,17 @@ func (v providersView) List(ctx context.Context) ([]ProviderRow, error) {
 		var p ProviderRow
 		var created int64
 		var billingEnabled, enabled int64
+		var peakWindows sql.NullString
 		if err := rows.Scan(&p.ID, &p.Name, &p.APIKey, &p.TargetURL,
 			&p.Model, &p.Model2, &p.BillCurrency, &p.StatusURL, &p.CreditsURL,
 			&p.OrgID, &billingEnabled, &p.BillingConsoleURL, &enabled,
-			&p.Country, &p.DataResidencyGroup, &created); err != nil {
+			&p.Country, &p.DataResidencyGroup, &created, &peakWindows); err != nil {
 			return nil, fmt.Errorf("store: providers.list: %w", err)
 		}
 		p.BillingEnabled = billingEnabled != 0
 		p.Enabled = enabled != 0
 		p.CreatedAt = timeOf(sql.NullInt64{Int64: created, Valid: true})
+		p.PeakWindows = strOf(peakWindows)
 		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {
