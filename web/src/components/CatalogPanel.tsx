@@ -8,7 +8,7 @@
 // merged-config seam picks up changes immediately.
 
 import { useEffect, useState } from "react";
-import { countryFlag, formatGB } from "../lib/format";
+import { countryFlag, formatCurrencyPrecise, formatGB } from "../lib/format";
 import { familyInheritedIcon, modelInheritedIcon } from "../lib/iconInheritance";
 import { preferredOfferingIds } from "../lib/offeringPreference";
 import { providerIconSlug } from "../lib/providerPresets";
@@ -705,9 +705,19 @@ function OfferingsSection({ canAdmin }: { canAdmin: boolean }) {
                   {m?.name ?? `#${o.model_id}`}
                 </span>
                 <span style={{ width: 100, fontFamily: "var(--mono)", fontSize: 11 }}>
-                  {o.price_in_per_1m}/{o.price_out_per_1m}
+                  {formatCurrencyPrecise(o.price_in_per_1m, o.currency)}/{formatCurrencyPrecise(o.price_out_per_1m, o.currency)}
                   {o.price_cached_in_per_1m != null && (
-                    <span style={{ color: "var(--text-dim)" }}> (cached {o.price_cached_in_per_1m})</span>
+                    <span style={{ color: "var(--text-dim)" }}> (cached {formatCurrencyPrecise(o.price_cached_in_per_1m, o.currency)})</span>
+                  )}
+                  {(o.price_in_per_1m_peak != null || o.price_out_per_1m_peak != null) && (
+                    <span style={{ color: "var(--text-dim)" }}>
+                      {" "}(peak {formatCurrencyPrecise(o.price_in_per_1m_peak ?? o.price_in_per_1m, o.currency)}/{formatCurrencyPrecise(o.price_out_per_1m_peak ?? o.price_out_per_1m, o.currency)})
+                    </span>
+                  )}
+                  {prov?.peakActiveNow && (
+                    <span className="chip" style={{ marginLeft: 4, color: "var(--warn)" }} title="This provider's peak window is active right now">
+                      peak now
+                    </span>
                   )}
                 </span>
                 <span style={{ width: 64, fontFamily: "var(--mono)", fontSize: 11 }} title="Lower wins — among this model's enabled offerings, the lowest value is served via a0">{o.priority}</span>

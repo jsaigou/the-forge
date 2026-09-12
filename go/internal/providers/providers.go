@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/pricing"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -83,6 +84,13 @@ type Provider struct {
 	// from router_providers (0008 columns). "" when unknown.
 	Country            string
 	DataResidencyGroup string
+
+	// PeakWindows/PeakActiveNow (peak pricing sprint, 2026-09-12): raw
+	// schedule plus a server-evaluated "is peak in force right now" flag,
+	// computed once here against s.deps.now() rather than left for the FE
+	// to re-derive from the raw schedule.
+	PeakWindows   string
+	PeakActiveNow bool
 }
 
 // Model is one row under a provider — Phase 7 (2026-08-13): sourced from
@@ -340,6 +348,7 @@ func (s *service) List(ctx context.Context) ([]Provider, error) {
 		if models == nil {
 			models = []Model{}
 		}
+		windows, _ := pricing.Parse(row.PeakWindows) // malformed row -> zero value, PeakActiveNow false
 		out = append(out, Provider{
 			ID:                 row.ID,
 			Name:               row.Name,
@@ -357,6 +366,8 @@ func (s *service) List(ctx context.Context) ([]Provider, error) {
 			Enabled:            row.Enabled,
 			Country:            row.Country,
 			DataResidencyGroup: row.DataResidencyGroup,
+			PeakWindows:        row.PeakWindows,
+			PeakActiveNow:      windows.Active(s.deps.now()),
 		})
 	}
 	return out, nil

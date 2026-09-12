@@ -140,13 +140,13 @@ func (v routingView) SaveProvider(ctx context.Context, p ProviderRow) error {
 			`INSERT INTO router_providers (name, api_key, target_url,
 			   model, model2, bill_currency, status_url, credits_url, org_id,
 			   billing_enabled, billing_console_url, enabled, country,
-			   data_residency_group, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			   data_residency_group, created_at, peak_windows)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			p.Name, p.APIKey, p.TargetURL, p.Model, p.Model2,
 			billCcy, p.StatusURL, p.CreditsURL, p.OrgID,
 			boolInt(p.BillingEnabled), p.BillingConsoleURL, boolInt(p.Enabled),
 			p.Country, p.DataResidencyGroup,
-			unixOf(orNow(p.CreatedAt)),
+			unixOf(orNow(p.CreatedAt)), p.PeakWindows,
 		)
 		if err != nil {
 			return fmt.Errorf("store: routing.save_provider: %w", err)
@@ -163,12 +163,12 @@ func (v routingView) SaveProvider(ctx context.Context, p ProviderRow) error {
 		   bill_currency = COALESCE(NULLIF(?, ''), 'USD'),
 		   status_url = ?, credits_url = ?, org_id = ?,
 		   billing_enabled = ?, billing_console_url = ?,
-		   enabled = ?, country = ?, data_residency_group = ?
+		   enabled = ?, country = ?, data_residency_group = ?, peak_windows = ?
 		 WHERE id = ?`,
 		p.Name, p.APIKey, p.TargetURL, p.Model, p.Model2,
 		billCcy, p.StatusURL, p.CreditsURL, p.OrgID,
 		boolInt(p.BillingEnabled), p.BillingConsoleURL, boolInt(p.Enabled),
-		p.Country, p.DataResidencyGroup, p.ID,
+		p.Country, p.DataResidencyGroup, p.PeakWindows, p.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("store: routing.save_provider: %w", err)
@@ -200,7 +200,7 @@ func (v routingView) Providers(ctx context.Context) ([]ProviderRow, error) {
 		`SELECT rp.id, rp.name, rp.api_key, rp.target_url, rp.model, rp.model2,
 		        rp.bill_currency, rp.status_url, rp.credits_url, rp.org_id,
 		        rp.billing_enabled, rp.billing_console_url, rp.enabled, rp.country,
-		        rp.data_residency_group, rp.created_at, hp.service
+		        rp.data_residency_group, rp.created_at, hp.service, rp.peak_windows
 		 FROM router_providers rp
 		 LEFT JOIN compressor_proxies hp
 		   ON hp.provider_id = rp.id AND hp.orphaned_at IS NULL
@@ -215,17 +215,18 @@ func (v routingView) Providers(ctx context.Context) ([]ProviderRow, error) {
 		var p ProviderRow
 		var created int64
 		var billingEnabled, enabled int64
-		var proxyService sql.NullString
+		var proxyService, peakWindows sql.NullString
 		if err := rows.Scan(&p.ID, &p.Name, &p.APIKey, &p.TargetURL,
 			&p.Model, &p.Model2, &p.BillCurrency, &p.StatusURL, &p.CreditsURL,
 			&p.OrgID, &billingEnabled, &p.BillingConsoleURL, &enabled,
-			&p.Country, &p.DataResidencyGroup, &created, &proxyService); err != nil {
+			&p.Country, &p.DataResidencyGroup, &created, &proxyService, &peakWindows); err != nil {
 			return nil, fmt.Errorf("store: routing.providers: %w", err)
 		}
 		p.BillingEnabled = billingEnabled != 0
 		p.Enabled = enabled != 0
 		p.CreatedAt = timeOf(sql.NullInt64{Int64: created, Valid: true})
 		p.CompressorProxyName = strOf(proxyService)
+		p.PeakWindows = strOf(peakWindows)
 		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -252,12 +253,13 @@ func (v routingView) providerBy(ctx context.Context, where string, arg any) (Pro
 	var created int64
 	var billingEnabled, enabled int64
 	var deletedAt sql.NullInt64
-	var proxyService sql.NullString
+	var proxyService, peakWindows sql.NullString
 	err := v.d.sql.QueryRowContext(ctx,
 		`SELECT rp.id, rp.name, rp.api_key, rp.target_url, rp.model, rp.model2,
 		        rp.bill_currency, rp.status_url, rp.credits_url, rp.org_id,
 		        rp.billing_enabled, rp.billing_console_url, rp.enabled, rp.country,
-		        rp.data_residency_group, rp.deleted_at, rp.created_at, hp.service
+		        rp.data_residency_group, rp.deleted_at, rp.created_at, hp.service,
+		        rp.peak_windows
 		 FROM router_providers rp
 		 LEFT JOIN compressor_proxies hp
 		   ON hp.provider_id = rp.id AND hp.orphaned_at IS NULL
@@ -265,7 +267,7 @@ func (v routingView) providerBy(ctx context.Context, where string, arg any) (Pro
 		arg).Scan(&p.ID, &p.Name, &p.APIKey, &p.TargetURL, &p.Model, &p.Model2,
 		&p.BillCurrency, &p.StatusURL, &p.CreditsURL, &p.OrgID,
 		&billingEnabled, &p.BillingConsoleURL, &enabled, &p.Country,
-		&p.DataResidencyGroup, &deletedAt, &created, &proxyService)
+		&p.DataResidencyGroup, &deletedAt, &created, &proxyService, &peakWindows)
 	if err == sql.ErrNoRows {
 		return ProviderRow{}, false, nil
 	}
@@ -277,6 +279,7 @@ func (v routingView) providerBy(ctx context.Context, where string, arg any) (Pro
 	p.CreatedAt = timeOf(sql.NullInt64{Int64: created, Valid: true})
 	p.DeletedAt = timeOf(deletedAt)
 	p.CompressorProxyName = strOf(proxyService)
+	p.PeakWindows = strOf(peakWindows)
 	return p, true, nil
 }
 
@@ -342,8 +345,9 @@ func (v routingView) RecordSavingsSample(ctx context.Context, s CompressorSaving
 		   cache_busts, cache_bust_tokens_lost,
 		   ttfb_count, ttfb_sum_ms, ttfb_min_ms, ttfb_max_ms,
 		   latency_count, latency_sum_ms, latency_min_ms, latency_max_ms,
-		   overhead_count, overhead_sum_ms, overhead_min_ms, overhead_max_ms
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   overhead_count, overhead_sum_ms, overhead_min_ms, overhead_max_ms,
+		   overhead_p50_ms, overhead_p90_ms, overhead_p99_ms
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts, s.ProxyID, s.TokensIn, s.TokensOut, s.CacheReadTokens, s.UncachedTokens, s.TokensSaved,
 		s.Requests, s.RequestsCached, s.RequestsFailed, s.RequestsRateLimited,
 		s.RequestsTimeout, s.RequestsCanceled, s.FailOpenTotal,
@@ -351,6 +355,7 @@ func (v routingView) RecordSavingsSample(ctx context.Context, s CompressorSaving
 		s.TTFBCount, s.TTFBSumMs, floatPtrArg(s.TTFBMinMs), floatPtrArg(s.TTFBMaxMs),
 		s.LatencyCount, s.LatencySumMs, floatPtrArg(s.LatencyMinMs), floatPtrArg(s.LatencyMaxMs),
 		s.OverheadCount, s.OverheadSumMs, floatPtrArg(s.OverheadMinMs), floatPtrArg(s.OverheadMaxMs),
+		floatPtrArg(s.OverheadP50Ms), floatPtrArg(s.OverheadP90Ms), floatPtrArg(s.OverheadP99Ms),
 	)
 	if err != nil {
 		return fmt.Errorf("store: routing.record_sample: %w", err)
@@ -384,7 +389,8 @@ func (v routingView) SavingsSummary(ctx context.Context, since time.Time) (map[s
 		        hs.cache_read_tokens, hs.uncached_tokens, hs.cache_busts, hs.cache_bust_tokens_lost,
 		        hs.ttfb_count, hs.ttfb_sum_ms, hs.ttfb_min_ms, hs.ttfb_max_ms,
 		        hs.latency_count, hs.latency_sum_ms, hs.latency_min_ms, hs.latency_max_ms,
-		        hs.overhead_count, hs.overhead_sum_ms, hs.overhead_min_ms, hs.overhead_max_ms
+		        hs.overhead_count, hs.overhead_sum_ms, hs.overhead_min_ms, hs.overhead_max_ms,
+		        hs.overhead_p50_ms, hs.overhead_p90_ms, hs.overhead_p99_ms
 		 FROM compressor_savings_samples hs
 		 JOIN compressor_proxies hp ON hp.id = hs.proxy_id
 		 WHERE hs.ts >= ? ORDER BY hs.ts ASC`,
@@ -405,6 +411,7 @@ func (v routingView) SavingsSummary(ctx context.Context, since time.Time) (map[s
 		var ttfbCount, latencyCount, overheadCount int64
 		var ttfbSum, latencySum, overheadSum float64
 		var ttfbMin, ttfbMax, latencyMin, latencyMax, overheadMin, overheadMax sql.NullFloat64
+		var overheadP50, overheadP90, overheadP99 sql.NullFloat64
 		if err := rows.Scan(&proxy, &tokensIn, &tokensOut, &tokensSaved,
 			&requests, &requestsCached, &requestsFailed, &requestsRateLimited,
 			&requestsTimeout, &requestsCanceled, &failOpenTotal,
@@ -412,6 +419,7 @@ func (v routingView) SavingsSummary(ctx context.Context, since time.Time) (map[s
 			&ttfbCount, &ttfbSum, &ttfbMin, &ttfbMax,
 			&latencyCount, &latencySum, &latencyMin, &latencyMax,
 			&overheadCount, &overheadSum, &overheadMin, &overheadMax,
+			&overheadP50, &overheadP90, &overheadP99,
 		); err != nil {
 			return nil, fmt.Errorf("store: routing.summary: %w", err)
 		}
@@ -454,6 +462,15 @@ func (v routingView) SavingsSummary(ctx context.Context, since time.Time) (map[s
 		}
 		if v := nullFloat64Ptr(overheadMax); v != nil {
 			p.OverheadMaxMs = v
+		}
+		if v := nullFloat64Ptr(overheadP50); v != nil {
+			p.OverheadP50Ms = v
+		}
+		if v := nullFloat64Ptr(overheadP90); v != nil {
+			p.OverheadP90Ms = v
+		}
+		if v := nullFloat64Ptr(overheadP99); v != nil {
+			p.OverheadP99Ms = v
 		}
 		out[proxy] = p
 	}
@@ -518,6 +535,15 @@ func (v routingView) SavingsSummary(ctx context.Context, since time.Time) (map[s
 				p.RequestsByModel = map[string]int64{}
 			}
 			p.RequestsByModel[labelValue] = sum
+		case "outcome_size":
+			// labelValue is a composite "outcome:size_tier" (e.g.
+			// "compressed:huge") — see messagesByOutcomeSize's doc comment
+			// in cmd/forge-compress/metrics.go for why composite rather than
+			// two independent label dimensions.
+			if p.MessagesByOutcomeSize == nil {
+				p.MessagesByOutcomeSize = map[string]int64{}
+			}
+			p.MessagesByOutcomeSize[labelValue] = sum
 		case "transform":
 			switch metric {
 			case "timing_ms_sum":

@@ -543,6 +543,13 @@ type toolOfferingView struct {
 	PriceInPer1M  float64 `json:"price_in_per_1m"`
 	PriceOutPer1M float64 `json:"price_out_per_1m"`
 	Currency      string  `json:"currency"`
+	// PriceNote (peak pricing sprint, 2026-09-12) discloses that
+	// price_in_per_1m/price_out_per_1m above are the OFF-PEAK/base rate
+	// only, when the offering has any peak-tier price configured — without
+	// this the tool would silently state half the truth for a
+	// time-of-day-priced provider (e.g. DeepSeek). Empty when the offering
+	// has no peak pricing at all.
+	PriceNote string `json:"price_note,omitempty"`
 }
 
 func catalogLookupTool(ctx context.Context, env *ToolEnv, args json.RawMessage) (any, error) {
@@ -587,10 +594,14 @@ func catalogLookupTool(ctx context.Context, env *ToolEnv, args json.RawMessage) 
 			if a.Name != "" && o.WireModel != a.Name {
 				continue
 			}
-			out = append(out, toolOfferingView{
+			view := toolOfferingView{
 				Provider: o.ProviderName, WireModel: o.WireModel, ContextLength: o.ContextLength, Enabled: o.Enabled,
 				PriceInPer1M: o.PriceInPer1M, PriceOutPer1M: o.PriceOutPer1M, Currency: o.Currency,
-			})
+			}
+			if o.PriceInPer1MPeak != nil || o.PriceOutPer1MPeak != nil || o.PriceCachedInPer1MPeak != nil {
+				view.PriceNote = "off-peak/base rate shown — this provider also has a higher peak-hours rate"
+			}
+			out = append(out, view)
 		}
 		return map[string]any{"offerings": out}, nil
 	default:

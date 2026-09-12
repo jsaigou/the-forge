@@ -352,6 +352,11 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                       />
                       Billing API enabled
                     </label>
+                    <PeakWindowsEditor
+                      value={editDraft.peak_windows ?? p.peak_windows ?? ""}
+                      peakActiveNow={p.peak_active_now}
+                      onChange={(v) => setEditDraft({ ...editDraft, peak_windows: v })}
+                    />
                     <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
                       <button className="btn" onClick={() => { setEditing(null); setEditDraft({}); }}>Cancel</button>
                       <SaveButton pending={update.isPending} isError={update.isError} onClick={() => submitEdit(p.id)} />
@@ -454,5 +459,180 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
         )}
       </div>
     </>
+  );
+}
+
+const PEAK_WINDOWS_JSON_PLACEHOLDER = `[{"days":[1,2,3,4,5],"start":"01:00","end":"04:00"}]`;
+
+const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// A short curated list, not the full ~600-name IANA database — common
+// zones a provider is actually likely to publish hours in, covering every
+// populated continent, plus UTC itself. "Custom…" is the escape hatch for
+// anything else (the free-text input below still accepts any valid IANA
+// name typed directly — this select is a convenience, not a restriction).
+const COMMON_TIMEZONES = [
+  "UTC",
+  "America/Los_Angeles",
+  "America/Denver",
+  "America/Chicago",
+  "America/New_York",
+  "America/Sao_Paulo",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Moscow",
+  "Africa/Cairo",
+  "Africa/Johannesburg",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Shanghai",
+  "Asia/Tokyo",
+  "Asia/Seoul",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+];
+
+type PeakWindowRow = { days: number[]; start: string; end: string };
+type PeakSchedule = { tz?: string; windows?: PeakWindowRow[] };
+
+// splitStored parses the full stored peak_windows JSON (as PUT to the API)
+// into its two independently-edited pieces: the timezone name and the
+// windows array (kept as its own JSON text so the textarea round-trips
+// exactly what the operator typed, including in-progress edits). Falls
+// back to (no tz, raw text in the windows box) when the stored value isn't
+// valid JSON — should only happen for hand-typed data mid-edit, since
+// every value that reaches here from the server already parsed once.
+function splitStored(raw: string): { tz: string; windowsJson: string } {
+  if (raw.trim() === "") return { tz: "", windowsJson: "" };
+  try {
+    const parsed = JSON.parse(raw) as PeakSchedule;
+    return { tz: parsed.tz ?? "", windowsJson: JSON.stringify(parsed.windows ?? []) };
+  } catch {
+    return { tz: "", windowsJson: raw };
+  }
+}
+
+// composeStored is splitStored's inverse — called on every keystroke in
+// either sub-field to rebuild the single JSON string the API/store expects.
+// Omits "tz" entirely when empty (equivalent to UTC, matches the backend's
+// omitempty convention) rather than writing {"tz":""}.
+function composeStored(tz: string, windowsJson: string): string {
+  if (windowsJson.trim() === "" && tz.trim() === "") return "";
+  let windows: unknown = [];
+  try {
+    windows = JSON.parse(windowsJson || "[]");
+  } catch {
+    // Malformed mid-edit — still compose so `tz` isn't lost, but embed the
+    // raw (invalid) text as a placeholder the server will reject with a
+    // real parse error surfaced through the existing error banner.
+    return `{${tz ? `"tz":${JSON.stringify(tz)},` : ""}"windows":${windowsJson || "[]"}}`;
+  }
+  const schedule: PeakSchedule = { windows: windows as PeakWindowRow[] };
+  if (tz.trim() !== "") schedule.tz = tz.trim();
+  return JSON.stringify(schedule);
+}
+
+// PeakWindowsEditor (peak pricing sprint, 2026-09-12; timezone input added
+// 2026-09-13) — a labeled Timezone picker plus a validated JSON textarea
+// for a provider's recurring peak-hours windows (e.g. DeepSeek's weekday
+// 01:00-04:00 + 06:00-10:00 UTC). The windows LIST stays JSON — there's no
+// precedent anywhere in this codebase for a bespoke hour-range picker (the
+// closest is SchedulerJobs' raw cron text input) and it's edited rarely —
+// but the timezone is a single flat value a provider almost always quotes
+// in one local zone ("9am-5pm Pacific"), and typing "tz":"..." correctly
+// inside hand-written JSON is exactly the kind of error a labeled field
+// with a curated dropdown avoids. The server converts using the real IANA
+// database (internal/pricing), so entering local hours + a zone here is
+// enough — no manual UTC math, and it stays correct across DST automatically.
+// The summary below only reformats the parsed JSON for readability — it
+// never evaluates whether a window is currently active; that's
+// peakActiveNow, computed server-side and passed in, never re-derived here.
+function PeakWindowsEditor({
+  value,
+  peakActiveNow,
+  onChange,
+}: {
+  value: string;
+  peakActiveNow: boolean;
+  onChange: (v: string) => void;
+}) {
+  const [tz, setTz] = useState(() => splitStored(value).tz);
+  const [windowsJson, setWindowsJson] = useState(() => splitStored(value).windowsJson);
+  const [tzMode, setTzMode] = useState<"select" | "custom">(() =>
+    COMMON_TIMEZONES.includes(splitStored(value).tz) || splitStored(value).tz === "" ? "select" : "custom",
+  );
+
+  function update(nextTz: string, nextWindowsJson: string) {
+    setTz(nextTz);
+    setWindowsJson(nextWindowsJson);
+    onChange(composeStored(nextTz, nextWindowsJson));
+  }
+
+  let summary: string | null = null;
+  let localParseError: string | null = null;
+  if (windowsJson.trim() !== "") {
+    try {
+      const parsed = JSON.parse(windowsJson) as PeakWindowRow[];
+      const tzLabel = tz.trim() || "UTC";
+      summary = parsed
+        .map((w) => `${w.days.map((d) => WEEKDAY_SHORT[d] ?? `?${d}`).join("/")} ${w.start}–${w.end} ${tzLabel}`)
+        .join(", ") || "(no windows)";
+    } catch {
+      localParseError = "Not valid JSON — the server will reject this until it parses.";
+    }
+  }
+
+  return (
+    <div style={{ gridColumn: "1 / -1", display: "grid", gap: 10 }}>
+      <label className="form-row">
+        Timezone
+        {tzMode === "select" ? (
+          <select
+            value={COMMON_TIMEZONES.includes(tz) ? tz : "UTC"}
+            onChange={(e) => {
+              if (e.target.value === "__custom") {
+                setTzMode("custom");
+                return;
+              }
+              update(e.target.value === "UTC" ? "" : e.target.value, windowsJson);
+            }}
+          >
+            {COMMON_TIMEZONES.map((z) => <option key={z} value={z}>{z}</option>)}
+            <option value="__custom">Custom…</option>
+          </select>
+        ) : (
+          <input
+            value={tz}
+            placeholder="e.g. America/Los_Angeles — full IANA name, not an abbreviation like PST"
+            style={{ fontFamily: "var(--mono)" }}
+            onChange={(e) => update(e.target.value, windowsJson)}
+          />
+        )}
+        <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          What zone the hours below are in — the server converts to real UTC per request (DST-correct)
+          automatically. Leave as UTC if you already have UTC hours.
+        </span>
+      </label>
+      <label className="form-row">
+        Peak pricing windows (JSON, local to the timezone above)
+        <textarea
+          rows={2}
+          value={windowsJson}
+          placeholder={PEAK_WINDOWS_JSON_PLACEHOLDER}
+          style={{ fontFamily: "var(--mono)", fontSize: 11 }}
+          onChange={(e) => update(tz, e.target.value)}
+        />
+        <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          Empty = no peak/off-peak concept for this provider. Format: {`[{"days":[0-6, 0=Sun],"start":"HH:MM","end":"HH:MM"}]`}
+        </span>
+        {localParseError && <span style={{ fontSize: 11, color: "var(--warn)" }}>{localParseError}</span>}
+        {summary && !localParseError && (
+          <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
+            {summary}
+            {peakActiveNow && <span className="chip" style={{ marginLeft: 6, color: "var(--warn)" }}>peak now</span>}
+          </span>
+        )}
+      </label>
+    </div>
   );
 }

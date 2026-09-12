@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/jsaigou/the-forge/internal/config"
+	"github.com/jsaigou/the-forge/internal/statutil"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -290,42 +291,8 @@ func computeEnergy(samples []store.MetricSample, cost config.Cost, sampleInterva
 			}
 		}
 	}
-	e.IdleBaselineW = median(idleWallWatts)
+	e.IdleBaselineW = statutil.Median(idleWallWatts)
 	return e
-}
-
-// median returns the median of vals (sorted copy; even-length averages the
-// two middle values). 0 for an empty slice.
-func median(vals []float64) float64 {
-	if len(vals) == 0 {
-		return 0
-	}
-	sorted := append([]float64(nil), vals...)
-	sort.Float64s(sorted)
-	mid := len(sorted) / 2
-	if len(sorted)%2 == 1 {
-		return sorted[mid]
-	}
-	return (sorted[mid-1] + sorted[mid]) / 2
-}
-
-// percentile returns the p-th percentile (0-100) of vals via nearest-rank.
-// 0 for an empty slice — callers must check len(vals) before trusting a
-// calibration figure computed from too few samples.
-func percentile(vals []float64, p float64) float64 {
-	if len(vals) == 0 {
-		return 0
-	}
-	sorted := append([]float64(nil), vals...)
-	sort.Float64s(sorted)
-	rank := int(p/100*float64(len(sorted)-1) + 0.5)
-	if rank < 0 {
-		rank = 0
-	}
-	if rank >= len(sorted) {
-		rank = len(sorted) - 1
-	}
-	return sorted[rank]
 }
 
 // ── GET /api/v1/cost/summary ──────────────────────────────────────────────
@@ -438,8 +405,8 @@ func (s *Server) handleCostSummary(w http.ResponseWriter, r *http.Request) {
 	// p95. 10 is an arbitrary but reasonable floor (below it: null, not a
 	// misleadingly precise-looking number from noise).
 	if len(e.activeSingleSlotWallW) >= 10 {
-		p50 := round6(percentile(e.activeSingleSlotWallW, 50))
-		p95 := round6(percentile(e.activeSingleSlotWallW, 95))
+		p50 := round6(statutil.Percentile(e.activeSingleSlotWallW, 50))
+		p95 := round6(statutil.Percentile(e.activeSingleSlotWallW, 95))
 		resp.Energy.Calibration.SingleSlotActiveWallWP50 = &p50
 		resp.Energy.Calibration.SingleSlotActiveWallWP95 = &p95
 	}

@@ -17,13 +17,15 @@
 #
 # The three Environment= paths below are this binary's own artifacts --
 # constant across every instance on this host, so they're baked in here
-# rather than written per-instance by Provisioner (which only ever varies
-# OPENAI_TARGET_API_URL/HEADROOM_KOMPRESS_ONNX_INTRA_THREADS/
-# HEADROOM_PROXY_TOKEN/HEADROOM_PORT per row, same as it always has for
-# headroom@ instances -- see writeEnv). HEADROOM_PROXY_TOKEN is accepted
-# from that EnvironmentFile but not enforced as an auth gate by this
-# binary; see cmd/forge-compress/config.go's ProxyToken doc comment for
-# why.
+# rather than written per-instance by Provisioner (writeEnv,
+# internal/compressorctl/provision.go -- the var names in that function's
+# own comment predate the Foundry->Forge rename and are stale here too;
+# trust provision.go's actual code over this paragraph). As of 2026-09-11
+# writeEnv also writes COMPRESS_MAX_INFLIGHT and
+# FORGE_COMPRESS_FAILOPEN_BUDGET_MS per row -- COMPRESS_PROXY_TOKEN is
+# accepted from that EnvironmentFile but not enforced as an auth gate by
+# this binary; see cmd/forge-compress/config.go's ProxyToken doc comment
+# for why.
 #
 # One-time manual root install (this file only -- not something to script
 # unattended against a live production host, same convention as
@@ -56,6 +58,15 @@ EnvironmentFile=/var/lib/forge/compress/%i.env
 Environment=FORGE_COMPRESS_MODEL_PATH=/opt/forge/compress/kompress-int8-wo.onnx
 Environment=FORGE_COMPRESS_TOKENIZER_PATH=/opt/forge/compress/tokenizer.json
 Environment=FORGE_COMPRESS_ONNXRUNTIME_LIB=/opt/forge/compress/libonnxruntime.so
+# GOMEMLIMIT, added after the 2026-09-09 OOM-kill (forge-compress@deepseek,
+# 1d7h uptime, kernel OOM killer under MemoryMax below). Go's GC has no
+# innate awareness of a cgroup ceiling -- without this it paces itself
+# against GOGC alone, oblivious to MemoryMax, and native onnxruntime
+# allocations (cgo, off the Go heap) are invisible to it entirely, so the
+# process can sail past the ceiling with no graceful GC response before the
+# kernel hard-kills it. Set comfortably under MemoryMax so the GC has room
+# to react before that happens.
+Environment=GOMEMLIMIT=3500MiB
 # Legacy aliases -- the currently-deployed binary predates the Foundry->Forge
 # rename and still reads FOUNDRY_COMPRESS_*; remove these three lines once
 # forge-compress is rebuilt natively on this host from the renamed source.

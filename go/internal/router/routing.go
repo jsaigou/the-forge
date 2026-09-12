@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/jsaigou/the-forge/internal/activity"
 	"github.com/jsaigou/the-forge/internal/authz"
+	"github.com/jsaigou/the-forge/internal/pricing"
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/store"
 )
@@ -43,6 +45,14 @@ type ResolvedBackend struct {
 	PriceOutPer1M      float64
 	PriceCachedInPer1M *float64
 	PriceCurrency      string
+	// Peak pricing (2026-09-12) — see Backend's matching fields. Carried
+	// through resolveBackend's remote case alongside the base prices;
+	// computeCostNative picks base vs. peak per field, per request, using
+	// the response-completion timestamp (recordExternalUsage's now).
+	PriceInPer1MPeak       *float64
+	PriceOutPer1MPeak      *float64
+	PriceCachedInPer1MPeak *float64
+	PeakWindows            pricing.Windows
 	// UpstreamOverride, when non-empty, is sent as the x-compress-base-url
 	// request header (docs/v5-headroom-topology.md §3/§4): the shared local
 	// Compressor proxy (BaseURL) honors it to route this specific request to
@@ -221,19 +231,23 @@ func (s *Server) resolveBackend(ctx context.Context, b *Backend) (ResolvedBacken
 			directUpstreamURL = provider.TargetURL
 		}
 		return ResolvedBackend{
-			Name:               b.Name,
-			BaseURL:            baseURL,
-			APIKey:             provider.APIKey,
-			WireModel:          b.WireModel,
-			Provider:           provider.Name,
-			ProviderID:         provider.ID,
-			PriceInPer1M:       b.PriceInPer1M,
-			PriceOutPer1M:      b.PriceOutPer1M,
-			PriceCachedInPer1M: b.PriceCachedInPer1M,
-			PriceCurrency:      b.PriceCurrency,
-			UpstreamOverride:   upstreamOverride,
-			CompressorFronted:  compressorFronted,
-			DirectUpstreamURL:  directUpstreamURL,
+			Name:                   b.Name,
+			BaseURL:                baseURL,
+			APIKey:                 provider.APIKey,
+			WireModel:              b.WireModel,
+			Provider:               provider.Name,
+			ProviderID:             provider.ID,
+			PriceInPer1M:           b.PriceInPer1M,
+			PriceOutPer1M:          b.PriceOutPer1M,
+			PriceCachedInPer1M:     b.PriceCachedInPer1M,
+			PriceCurrency:          b.PriceCurrency,
+			PriceInPer1MPeak:       b.PriceInPer1MPeak,
+			PriceOutPer1MPeak:      b.PriceOutPer1MPeak,
+			PriceCachedInPer1MPeak: b.PriceCachedInPer1MPeak,
+			PeakWindows:            b.PeakWindows,
+			UpstreamOverride:       upstreamOverride,
+			CompressorFronted:      compressorFronted,
+			DirectUpstreamURL:      directUpstreamURL,
 		}, nil
 
 	default:
@@ -674,11 +688,23 @@ func (s *Server) offeringChain(ctx context.Context, model string) (chain []*Back
 		if !hasProxy {
 			baseURL = provider.TargetURL // no Compressor proxy (dedicated or shared external) — straight passthrough
 		}
+		// Peak pricing (2026-09-12): parse once here, at the single copy
+		// point, rather than per-request in computeCostNative. A malformed
+		// schedule (should only happen to a row written before API
+		// validation existed) degrades to "no windows" — never blocks
+		// routing over a pricing concern.
+		windows, err := pricing.Parse(provider.PeakWindows)
+		if err != nil {
+			log.Printf("router: offering_chain: provider %q: invalid peak_windows, treating as none: %v", provider.Name, err)
+			windows = pricing.Windows{}
+		}
 		chain = append(chain, &Backend{
 			Name: o.ProviderName, Kind: "remote",
 			BaseURL: baseURL, WireModel: o.WireModel, Credential: o.ProviderName,
 			PriceInPer1M: o.PriceInPer1M, PriceOutPer1M: o.PriceOutPer1M,
 			PriceCachedInPer1M: o.PriceCachedInPer1M, PriceCurrency: o.Currency,
+			PriceInPer1MPeak: o.PriceInPer1MPeak, PriceOutPer1MPeak: o.PriceOutPer1MPeak,
+			PriceCachedInPer1MPeak: o.PriceCachedInPer1MPeak, PeakWindows: windows,
 		})
 	}
 	if len(chain) == 0 {

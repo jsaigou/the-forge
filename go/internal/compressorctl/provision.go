@@ -92,6 +92,18 @@ func (p *Provisioner) instanceOf(unit string) string {
 // store.ProxyRow field.
 const kompressIntraThreads = 16
 
+// kompressMaxInflight bounds concurrent compression passes
+// (COMPRESS_MAX_INFLIGHT, cmd/forge-compress/config.go). Found 2026-09-11:
+// this var was never written here, so every deployed instance silently ran
+// at the binary's own hardcoded default of 2 regardless of this constant's
+// existence — see cmd/forge-compress/config.go's MaxInflight default. Not a
+// store.ProxyRow field for the same reason kompressIntraThreads isn't: one
+// fixed value across every instance, no known need to vary it per-proxy
+// yet. Worth retuning empirically once the batching work
+// (internal/compress, Compressor speed sprint) lands and this proxy's
+// per-request compute shape changes — see the compressor plan's Step 4.
+const kompressMaxInflight = 4
+
 // Provisioner writes per-instance env files and starts/stops the
 // corresponding template-unit instance. It does no unit-file authoring and
 // requires no privilege beyond the existing forge-*.service polkit grant.
@@ -128,8 +140,8 @@ func (p *Provisioner) writeEnv(row store.ProxyRow) error {
 		budgetMS = 2000 // forge-compress default
 	}
 	content := fmt.Sprintf(
-		"OPENAI_TARGET_API_URL=%s\nCOMPRESS_ONNX_INTRA_THREADS=%d\nCOMPRESS_PROXY_TOKEN=%s\nCOMPRESS_PORT=%d\nFORGE_COMPRESS_FAILOPEN_BUDGET_MS=%d\n",
-		row.TargetURL, kompressIntraThreads, row.Token, row.Port, budgetMS,
+		"OPENAI_TARGET_API_URL=%s\nCOMPRESS_ONNX_INTRA_THREADS=%d\nCOMPRESS_PROXY_TOKEN=%s\nCOMPRESS_PORT=%d\nFORGE_COMPRESS_FAILOPEN_BUDGET_MS=%d\nCOMPRESS_MAX_INFLIGHT=%d\n",
+		row.TargetURL, kompressIntraThreads, row.Token, row.Port, budgetMS, kompressMaxInflight,
 	)
 	if err := os.WriteFile(p.envPathForUnit(row.Unit), []byte(content), 0o600); err != nil {
 		return fmt.Errorf("compressorctl: write env: %w", err)

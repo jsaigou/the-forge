@@ -168,8 +168,10 @@ func (s *server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		compressStart := time.Now()
 		budget := time.Duration(s.cfg.FailOpenBudgetMS) * time.Millisecond
-		originalTokens, compressedTokens, foTimeout, foError := compressMessages(s.engine, body, budget)
-		s.metrics.overhead.observe(msSince(compressStart))
+		originalTokens, compressedTokens, foTimeout, foError, outcomeSize := compressMessages(s.engine, body, budget)
+		overheadMs := msSince(compressStart)
+		s.metrics.overhead.observe(overheadMs)
+		s.metrics.overheadRing.add(overheadMs)
 		s.metrics.tokensInput.add(originalTokens)
 		if originalTokens > compressedTokens {
 			s.metrics.tokensSaved.add(originalTokens - compressedTokens)
@@ -179,6 +181,9 @@ func (s *server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		if foError > 0 {
 			s.metrics.failOpenError.add(foError)
+		}
+		for label, count := range outcomeSize {
+			s.metrics.messagesByOutcomeSize.add(label, count)
 		}
 		if reencoded, err := json.Marshal(body); err == nil {
 			mutatedBody = reencoded

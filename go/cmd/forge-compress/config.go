@@ -113,6 +113,11 @@ func loadConfig() (config, error) {
 	} else {
 		c.Compress.ByteThreshold = v
 	}
+	if v, err := intEnv("FORGE_COMPRESS_BATCH_SIZE", c.Compress.BatchSize); err != nil {
+		return config{}, err
+	} else {
+		c.Compress.BatchSize = v
+	}
 	if v, err := intEnv("FORGE_COMPRESS_FAILOPEN_BUDGET_MS", c.FailOpenBudgetMS); err != nil {
 		return config{}, err
 	} else {

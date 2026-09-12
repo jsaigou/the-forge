@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/jsaigou/the-forge/internal/compressorctl"
+	"github.com/jsaigou/the-forge/internal/pricing"
 	"github.com/jsaigou/the-forge/internal/providers"
 	"github.com/jsaigou/the-forge/internal/store"
 )
@@ -246,6 +247,7 @@ func (s *Server) handleProviderCreate(w http.ResponseWriter, r *http.Request) {
 		Enabled:            true,
 		Country:            b.Country,
 		DataResidencyGroup: b.DataResidencyGroup,
+		PeakWindows:        b.PeakWindows,
 		CreatedAt:          time.Now(),
 	}
 	if err := s.deps.Routing.SaveProvider(ctx, row); err != nil {
@@ -362,6 +364,9 @@ func (s *Server) handleProviderUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if b.DataResidencyGroup != nil {
 		row.DataResidencyGroup = *b.DataResidencyGroup
+	}
+	if b.PeakWindows != nil {
+		row.PeakWindows = *b.PeakWindows
 	}
 	// Phase 2 (docs/v5-headroom-topology.md §5): provision/reconcile/tear
 	// down the linked Compressor proxy before persisting the provider row, so
@@ -725,7 +730,23 @@ func toProviderJSON(p store.ProviderRow) providerJSON {
 		Enabled:            p.Enabled,
 		Country:            p.Country,
 		DataResidencyGroup: p.DataResidencyGroup,
+		PeakWindows:        p.PeakWindows,
+		PeakActiveNow:      peakActiveNow(p.PeakWindows),
 	}
+}
+
+// peakActiveNow evaluates a raw peak_windows schedule against the real
+// current time — used only by the create/update echo above (a one-off
+// confirmation of what was just written, not a repeatedly-polled read
+// path), unlike internal/providers.Service.List's injectable clock. A
+// malformed schedule (should only happen to a row predating API
+// validation) degrades to false rather than erroring the response.
+func peakActiveNow(raw string) bool {
+	w, err := pricing.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return w.Active(time.Now())
 }
 
 // validProviderName checks the provider display name matches the relaxed
@@ -774,6 +795,10 @@ type providerCreateBody struct {
 	// callers that omit it see no behavior change; the PWA create form sends
 	// true by default.
 	CreateProxy *bool `json:"create_proxy"`
+	// PeakWindows (peak pricing sprint, 2026-09-12): optional at create
+	// time; "" (the zero value) means no peak/off-peak concept, same as
+	// omitting it entirely.
+	PeakWindows string `json:"peak_windows"`
 }
 
 func (b providerCreateBody) validate() map[string]string {
@@ -783,6 +808,11 @@ func (b providerCreateBody) validate() map[string]string {
 	}
 	if b.BillCurrency != "" && !currencyRE.MatchString(b.BillCurrency) {
 		fields["bill_currency"] = "must be a 3-letter ISO 4217 code (e.g. USD)"
+	}
+	if b.PeakWindows != "" {
+		if _, err := pricing.Parse(b.PeakWindows); err != nil {
+			fields["peak_windows"] = err.Error()
+		}
 	}
 	return fields
 }
@@ -812,6 +842,11 @@ type providerUpdateBody struct {
 	// preserve, present-including-"" = set/clear.
 	Country            *string `json:"country"`
 	DataResidencyGroup *string `json:"data_residency_group"`
+	// PeakWindows (peak pricing sprint, 2026-09-12): raw JSON-encoded
+	// internal/pricing.Windows; "" clears (no peak/off-peak concept for
+	// this provider). Validated with pricing.Parse below, same
+	// preserve-unless-present convention as every other field here.
+	PeakWindows *string `json:"peak_windows"`
 }
 
 func (b providerUpdateBody) validate() map[string]string {
@@ -825,6 +860,11 @@ func (b providerUpdateBody) validate() map[string]string {
 	if b.CompressorProxy != nil && *b.CompressorProxy != "" &&
 		(!serviceRE.MatchString(*b.CompressorProxy) || len(*b.CompressorProxy) > 64) {
 		fields["compressor_proxy"] = "must match ^[a-z][a-z0-9_-]+$ (max 64)"
+	}
+	if b.PeakWindows != nil {
+		if _, err := pricing.Parse(*b.PeakWindows); err != nil {
+			fields["peak_windows"] = err.Error()
+		}
 	}
 	return fields
 }
