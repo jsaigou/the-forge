@@ -55,33 +55,75 @@ function levelFor(tokens: number, max: number): number {
   return 1;
 }
 
-export function ActivityHeatmap({ days, colors = DEFAULT_COLORS, ariaLabel = "Token activity by day, last 12 weeks" }: { days: HeatmapCell[]; colors?: string[]; ariaLabel?: string }) {
-  if (days.length === 0) {
+// One cross-fadeable data source for the grid — ActivityHeatmapWidget's
+// auto-cycle passes two of these (the outgoing scope at opacity 1→0, the
+// incoming scope at opacity 0→1) so the swap is a true crossfade, not a
+// fade-to-empty-then-fade-in. A caller not cross-fading just passes one.
+export interface HeatmapLayer {
+  days: HeatmapCell[];
+  colors?: string[];
+  opacity: number;
+}
+
+export function ActivityHeatmap({
+  layers,
+  ariaLabel = "Token activity by day",
+  stretch = false,
+  fadeMs = 250,
+}: {
+  // Grid geometry (dates, columns, month labels) is derived from
+  // layers[0].days — every layer is expected to share the same date range
+  // (true for the widget's All/Local/External scopes, which all come from
+  // the same window, just different per-day fields), only cell colors
+  // differ per layer.
+  layers: HeatmapLayer[];
+  ariaLabel?: string;
+  // stretch (operator feedback 2026-09-13): the grid's natural pixel width
+  // (LEFT_PAD + columns*STEP) is normally just a ceiling — maxWidth:100%
+  // only ever shrinks it to fit a narrower card, never grows it to fill a
+  // wider one, so a card sized for the widget's own section reads as mostly
+  // empty. width:100% instead always fills the container; height:auto plus
+  // the SVG's own viewBox (no preserveAspectRatio override) keeps every
+  // cell square and proportional either way — this only changes whether the
+  // grid is allowed to scale UP, not how cells are laid out.
+  stretch?: boolean;
+  // fadeMs: how long each layer's own opacity transition takes. With two
+  // layers cross-fading simultaneously (one 1→0, one 0→1 at the same time)
+  // this is the whole transition's duration, not half of it.
+  fadeMs?: number;
+}) {
+  const referenceDays = layers[0]?.days ?? [];
+  if (referenceDays.length === 0) {
     return <div className="empty-note">No activity data yet.</div>;
   }
 
-  const maxTokens = Math.max(0, ...days.map((d) => d.tokens));
-  const firstDate = parseDay(days[0].date);
+  const firstDate = parseDay(referenceDays[0].date);
   const firstSunday = new Date(firstDate);
   firstSunday.setUTCDate(firstSunday.getUTCDate() - firstSunday.getUTCDay());
 
   type Cell = { x: number; y: number; day: HeatmapCell; date: Date };
-  const cells: Cell[] = [];
+  function buildCells(days: HeatmapCell[]): Cell[] {
+    return days.map((day) => {
+      const date = parseDay(day.date);
+      const weekday = date.getUTCDay();
+      const col = Math.round((date.getTime() - firstSunday.getTime()) / (7 * 86400000));
+      return { x: LEFT_PAD + col * STEP, y: TOP_PAD + weekday * STEP, day, date };
+    });
+  }
+
+  // Month labels + overall size come from the reference layer only — every
+  // layer shares the same dates, so this never needs to be computed twice.
   let maxCol = 0;
   let lastMonthLabeled = -1;
   const monthLabels: { x: number; text: string }[] = [];
-
-  for (const day of days) {
+  for (const day of referenceDays) {
     const date = parseDay(day.date);
     const weekday = date.getUTCDay();
     const col = Math.round((date.getTime() - firstSunday.getTime()) / (7 * 86400000));
     maxCol = Math.max(maxCol, col);
-    const x = LEFT_PAD + col * STEP;
-    const y = TOP_PAD + weekday * STEP;
-    cells.push({ x, y, day, date });
     if (weekday === 0 && date.getUTCMonth() !== lastMonthLabeled) {
       lastMonthLabeled = date.getUTCMonth();
-      monthLabels.push({ x, text: MONTH_NAMES[date.getUTCMonth()] });
+      monthLabels.push({ x: LEFT_PAD + col * STEP, text: MONTH_NAMES[date.getUTCMonth()] });
     }
   }
 
@@ -94,7 +136,7 @@ export function ActivityHeatmap({ days, colors = DEFAULT_COLORS, ariaLabel = "To
         viewBox={`0 0 ${width} ${height}`}
         width={width}
         height={height}
-        style={{ maxWidth: "100%", height: "auto", display: "block" }}
+        style={stretch ? { width: "100%", height: "auto", display: "block" } : { maxWidth: "100%", height: "auto", display: "block" }}
         role="img"
         aria-label={ariaLabel}
       >
@@ -114,15 +156,24 @@ export function ActivityHeatmap({ days, colors = DEFAULT_COLORS, ariaLabel = "To
             {label}
           </text>
         ))}
-        {cells.map((c) => {
-          const level = levelFor(c.day.tokens, maxTokens);
-          const dateLabel = c.date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+        {layers.map((layer, i) => {
+          const cells = buildCells(layer.days);
+          const colors = layer.colors ?? DEFAULT_COLORS;
+          const maxTokens = Math.max(0, ...layer.days.map((d) => d.tokens));
           return (
-            <rect key={c.day.date} x={c.x} y={c.y} width={CELL} height={CELL} rx={2} fill={colors[level]}>
-              <title>
-                {dateLabel}: {formatTokens(c.day.tokens)} tokens, {c.day.requests} request{c.day.requests === 1 ? "" : "s"}
-              </title>
-            </rect>
+            <g key={i} style={{ opacity: layer.opacity, transition: `opacity ${fadeMs}ms ease` }}>
+              {cells.map((c) => {
+                const level = levelFor(c.day.tokens, maxTokens);
+                const dateLabel = c.date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+                return (
+                  <rect key={c.day.date} x={c.x} y={c.y} width={CELL} height={CELL} rx={2} fill={colors[level]}>
+                    <title>
+                      {dateLabel}: {formatTokens(c.day.tokens)} tokens, {c.day.requests} request{c.day.requests === 1 ? "" : "s"}
+                    </title>
+                  </rect>
+                );
+              })}
+            </g>
           );
         })}
       </svg>

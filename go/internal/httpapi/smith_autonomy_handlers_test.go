@@ -163,3 +163,48 @@ func TestHandleSmithAutonomy_EscalationRequiresStepUp(t *testing.T) {
 		t.Errorf("policy.Enabled = true after refused escalations, want false")
 	}
 }
+
+// TestHandleSmithAutonomy_BearerKeyCannotEscalateWithoutStepUp is the
+// regression test for the smith-autonomy analogue of issue #37: before this
+// fix, the escalating branch only ever evaluated step-up when
+// ident.KeyID == "" (a session), so ANY bearer forge key with RoleOperator+
+// — even one never granted a human step-up — could flip smith's standing
+// autonomy on and let it start executing system-modifying procedures
+// unattended. A non-escalating PUT (disabling) must still work over bearer,
+// same as #37's self-rotation carve-out preserved ordinary bearer use.
+func TestHandleSmithAutonomy_BearerKeyCannotEscalateWithoutStepUp(t *testing.T) {
+	s, auth, _ := serverWithSmithActionsAuth(t)
+	token, err := auth.MintKey(t.Context(), authz.KindForge, "admin-bot", "", authz.RoleAdmin, "", time.Time{})
+	if err != nil {
+		t.Fatalf("MintKey: %v", err)
+	}
+
+	req := httptest.NewRequest("PUT", "/api/v1/smith/autonomy", bytes.NewBufferString(`{"enabled":true}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("bearer PUT enabled:true = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	var errResp map[string]string
+	json.NewDecoder(rec.Body).Decode(&errResp)
+	if errResp["error"] != "step_up_required" || errResp["resource"] != authz.ResourceActionSmithAutonomy {
+		t.Errorf("errResp = %+v, want step_up_required for action.smith.autonomy", errResp)
+	}
+
+	// A non-escalating PUT (disabling) over the same bearer key still works.
+	req = httptest.NewRequest("PUT", "/api/v1/smith/autonomy", bytes.NewBufferString(`{"enabled":false}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bearer PUT enabled:false = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	final := s.deps.Smith.AutonomyPolicy(context.Background())
+	if final.Enabled {
+		t.Errorf("policy.Enabled = true after a refused bearer escalation, want false")
+	}
+}
