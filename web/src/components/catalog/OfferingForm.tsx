@@ -19,6 +19,13 @@ export interface CatalogProviderRef {
   country: string;
   data_residency_group: string;
   enabled: boolean;
+  // Peak pricing sprint (2026-09-12): whether this provider has a peak
+  // schedule configured at all — drives OfferingForm's "no peak window
+  // configured" hint, since a peak price set without one never applies.
+  hasPeakWindows: boolean;
+  // Server-computed "peak in force right now" — never re-derived from the
+  // raw schedule client-side.
+  peakActiveNow: boolean;
 }
 
 export function useCatalogProviders(): CatalogProviderRef[] {
@@ -28,6 +35,8 @@ export function useCatalogProviders(): CatalogProviderRef[] {
     country: p.country ?? "",
     data_residency_group: p.data_residency_group ?? "",
     enabled: p.enabled,
+    hasPeakWindows: !!p.peak_windows,
+    peakActiveNow: p.peak_active_now,
   }));
 }
 
@@ -57,6 +66,9 @@ export function OfferingForm({
   const [priceIn, setPriceIn] = useState(existing?.price_in_per_1m ?? 0);
   const [priceOut, setPriceOut] = useState(existing?.price_out_per_1m ?? 0);
   const [priceCachedIn, setPriceCachedIn] = useState(existing?.price_cached_in_per_1m ?? null);
+  const [priceInPeak, setPriceInPeak] = useState(existing?.price_in_per_1m_peak ?? null);
+  const [priceOutPeak, setPriceOutPeak] = useState(existing?.price_out_per_1m_peak ?? null);
+  const [priceCachedInPeak, setPriceCachedInPeak] = useState(existing?.price_cached_in_per_1m_peak ?? null);
   const [currency, setCurrency] = useState(existing?.currency ?? "USD");
   const [contextLength, setContextLength] = useState(existing?.context_length ?? 0);
   const [enabled, setEnabled] = useState(existing?.enabled ?? true);
@@ -75,6 +87,9 @@ export function OfferingForm({
         price_in_per_1m: priceIn,
         price_out_per_1m: priceOut,
         price_cached_in_per_1m: priceCachedIn,
+        price_in_per_1m_peak: priceInPeak,
+        price_out_per_1m_peak: priceOutPeak,
+        price_cached_in_per_1m_peak: priceCachedInPeak,
         currency,
         context_length: contextLength,
         enabled,
@@ -82,6 +97,12 @@ export function OfferingForm({
       },
       existing?.id,
     );
+  }
+
+  function fillPeakDouble() {
+    setPriceInPeak(priceIn * 2);
+    setPriceOutPeak(priceOut * 2);
+    if (priceCachedIn != null) setPriceCachedInPeak(priceCachedIn * 2);
   }
 
   return (
@@ -125,6 +146,48 @@ export function OfferingForm({
           value={priceCachedIn ?? ""}
           placeholder="unmodelled — full price applies to cache hits"
           onChange={(e) => setPriceCachedIn(e.target.value === "" ? null : Number(e.target.value))}
+        />
+      </label>
+      <div style={{ gridColumn: "1 / -1", marginTop: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>Time-of-day pricing (optional)</span>
+          <button type="button" className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={fillPeakDouble}>
+            Fill: peak = 2× off-peak
+          </button>
+        </div>
+        {selectedProvider && !selectedProvider.hasPeakWindows && (priceInPeak != null || priceOutPeak != null || priceCachedInPeak != null) && (
+          <div style={{ fontSize: 11, color: "var(--warn)", marginBottom: 4 }}>
+            {selectedProvider.name} has no peak schedule configured (Settings → Providers) — these peak rates will never apply.
+          </div>
+        )}
+        {((priceInPeak != null && priceInPeak < priceIn) || (priceOutPeak != null && priceOutPeak < priceOut)) && (
+          <div style={{ fontSize: 11, color: "var(--warn)", marginBottom: 4 }}>
+            A peak rate is lower than its off-peak rate — unusual, but the provider's own pricing policy isn't enforced here.
+          </div>
+        )}
+      </div>
+      <label className="form-row">Price in / 1M, peak
+        <input
+          type="number" step="0.01" min={0}
+          value={priceInPeak ?? ""}
+          placeholder="same as off-peak"
+          onChange={(e) => setPriceInPeak(e.target.value === "" ? null : Number(e.target.value))}
+        />
+      </label>
+      <label className="form-row">Price out / 1M, peak
+        <input
+          type="number" step="0.01" min={0}
+          value={priceOutPeak ?? ""}
+          placeholder="same as off-peak"
+          onChange={(e) => setPriceOutPeak(e.target.value === "" ? null : Number(e.target.value))}
+        />
+      </label>
+      <label className="form-row">Cached price in / 1M, peak
+        <input
+          type="number" step="0.001" min={0}
+          value={priceCachedInPeak ?? ""}
+          placeholder="same as off-peak"
+          onChange={(e) => setPriceCachedInPeak(e.target.value === "" ? null : Number(e.target.value))}
         />
       </label>
       <label className="form-row">Currency

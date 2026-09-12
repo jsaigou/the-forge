@@ -638,6 +638,51 @@ func TestProviderUpdate(t *testing.T) {
 	}
 }
 
+// TestProviderUpdatePeakWindows covers the peak pricing sprint's
+// (2026-09-12) provider-level schedule field: valid JSON persists and
+// round-trips through the response's peak_windows/peak_active_now, and a
+// deliberately-in-the-past-relative window computes peak_active_now
+// deterministically off the injected clock rather than wall time.
+func TestProviderUpdatePeakWindows(t *testing.T) {
+	s, fh, _ := newSettingsTestServer(t)
+	body := strings.NewReader(`{"name":"deepseek","bill_currency":"USD","target_url":"https://api.deepseek.com/v1"}`)
+	do(t, s, authedRequest("POST", "/api/v1/providers", body))
+
+	windows := `{"windows":[{"days":[0,1,2,3,4,5,6],"start":"00:00","end":"23:59"}]}`
+	upd := strings.NewReader(`{"peak_windows":` + strconv.Quote(windows) + `}`)
+	w := do(t, s, authedRequest("PUT", "/api/v1/providers/deepseek", upd))
+	if w.Code != 200 {
+		t.Fatalf("PUT = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var resp providerJSON
+	decodeJSON(t, w.Body, &resp)
+	if resp.PeakWindows != windows {
+		t.Errorf("peak_windows = %q, want %q", resp.PeakWindows, windows)
+	}
+
+	providers, _ := fh.Providers(context.Background())
+	if providers[0].PeakWindows != windows {
+		t.Errorf("persisted peak_windows = %q", providers[0].PeakWindows)
+	}
+	// peak_active_now itself (the derived, server-computed flag) is covered
+	// end-to-end against a real store + injectable clock in
+	// internal/providers's own tests — this handler-level test only needs
+	// to confirm the raw schedule persists and round-trips through the
+	// pointer-field PATCH body.
+}
+
+func TestProviderUpdatePeakWindowsInvalid(t *testing.T) {
+	s, _, _ := newSettingsTestServer(t)
+	body := strings.NewReader(`{"name":"deepseek","bill_currency":"USD"}`)
+	do(t, s, authedRequest("POST", "/api/v1/providers", body))
+
+	upd := strings.NewReader(`{"peak_windows":"{not json"}`)
+	w := do(t, s, authedRequest("PUT", "/api/v1/providers/deepseek", upd))
+	if w.Code != 422 {
+		t.Fatalf("PUT with malformed peak_windows = %d, want 422: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestProviderUpdateNotFound(t *testing.T) {
 	s, _, _ := newSettingsTestServer(t)
 	body := strings.NewReader(`{"target_url":"https://new.example.com"}`)

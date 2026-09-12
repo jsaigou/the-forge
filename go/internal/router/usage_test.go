@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/pricing"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -133,8 +134,13 @@ func TestParseStreamingUsagePicksLastUsageFrame(t *testing.T) {
 
 // ── computeCostNative ──────────────────────────────────────────────────────
 
+// offPeakT is an arbitrary time with no configured windows in play for the
+// pre-existing (pre-peak-pricing) test cases below — any time works since
+// those ResolvedBackends carry a zero-value PeakWindows (TierAt -> "flat").
+var offPeakT = time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+
 func TestComputeCostNativeNoOffering(t *testing.T) {
-	_, ok := computeCostNative(ResolvedBackend{}, 1000, 500, 0)
+	_, _, ok := computeCostNative(ResolvedBackend{}, 1000, 500, 0, offPeakT)
 	if ok {
 		t.Error("ok = true with no PriceCurrency (no offering matched)")
 	}
@@ -142,7 +148,7 @@ func TestComputeCostNativeNoOffering(t *testing.T) {
 
 func TestComputeCostNativeBasic(t *testing.T) {
 	rb := ResolvedBackend{PriceInPer1M: 1.0, PriceOutPer1M: 2.0, PriceCurrency: "USD"}
-	cost, ok := computeCostNative(rb, 1_000_000, 500_000, 0)
+	cost, tier, ok := computeCostNative(rb, 1_000_000, 500_000, 0, offPeakT)
 	if !ok {
 		t.Fatal("ok = false, want true")
 	}
@@ -150,11 +156,14 @@ func TestComputeCostNativeBasic(t *testing.T) {
 	if cost != want {
 		t.Errorf("cost = %v, want %v", cost, want)
 	}
+	if tier != pricing.TierFlat {
+		t.Errorf("tier = %q, want %q (no windows configured)", tier, pricing.TierFlat)
+	}
 }
 
 func TestComputeCostNativeCachedTokensUpperBoundWhenUnmodelled(t *testing.T) {
 	rb := ResolvedBackend{PriceInPer1M: 1.0, PriceOutPer1M: 2.0, PriceCurrency: "USD"}
-	cost, ok := computeCostNative(rb, 1_000_000, 0, 500_000) // half the input was cached
+	cost, _, ok := computeCostNative(rb, 1_000_000, 0, 500_000, offPeakT) // half the input was cached
 	if !ok {
 		t.Fatal("ok = false")
 	}
@@ -169,7 +178,7 @@ func TestComputeCostNativeCachedTokensUpperBoundWhenUnmodelled(t *testing.T) {
 func TestComputeCostNativeCachedTokensDiscounted(t *testing.T) {
 	cachedRate := 0.1
 	rb := ResolvedBackend{PriceInPer1M: 1.0, PriceOutPer1M: 2.0, PriceCurrency: "USD", PriceCachedInPer1M: &cachedRate}
-	cost, ok := computeCostNative(rb, 1_000_000, 0, 500_000)
+	cost, _, ok := computeCostNative(rb, 1_000_000, 0, 500_000, offPeakT)
 	if !ok {
 		t.Fatal("ok = false")
 	}
@@ -179,6 +188,124 @@ func TestComputeCostNativeCachedTokensDiscounted(t *testing.T) {
 		t.Errorf("cost = %v, want %v", cost, want)
 	}
 }
+
+// ── computeCostNative: peak pricing ─────────────────────────────────────────
+
+func deepSeekLikeWindows(t *testing.T) pricing.Windows {
+	t.Helper()
+	w, err := pricing.Parse(`{"windows":[
+		{"days":[1,2,3,4,5],"start":"01:00","end":"04:00"},
+		{"days":[1,2,3,4,5],"start":"06:00","end":"10:00"}
+	]}`)
+	if err != nil {
+		t.Fatalf("pricing.Parse: %v", err)
+	}
+	return w
+}
+
+func TestComputeCostNativePeakTier(t *testing.T) {
+	inPeak, outPeak, cachedPeak := 0.3, 1.2, 0.006
+	rb := ResolvedBackend{
+		PriceInPer1M: 0.15, PriceOutPer1M: 0.6, PriceCurrency: "USD",
+		PriceCachedInPer1M:     floatPtr(0.003),
+		PriceInPer1MPeak:       &inPeak,
+		PriceOutPer1MPeak:      &outPeak,
+		PriceCachedInPer1MPeak: &cachedPeak,
+		PeakWindows:            deepSeekLikeWindows(t),
+	}
+	peakT := time.Date(2026, 9, 15, 2, 0, 0, 0, time.UTC) // Tue 02:00 UTC — in the first window
+	cost, tier, ok := computeCostNative(rb, 1_000_000, 500_000, 500_000, peakT)
+	if !ok {
+		t.Fatal("ok = false")
+	}
+	if tier != pricing.TierPeak {
+		t.Errorf("tier = %q, want %q", tier, pricing.TierPeak)
+	}
+	// 500k billable @ $0.3/1M + 500k cached @ $0.006/1M + 500k out @ $1.2/1M
+	want := 0.15 + 0.003 + 0.6
+	if cost != want {
+		t.Errorf("cost = %v, want %v", cost, want)
+	}
+}
+
+func TestComputeCostNativeOffPeakTier(t *testing.T) {
+	inPeak := 0.3
+	rb := ResolvedBackend{
+		PriceInPer1M: 0.15, PriceOutPer1M: 0.6, PriceCurrency: "USD",
+		PriceInPer1MPeak: &inPeak,
+		PeakWindows:      deepSeekLikeWindows(t),
+	}
+	offT := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC) // Tue noon — outside both windows
+	cost, tier, ok := computeCostNative(rb, 1_000_000, 0, 0, offT)
+	if !ok {
+		t.Fatal("ok = false")
+	}
+	if tier != pricing.TierOffPeak {
+		t.Errorf("tier = %q, want %q", tier, pricing.TierOffPeak)
+	}
+	if cost != 0.15 {
+		t.Errorf("cost = %v, want 0.15 (base rate)", cost)
+	}
+}
+
+func TestComputeCostNativeExactBoundary(t *testing.T) {
+	inPeak := 0.3
+	rb := ResolvedBackend{
+		PriceInPer1M: 0.15, PriceInPer1MPeak: &inPeak,
+		PriceCurrency: "USD", PeakWindows: deepSeekLikeWindows(t),
+	}
+	// Exactly 04:00:00 UTC is the window's exclusive end -> off-peak
+	// (half-open [start, end), pinned by internal/pricing's own tests).
+	boundary := time.Date(2026, 9, 15, 4, 0, 0, 0, time.UTC)
+	cost, tier, ok := computeCostNative(rb, 1_000_000, 0, 0, boundary)
+	if !ok {
+		t.Fatal("ok = false")
+	}
+	if tier != pricing.TierOffPeak {
+		t.Errorf("tier at exact boundary = %q, want %q", tier, pricing.TierOffPeak)
+	}
+	if cost != 0.15 {
+		t.Errorf("cost at exact boundary = %v, want 0.15 (base rate)", cost)
+	}
+}
+
+func TestComputeCostNativePeakWindowsButNoPeakPricesFallsBackToBase(t *testing.T) {
+	// Windows configured (so the tier genuinely is "peak" right now) but no
+	// peak price columns set -> tier is still reported honestly as "peak"
+	// (the objective fact about the clock), while cost reflects base rates
+	// (per-field nil fallback).
+	rb := ResolvedBackend{
+		PriceInPer1M: 0.15, PriceOutPer1M: 0.6, PriceCurrency: "USD",
+		PeakWindows: deepSeekLikeWindows(t),
+	}
+	peakT := time.Date(2026, 9, 15, 2, 0, 0, 0, time.UTC)
+	cost, tier, ok := computeCostNative(rb, 1_000_000, 0, 0, peakT)
+	if !ok {
+		t.Fatal("ok = false")
+	}
+	if tier != pricing.TierPeak {
+		t.Errorf("tier = %q, want %q", tier, pricing.TierPeak)
+	}
+	if cost != 0.15 {
+		t.Errorf("cost = %v, want 0.15 (base rate, no peak price modelled)", cost)
+	}
+}
+
+func TestComputeCostNativeNoWindowsIsFlat(t *testing.T) {
+	rb := ResolvedBackend{PriceInPer1M: 1.0, PriceCurrency: "USD"}
+	cost, tier, ok := computeCostNative(rb, 1_000_000, 0, 0, time.Date(2026, 9, 15, 2, 0, 0, 0, time.UTC))
+	if !ok {
+		t.Fatal("ok = false")
+	}
+	if tier != pricing.TierFlat {
+		t.Errorf("tier = %q, want %q", tier, pricing.TierFlat)
+	}
+	if cost != 1.0 {
+		t.Errorf("cost = %v, want 1.0", cost)
+	}
+}
+
+func floatPtr(f float64) *float64 { return &f }
 
 // ── usageTap ────────────────────────────────────────────────────────────────
 

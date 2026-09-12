@@ -56,9 +56,11 @@ func TestRecordCompressorSampleAndSummary(t *testing.T) {
 		TTFBCount: 10, TTFBSumMs: 500, TTFBMinMs: f64ptr(20), TTFBMaxMs: f64ptr(80),
 		LatencyCount: 10, LatencySumMs: 4000, LatencyMinMs: f64ptr(200), LatencyMaxMs: f64ptr(900),
 		OverheadCount: 10, OverheadSumMs: 50, OverheadMinMs: f64ptr(2), OverheadMaxMs: f64ptr(9),
+		OverheadP50Ms: f64ptr(4), OverheadP90Ms: f64ptr(8), OverheadP99Ms: f64ptr(9),
 	}, []CompressorLabelSample{
 		{TS: base, ProxyID: localID, LabelKey: "provider", LabelValue: "openai", Metric: "requests", Delta: 8},
 		{TS: base, ProxyID: localID, LabelKey: "provider", LabelValue: "anthropic", Metric: "requests", Delta: 2},
+		{TS: base, ProxyID: localID, LabelKey: "outcome_size", LabelValue: "compressed:medium", Metric: "messages", Delta: 6},
 	}); err != nil {
 		t.Fatalf("RecordSavingsSample 1: %v", err)
 	}
@@ -75,9 +77,12 @@ func TestRecordCompressorSampleAndSummary(t *testing.T) {
 		TTFBCount: 5, TTFBSumMs: 300, TTFBMinMs: f64ptr(15), TTFBMaxMs: f64ptr(95),
 		LatencyCount: 5, LatencySumMs: 1500, LatencyMinMs: f64ptr(180), LatencyMaxMs: f64ptr(300),
 		OverheadCount: 5, OverheadSumMs: 30, OverheadMinMs: f64ptr(1), OverheadMaxMs: f64ptr(6),
+		OverheadP50Ms: f64ptr(3), OverheadP90Ms: f64ptr(5), OverheadP99Ms: f64ptr(6),
 	}, []CompressorLabelSample{
 		{TS: next, ProxyID: localID, LabelKey: "provider", LabelValue: "openai", Metric: "requests", Delta: 4},
 		{TS: next, ProxyID: localID, LabelKey: "model", LabelValue: "gemma4-e2b", Metric: "requests", Delta: 5},
+		{TS: next, ProxyID: localID, LabelKey: "outcome_size", LabelValue: "compressed:huge", Metric: "messages", Delta: 3},
+		{TS: next, ProxyID: localID, LabelKey: "outcome_size", LabelValue: "gated_passthrough:small", Metric: "messages", Delta: 2},
 	}); err != nil {
 		t.Fatalf("RecordSavingsSample 2: %v", err)
 	}
@@ -132,6 +137,23 @@ func TestRecordCompressorSampleAndSummary(t *testing.T) {
 	if local.RequestsByModel["gemma4-e2b"] != 5 {
 		t.Errorf("RequestsByModel[gemma4-e2b] = %d, want 5", local.RequestsByModel["gemma4-e2b"])
 	}
+	// Same latest-sample-wins gauge semantics as TTFBMax/LatencyMax above —
+	// the second sample's percentiles win, not an average of the two.
+	if local.OverheadP50Ms == nil || *local.OverheadP50Ms != 3 {
+		t.Errorf("OverheadP50Ms = %v, want 3 (the latest sample's value)", local.OverheadP50Ms)
+	}
+	if local.OverheadP99Ms == nil || *local.OverheadP99Ms != 6 {
+		t.Errorf("OverheadP99Ms = %v, want 6 (the latest sample's value, even though lower than the earlier sample's 9)", local.OverheadP99Ms)
+	}
+	if local.MessagesByOutcomeSize["compressed:medium"] != 6 {
+		t.Errorf("MessagesByOutcomeSize[compressed:medium] = %d, want 6", local.MessagesByOutcomeSize["compressed:medium"])
+	}
+	if local.MessagesByOutcomeSize["compressed:huge"] != 3 {
+		t.Errorf("MessagesByOutcomeSize[compressed:huge] = %d, want 3", local.MessagesByOutcomeSize["compressed:huge"])
+	}
+	if local.MessagesByOutcomeSize["gated_passthrough:small"] != 2 {
+		t.Errorf("MessagesByOutcomeSize[gated_passthrough:small] = %d, want 2", local.MessagesByOutcomeSize["gated_passthrough:small"])
+	}
 
 	deepseek, ok := summary["deepseek"]
 	if !ok {
@@ -142,6 +164,9 @@ func TestRecordCompressorSampleAndSummary(t *testing.T) {
 	}
 	if deepseek.TTFBMinMs != nil {
 		t.Errorf("deepseek TTFBMinMs = %v, want nil (never recorded)", deepseek.TTFBMinMs)
+	}
+	if deepseek.OverheadP50Ms != nil {
+		t.Errorf("deepseek OverheadP50Ms = %v, want nil (never recorded)", deepseek.OverheadP50Ms)
 	}
 }
 
