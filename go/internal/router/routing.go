@@ -567,44 +567,244 @@ func (s *Server) ensureBackendLoaded(ctx context.Context, modelName string, b *B
 // (ResolvedBackend.UpstreamOverride), so nothing here ever hands the proxy a
 // fixed address — this function still just emits a plain foundry_slot
 // backend, unchanged.
-func (s *Server) catalogChain(ctx context.Context, model string, requestedBy string) (chain []*Backend, handled bool, errMsg string, reason sched.RefusalReason) {
+//
+// Capability-tier substitution (Sprint P3, 2026-09-13, capability_substitution.go): before
+// committing to EnsureLoaded(want), check whether an already-loaded
+// performance-class peer should serve this request instead — either
+// because `want` is genuinely infeasible to load right now
+// (fallback_only), or because a resident peer outranks it
+// (prefer_smarter), decided BEFORE the load attempt so fallback_only never
+// pays ensure_loaded_timeout_s to discover infeasibility and
+// prefer_smarter never loads `want` only to discard it. Default off
+// (substitutionPolicy resolves to subOff): the candidate gather is skipped
+// entirely and this function is byte-for-byte the pre-Sprint-P3 code path.
+// If EnsureLoaded(want) itself still fails, one second chance re-runs the
+// decision — the only gap a pre-check can't see is the engine's
+// same-weights sibling guard, which lives below place() (Engine.Load
+// itself) and can refuse a load CouldLoad had no way to predict.
+// Substitution can happen at most twice and never chains to a third
+// config: the second pass's own EnsureLoaded failure returns `want`'s
+// original error, not another substitute.
+// resolvedBody is returned alongside the chain: identical to the body
+// argument, except when model resolved via a ModelAlias, in which case it
+// carries the alias's request_defaults merged in (T3, per-request thinking
+// control). Maps are reference types but a merge produces a NEW map
+// (mergeForcedDefaults never mutates its input) — reassigning body inside
+// this function does not change the caller's own map, so the caller MUST
+// use resolvedBody for every subsequent step (mutateBody, tryBackends),
+// never its own original body, or a forced default silently never reaches
+// the upstream request. Found live while table-testing this exact sprint.
+func (s *Server) catalogChain(ctx context.Context, model string, requestedBy string, body map[string]any) (chain []*Backend, handled bool, errMsg string, reason sched.RefusalReason, resolvedBody map[string]any) {
+	resolvedBody = body
 	sc := s.deps.StoreCatalog
 	if sc == nil {
-		return nil, false, "", ""
+		return nil, false, "", "", resolvedBody
 	}
+	// loadName is the catalog config name actually loaded/scheduled — model
+	// itself when requested directly, or the target config's own name when
+	// model resolved via a ModelAlias. Every scheduler call below uses
+	// loadName, never model, since post-T3 an alias's own name (e.g.
+	// "gemma4-26b-a4b-nothink") is not a real catalog config the scheduler
+	// can load.
 	cfg, err := sc.ConfigByName(ctx, model)
+	loadName := model
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, false, "", ""
+		if !errors.Is(err, store.ErrNotFound) {
+			return nil, true, "catalog lookup failed: " + err.Error(), "", resolvedBody
 		}
-		return nil, true, "catalog lookup failed: " + err.Error(), ""
+		// Not a direct config name — try a model alias: a wire-visible name
+		// mapped to a real config plus request fields FORCED onto the body
+		// (overwriting, even over a client-sent value — unlike
+		// Config.ReasoningEffortDefault's client-wins precedence), for a
+		// consumer like podcast_creator that structurally cannot send those
+		// fields itself. See 0086_model_aliases.sql's doc comment.
+		alias, aerr := sc.ModelAliasByName(ctx, model)
+		if aerr != nil {
+			// Not an alias either — try a virtual model: a wire-visible name
+			// that resolves to a real config dynamically, picked fresh on
+			// every call rather than pinned by FK. See virtual_models.go's
+			// doc comment.
+			if vcfg, ok := s.resolveVirtualModel(ctx, model); ok {
+				cfg = vcfg
+				loadName = vcfg.Name
+			} else {
+				return nil, false, "", "", resolvedBody // genuinely unknown name — not handled
+			}
+		} else {
+			if alias.Visibility == "hidden" {
+				return nil, false, "", "", resolvedBody
+			}
+			target, terr := sc.GetConfig(ctx, alias.ConfigID)
+			if terr != nil {
+				return nil, true, "alias " + model + ": target config lookup failed: " + terr.Error(), "", resolvedBody
+			}
+			cfg = target
+			loadName = target.Name
+			resolvedBody = mergeForcedDefaults(body, alias.RequestDefaults)
+		}
 	}
 	if cfg.Visibility == "hidden" {
-		return nil, false, "", ""
+		return nil, false, "", "", resolvedBody
 	}
 
 	scd := s.deps.Sched
 	if scd == nil {
-		return nil, true, "scheduler not wired", ""
+		return nil, true, "scheduler not wired", "", resolvedBody
 	}
 	loadCtx, cancel := context.WithTimeout(ctx, s.cfg().ensureLoadedTimeout())
 	defer cancel()
+
+	if b := s.trySubstitute(loadCtx, cfg, resolvedBody, requestedBy); b != nil {
+		return []*Backend{b}, true, "", "", resolvedBody
+	}
+
 	ticket, err := scd.EnsureLoaded(loadCtx, sched.EnsureRequest{
-		Model:       model,
+		Model:       loadName,
 		RequestedBy: requestedBy,
 		TargetSlot:  "",
 	})
-	if err != nil {
-		return nil, true, err.Error(), scd.LoadStatus(model).Reason
-	}
-	if ticket.Status == "failed" {
-		return nil, true, "load failed", scd.LoadStatus(model).Reason
+	if err != nil || ticket.Status == "failed" {
+		// Second chance (fallback_only only — see this function's doc
+		// comment): `want` just failed for a reason CouldLoad couldn't
+		// have predicted. Policy is re-read fresh rather than cached from
+		// the pre-check, in case it was fallback_only there and the
+		// candidate list has since changed; prefer_smarter never reaches
+		// here because it always substitutes before this call when
+		// eligible, so this path is a genuine second, independent attempt,
+		// not a retry of the same decision.
+		if b := s.trySubstituteAfterFailure(loadCtx, cfg, resolvedBody); b != nil {
+			return []*Backend{b}, true, "", "", resolvedBody
+		}
+		msg := "load failed"
+		if err != nil {
+			msg = err.Error()
+		}
+		return nil, true, msg, scd.LoadStatus(loadName).Reason, resolvedBody
 	}
 	port := s.deps.Slots[ticket.TargetSlot]
 	if port == 0 {
-		return nil, true, "no port configured for slot " + ticket.TargetSlot, ""
+		return nil, true, "no port configured for slot " + ticket.TargetSlot, "", resolvedBody
 	}
-	return []*Backend{{Name: model, Kind: "foundry_slot", Port: port}}, true, "", ""
+	return []*Backend{{
+		Name: loadName, Kind: "foundry_slot", Port: port,
+		ReasoningEffortDefault: cfg.ReasoningEffortDefault, ChatTemplateCaps: cfg.EffectiveChatTemplateCaps(),
+	}}, true, "", "", resolvedBody
+}
+
+// mergeForcedDefaults shallow-copies body and overwrites it with every key
+// in forced — a ModelAlias's own request_defaults always win, even over a
+// client-sent value, unlike Config.ReasoningEffortDefault's client-wins
+// precedence (see 0086_model_aliases.sql's doc comment on why).
+func mergeForcedDefaults(body map[string]any, forced map[string]any) map[string]any {
+	if len(forced) == 0 {
+		return body
+	}
+	out := make(map[string]any, len(body)+len(forced))
+	for k, v := range body {
+		out[k] = v
+	}
+	for k, v := range forced {
+		out[k] = v
+	}
+	return out
+}
+
+// trySubstitute runs the pre-EnsureLoaded(want) substitution check
+// (capability_substitution.go's decideSubstitute) and, on a hit, loads the chosen
+// substitute via the scheduler exactly like the normal path would load
+// `want` — trusting the returned ticket for slot/port rather than the
+// candidate-gathering snapshot, since that snapshot can be stale by the
+// time this runs (sched.Status() is snapshot-based; see
+// sched/core.go "design decision 2"). If the substitute's own EnsureLoaded
+// fails, this returns nil and the caller proceeds to load `want` normally
+// — a failed substitute never blocks or delays loading the originally
+// requested config.
+func (s *Server) trySubstitute(ctx context.Context, want store.Config, body map[string]any, requestedBy string) *Backend {
+	scd := s.deps.Sched
+	if scd == nil {
+		return nil
+	}
+	policy := s.substitutionPolicy(ctx, want.CapabilityTierID)
+	if policy == subOff {
+		return nil
+	}
+	candidates := s.capabilityTierCandidates(ctx, want, body)
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	var wantTerminal bool
+	if policy == subFallbackOnly {
+		horizon := time.Until(deadlineOr(ctx, s.cfg().ensureLoadedTimeout()))
+		pl, err := scd.CouldLoad(ctx, want.Name, horizon)
+		if err != nil {
+			return nil // probe failure — proceed with the normal load path
+		}
+		wantTerminal = pl.Terminal
+	}
+
+	sub, _, why, ok := decideSubstitute(policy, want, candidates, wantTerminal)
+	if !ok {
+		return nil
+	}
+	return s.loadSubstitute(ctx, sub, requestedBy, string(policy), why)
+}
+
+// trySubstituteAfterFailure is trySubstitute's second-chance sibling, run
+// only when EnsureLoaded(want) has already failed for real. Always
+// evaluated as fallback_only semantics regardless of the configured
+// policy: at this point `want` is CONFIRMED infeasible (not just
+// CouldLoad's prediction), which is exactly fallback_only's trigger
+// condition, and prefer_smarter's own "already loaded and smarter"
+// condition was already checked (and would have fired) before
+// EnsureLoaded(want) was ever attempted.
+func (s *Server) trySubstituteAfterFailure(ctx context.Context, want store.Config, body map[string]any) *Backend {
+	policy := s.substitutionPolicy(ctx, want.CapabilityTierID)
+	if policy == subOff {
+		return nil
+	}
+	candidates := s.capabilityTierCandidates(ctx, want, body)
+	if len(candidates) == 0 {
+		return nil
+	}
+	sub, _, why, ok := decideSubstitute(subFallbackOnly, want, candidates, true)
+	if !ok {
+		return nil
+	}
+	return s.loadSubstitute(ctx, sub, "", string(policy), why)
+}
+
+// loadSubstitute loads sub via the scheduler and, on success, returns the
+// Backend to route this request to. requestedBy "" (trySubstituteAfterFailure
+// doesn't thread it through) attributes the load to the scheduler's own
+// default rather than fabricating an identity.
+func (s *Server) loadSubstitute(ctx context.Context, sub store.Config, requestedBy, policy, why string) *Backend {
+	scd := s.deps.Sched
+	ticket, err := scd.EnsureLoaded(ctx, sched.EnsureRequest{
+		Model:       sub.Name,
+		RequestedBy: requestedBy,
+		TargetSlot:  "",
+	})
+	if err != nil || ticket.Status == "failed" {
+		return nil
+	}
+	port := s.deps.Slots[ticket.TargetSlot]
+	if port == 0 {
+		return nil
+	}
+	return &Backend{
+		Name: sub.Name, Kind: "foundry_slot", Port: port,
+		CapabilitySubstitutionMode: policy, CapabilitySubstitutionReason: why,
+		ReasoningEffortDefault: sub.ReasoningEffortDefault, ChatTemplateCaps: sub.EffectiveChatTemplateCaps(),
+	}
+}
+
+// deadlineOr returns ctx's deadline if it has one, else now+fallback.
+func deadlineOr(ctx context.Context, fallback time.Duration) time.Time {
+	if d, ok := ctx.Deadline(); ok {
+		return d
+	}
+	return time.Now().Add(fallback)
 }
 
 // offeringChain resolves a remote model against store.Offering (ADR-0007

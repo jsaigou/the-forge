@@ -50,6 +50,14 @@ type Scheduler interface {
 	// loads — a pure snapshot read a consumer can poll from a second
 	// connection while its own chat request blocks inside EnsureLoaded.
 	LoadStatus(model string) LoadState
+
+	// CouldLoad answers "would EnsureLoaded(model) succeed right now, and
+	// what would it have to evict?" without loading, unloading, or queuing
+	// anything (performance-level routing, Sprint P2, 2026-09-13). See
+	// Placement's and CouldLoad's own doc comments (place.go) for the
+	// terminal-vs-retryable distinction and the one gap it can't see (the
+	// engine's same-weights sibling guard, below place()).
+	CouldLoad(ctx context.Context, model string, horizon time.Duration) (Placement, error)
 }
 
 // LoadState mirrors GET /v1/load-status?model=... on the a0 listener.
@@ -226,3 +234,7 @@ func (s *Stub) UpdateReservation(context.Context, string, Reservation) error { r
 func (s *Stub) CancelReservation(context.Context, string, string) error { return nil }
 
 func (s *Stub) LoadStatus(model string) LoadState { return LoadState{Model: model, State: "idle"} }
+
+func (s *Stub) CouldLoad(context.Context, string, time.Duration) (Placement, error) {
+	return Placement{Slot: "stub"}, nil
+}

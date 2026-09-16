@@ -58,13 +58,17 @@ const RETIRED_CATALOG_SLUGS: Record<string, SectionKey> = {
 // into "routing" Phase 7 (2026-08-13, Routing and Compressor are two halves
 // of one request path — see Routing.tsx's header comment); "profiling" was
 // folded into "benchmarks" Phase 8, same day (see the header comment
-// above). This maps just the section key — any anchor
-// (#settings/compressor/compressor-mode, #settings/profiling/profiling-runs)
-// is preserved and reattached to the new section, since both merged panels
-// still render the same DOM ids their old standalone pages did.
+// above); "behavior" was folded into "routing" too, 2026-09-14, same day it
+// shipped (operator call — see settings/panels/Behavior.tsx's header
+// comment). This maps just the section key — any anchor
+// (#settings/compressor/compressor-mode, #settings/profiling/profiling-runs,
+// #settings/behavior/behavior-configs) is preserved and reattached to the
+// new section, since every merged panel still renders the same DOM ids its
+// old standalone page did.
 const RETIRED_SECTION_SLUGS: Record<string, SectionKey> = {
   compressor: "routing",
   profiling: "benchmarks",
+  behavior: "routing",
 };
 
 function useSectionComponents(catalogAnchor: string | undefined, onCatalogTabChange: (tab: CatalogSubTab) => void): Record<SectionKey, () => ReactElement> {

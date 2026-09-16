@@ -280,6 +280,16 @@ type seedConfigOpts struct {
 	withMMProj      bool      // create an mmproj artifact and link it
 	mmprojMissing   bool      // only meaningful if withMMProj
 	cfgModalities   *[]string // nil -> derive; non-nil (incl. empty) -> explicit override
+	// weightFilePath overrides the weight artifact's file_path (default
+	// name+".gguf") — set this to the SAME string across two configs to
+	// simulate the gemma4-26b-a4b / -nothink duplicate-artifact-row
+	// incident (two different artifact rows, identical file on disk),
+	// capability-tier substitution's same-weights gate (Sprint P3).
+	weightFilePath string
+	// capabilityTierID/capabilityRank — see store.Config's own doc comment
+	// (capability-tier substitution, Sprint P3).
+	capabilityTierID int64
+	capabilityRank   int
 }
 
 // seedCatalogConfig creates the minimal Model → Variant → Artifact(weight) →
@@ -310,9 +320,13 @@ func seedCatalogConfig(t *testing.T, cat store.Catalog, name string, nCtx int, v
 	if err != nil {
 		t.Fatalf("FormatByName: %v", err)
 	}
+	weightFilePath := o.weightFilePath
+	if weightFilePath == "" {
+		weightFilePath = name + ".gguf"
+	}
 	weightID, err := cat.CreateArtifact(ctx, store.Artifact{
 		VariantID: varID, QuantizationID: q.ID, FormatID: f.ID,
-		FilePath: name + ".gguf", ArtifactType: "weight",
+		FilePath: weightFilePath, ArtifactType: "weight",
 	})
 	if err != nil {
 		t.Fatalf("CreateArtifact: %v", err)
@@ -334,7 +348,7 @@ func seedCatalogConfig(t *testing.T, cat store.Catalog, name string, nCtx int, v
 	cfgID, err := cat.CreateConfig(ctx, store.Config{
 		Name: name, VariantID: varID, WeightArtifactID: weightID,
 		EngineID: eng.ID, MMProjArtifactID: mmprojID, NCtx: nCtx, Visibility: visibility,
-		Modalities: o.cfgModalities,
+		Modalities: o.cfgModalities, CapabilityTierID: o.capabilityTierID, CapabilityRank: o.capabilityRank,
 	})
 	if err != nil {
 		t.Fatalf("CreateConfig: %v", err)

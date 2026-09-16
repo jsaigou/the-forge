@@ -102,7 +102,7 @@
       "gguf": false,
       "dest_rel_path": null,
       "files": [],
-      "notes": "ComfyUI runs as a service (forge-comfyui.service / remote PairNode node), not a downloaded asset."
+      "notes": "ComfyUI runs as a service (forge-comfyui.service), not a downloaded asset."
     }
   ]
 }

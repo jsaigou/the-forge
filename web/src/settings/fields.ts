@@ -111,6 +111,23 @@ export const ROUTING_FIELDS: SettingRecord[] = [
     input: "toggle",
   },
   {
+    id: "routing.capability_substitution",
+    kind: "field",
+    section: "routing",
+    card: "behavior",
+    label: "Capability-tier substitution",
+    help: "Let an already-loaded, operator-ranked config stand in for a requested one — \"Fallback only\" substitutes just when the requested config is genuinely infeasible to load right now; \"Prefer smarter\" also substitutes whenever a loaded config outranks the requested one, even if loading it would have been feasible. A capability tier's own override (the Capability tiers card below, under Model Behavior) takes precedence over this default. Off by default — a request with no eligible substitute behaves identically either way.",
+    keywords: ["capability_substitution", "performance", "substitute", "capability tier", "rank"],
+    storeKey: "router.capability_substitution",
+    apply: "immediate",
+    input: "select",
+    options: [
+      { value: "off", label: "Off" },
+      { value: "fallback_only", label: "Fallback only" },
+      { value: "prefer_smarter", label: "Prefer smarter" },
+    ],
+  },
+  {
     id: "routing.connect_timeout_s",
     kind: "field",
     section: "routing",
@@ -1177,6 +1194,61 @@ export const CATALOG_LANDMARKS: SettingRecord[] = [
   },
 ];
 
+// Behavior landmarks — one per settings/panels/Behavior.tsx eyebrow
+// (2026-09-14). ModelBehaviorSection renders inside Routing & Compressor
+// (folded in the same day, operator call — see that file's header comment),
+// so section is "routing" even though the ids/labels keep their own
+// "Model Behavior" identity. The anchors are real DOM ids on that panel
+// (unlike the Catalog landmarks above, this isn't CatalogPanel's own
+// sub-tabbed component), so a search result scrolls and flashes exactly
+// like any other Routing/Security field landmark does.
+export const BEHAVIOR_LANDMARKS: SettingRecord[] = [
+  {
+    id: "landmark.behavior.configs",
+    kind: "landmark",
+    section: "routing",
+    label: "Model Behavior · Configs",
+    help: "Per-config overview: capability tier + rank, default reasoning effort, the enable_thinking override, and aliases — in one table.",
+    keywords: ["reasoning", "reasoning_effort", "thinking", "enable_thinking", "chat_template_caps", "capability tier", "rank"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "behavior-configs",
+  },
+  {
+    id: "landmark.behavior.capability-tiers",
+    kind: "landmark",
+    section: "routing",
+    label: "Model Behavior · Capability tiers",
+    help: "Groups of configs that may substitute for each other under capability-tier substitution.",
+    keywords: ["performance", "capability tier", "substitute", "rank", "capability_substitution"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "behavior-capability-tiers",
+  },
+  {
+    id: "landmark.behavior.aliases",
+    kind: "landmark",
+    section: "routing",
+    label: "Model Behavior · Model aliases",
+    help: "A second model name that forces its own request defaults on every call through it.",
+    keywords: ["alias", "aliases", "model name", "force", "request defaults", "nothink"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "behavior-aliases",
+  },
+  {
+    id: "landmark.behavior.virtual-models",
+    kind: "landmark",
+    section: "routing",
+    label: "Model Behavior · Virtual models",
+    help: "A model name resolved to a real config dynamically per-request, by capability tier or real measured throughput — for a caller that doesn't care which specific model answers.",
+    keywords: ["virtual model", "fast", "smart", "throughput", "local-fast", "local-smart", "decode_tps"],
+    storeKey: "",
+    apply: "immediate",
+    anchor: "behavior-virtual-models",
+  },
+];
+
 // Security landmarks — one per SecurityPanel eyebrow. The anchors are the
 // existing Phase 5 eyebrow ids (security-policy, security-auth-config, …),
 // present in every render branch of that panel.
@@ -1276,6 +1348,7 @@ export const SETTINGS_INDEX: SettingRecord[] = SETTINGS_SECTIONS.flatMap((s) =>
     ...SECURITY_DANGER_FIELDS,
     ...LANDMARKS,
     ...CATALOG_LANDMARKS,
+    ...BEHAVIOR_LANDMARKS,
     ...SECURITY_LANDMARKS,
   ].filter((r) => r.section === s.key),
 );

@@ -36,6 +36,7 @@ import (
 	"github.com/jsaigou/the-forge/internal/hf"
 	"github.com/jsaigou/the-forge/internal/hfdownload"
 	"github.com/jsaigou/the-forge/internal/maintenance"
+	modelregistry "github.com/jsaigou/the-forge/internal/registry"
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/smith/comfyui"
 	"github.com/jsaigou/the-forge/internal/smith/procedures"
@@ -481,7 +482,7 @@ func DefaultThresholds() Thresholds {
 	return Thresholds{
 		GTTWarnPct: 85, GTTCritPct: 95, DiskWarnPct: 85, DiskCritPct: 95, DeviceLostWindowMinutes: 15,
 		CompressorRSSWindowHours: 6, CompressorRSSGrowthWarnPct: 40, CompressorRestartsWarnPerHour: 3,
-		BuildRefreshBehindN:         500,
+		BuildRefreshBehindN:       500,
 		CompressorFailOpenWarnPct: 10,
 	}
 }
@@ -549,6 +550,14 @@ type Deps struct {
 	// resolution, configured n_ctx for the n_ctx check). nil = the checks
 	// that need it skip themselves; the brain resolves deterministic_only.
 	Catalog store.Catalog
+
+	// Registry is the config-card assembler (go/internal/registry) —
+	// family/capabilities/measured performance/memory footprint for the
+	// capability_tier_candidates tool (capability-tier curation, 2026-09-14). Smith
+	// only ever reads Cards; deliberately not the fuller Registry surface
+	// (WeightEstimateBytes etc. stay the engine's own concern). nil = the
+	// tool reports itself unavailable, same degrade posture as Web/HF above.
+	Registry modelregistry.Registry
 
 	// Settings is the settings KV (smith.* keys). nil = defaults.
 	Settings store.Settings

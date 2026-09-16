@@ -455,6 +455,115 @@ func TestLoadRecordsCtxExceedsTrained(t *testing.T) {
 	}
 }
 
+// ── T1: chat_template_caps probed and persisted at load (per-request
+// thinking control) ──
+
+func TestLoadProbesAndPersistsChatTemplateCaps(t *testing.T) {
+	cfg := testConfig(t)
+	mode := cfg.Modes["gemma"]
+	mode.ConfigID = 42
+	cfg.Modes["gemma"] = mode
+
+	sys := newFakeSys()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			fmt.Fprint(w, `{"status":"ok"}`)
+		case "/props":
+			fmt.Fprint(w, `{"default_generation_settings":{"n_ctx":131072},
+				"chat_template_caps":{"supports_reasoning_effort":true,"supports_tool_calls":false}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	var calls int
+	var gotConfigID int64
+	var gotCaps map[string]bool
+	m, err := NewManager(Deps{
+		Cfg:          func() *config.Config { return cfg },
+		Sys:          sys,
+		GPU:          &collector.GPU{DRMRoot: t.TempDir()},
+		Proc:         collector.Proc{Root: t.TempDir()},
+		Usage:        &fakeUsage{},
+		Notify:       &notifyCounter{},
+		BaseURL:      func(port int) string { return srv.URL },
+		Kill:         func(pid int) error { return nil },
+		PollInterval: time.Millisecond,
+		Logf:         t.Logf,
+		ReadMeta: func(path string) (gguf.Metadata, error) {
+			return gguf.Metadata{TrainedCtx: 131072}, nil
+		},
+		UpdateChatTemplateCaps: func(_ context.Context, configID int64, caps map[string]bool) error {
+			calls++
+			gotConfigID = configID
+			gotCaps = caps
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sys.setSeq("forge-a1", st("inactive", "dead"), st("active", "running"))
+
+	if res := m.Load(context.Background(), "gemma", "a1"); !res.Success {
+		t.Fatalf("load failed: %s", res.Message)
+	}
+	if calls != 1 {
+		t.Fatalf("UpdateChatTemplateCaps calls = %d, want 1", calls)
+	}
+	if gotConfigID != 42 {
+		t.Errorf("configID = %d, want 42", gotConfigID)
+	}
+	if gotCaps["supports_reasoning_effort"] != true || gotCaps["supports_tool_calls"] != false {
+		t.Errorf("caps = %+v", gotCaps)
+	}
+}
+
+// A mode with no catalog config (ConfigID 0 — a file-config mode, or one
+// not yet migrated into the catalog) must skip the probe entirely rather
+// than persisting capability data against a nonexistent config row.
+func TestLoadSkipsChatTemplateCapsProbeWithoutConfigID(t *testing.T) {
+	cfg := testConfig(t) // "gemma" mode leaves ConfigID at its zero value
+	sys := newFakeSys()
+	stub := newLlamaStub(t, 131072)
+
+	var calls int
+	usage := &fakeUsage{}
+	m, err := NewManager(Deps{
+		Cfg:          func() *config.Config { return cfg },
+		Sys:          sys,
+		GPU:          &collector.GPU{DRMRoot: t.TempDir()},
+		Proc:         collector.Proc{Root: t.TempDir()},
+		Usage:        usage,
+		Notify:       &notifyCounter{},
+		BaseURL:      func(port int) string { return stub.srv.URL },
+		Kill:         func(pid int) error { return nil },
+		PollInterval: time.Millisecond,
+		Logf:         t.Logf,
+		ReadMeta: func(path string) (gguf.Metadata, error) {
+			return gguf.Metadata{TrainedCtx: 131072}, nil
+		},
+		UpdateChatTemplateCaps: func(context.Context, int64, map[string]bool) error {
+			calls++
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sys.setSeq("forge-a1", st("inactive", "dead"), st("active", "running"))
+
+	if res := m.Load(context.Background(), "gemma", "a1"); !res.Success {
+		t.Fatalf("load failed: %s", res.Message)
+	}
+	if calls != 0 {
+		t.Errorf("UpdateChatTemplateCaps calls = %d, want 0 (ConfigID 0 must skip the probe)", calls)
+	}
+}
+
 func TestLoadFailureStopsUnitAndRecords(t *testing.T) {
 	cfg := testConfig(t)
 	sys := newFakeSys()

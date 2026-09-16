@@ -53,7 +53,7 @@ func newRoutingPreviewTestServer(t *testing.T) (*Server, *store.DB, *ensureLoade
 		Config:    func() *config.Config { return cfg },
 		Hostname:  "test-host",
 		Catalog:   db.Catalog(),
-		Routing:  db.Routing(),
+		Routing:   db.Routing(),
 		Settings:  db.Settings(),
 	})
 	t.Cleanup(func() { s.Close() })
@@ -167,6 +167,84 @@ func TestRoutingPreview_LocalPathNeverLoads(t *testing.T) {
 	}
 	if spy.called {
 		t.Error("EnsureLoaded was called by a preview request — a preview must never load a model")
+	}
+}
+
+// TestRoutingPreview_CapabilitySubstitutionReport covers the performance-level-
+// routing report (Sprint P4, 2026-09-13): a config in a CapabilityTier gets an
+// CapabilitySubstitution block naming the effective policy (class override beats
+// global default) and every other member with its live loaded/slot state
+// — never a prediction of what a real request would do, just the
+// ingredients (see routingPreviewResponse.CapabilitySubstitution's doc comment).
+func TestRoutingPreview_CapabilitySubstitutionReport(t *testing.T) {
+	s, db, _ := newRoutingPreviewTestServer(t)
+	seedLocalConfig(t, db, "weak", "visible")
+	seedLocalConfig(t, db, "strong", "visible")
+
+	ctx := t.Context()
+	classID, err := db.Catalog().CreateCapabilityTier(ctx, store.CapabilityTier{Name: "chat-tier", Mode: "prefer_smarter"})
+	if err != nil {
+		t.Fatalf("CreateCapabilityTier: %v", err)
+	}
+	weak, err := db.Catalog().ConfigByName(ctx, "weak")
+	if err != nil {
+		t.Fatalf("ConfigByName weak: %v", err)
+	}
+	weak.CapabilityTierID, weak.CapabilityRank = classID, 10
+	if err := db.Catalog().UpdateConfig(ctx, weak); err != nil {
+		t.Fatalf("UpdateConfig weak: %v", err)
+	}
+	strong, err := db.Catalog().ConfigByName(ctx, "strong")
+	if err != nil {
+		t.Fatalf("ConfigByName strong: %v", err)
+	}
+	strong.CapabilityTierID, strong.CapabilityRank = classID, 0
+	if err := db.Catalog().UpdateConfig(ctx, strong); err != nil {
+		t.Fatalf("UpdateConfig strong: %v", err)
+	}
+
+	w := do(t, s, authedRequest("GET", "/api/v1/routing/preview?model=weak", nil))
+	if w.Code != 200 {
+		t.Fatalf("preview = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var resp routingPreviewResponse
+	decodeJSON(t, w.Body, &resp)
+	if resp.CapabilitySubstitution == nil {
+		t.Fatal("CapabilitySubstitution is nil, want a report (weak is in a capability tier)")
+	}
+	if resp.CapabilitySubstitution.Policy != "prefer_smarter" {
+		t.Errorf("Policy = %q, want %q (class override beats global default)", resp.CapabilitySubstitution.Policy, "prefer_smarter")
+	}
+	if resp.CapabilitySubstitution.CapabilityTier != "chat-tier" {
+		t.Errorf("CapabilityTier = %q, want %q", resp.CapabilitySubstitution.CapabilityTier, "chat-tier")
+	}
+	if resp.CapabilitySubstitution.Rank != 10 {
+		t.Errorf("Rank = %d, want 10", resp.CapabilitySubstitution.Rank)
+	}
+	if len(resp.CapabilitySubstitution.Members) != 1 || resp.CapabilitySubstitution.Members[0].Name != "strong" {
+		t.Fatalf("Members = %+v, want exactly [strong]", resp.CapabilitySubstitution.Members)
+	}
+	if resp.CapabilitySubstitution.Members[0].Loaded {
+		t.Error("strong.Loaded = true, want false — sched.Stub reports nothing loaded")
+	}
+}
+
+// TestRoutingPreview_NoCapabilitySubstitutionOutsideClass confirms the field cleanly
+// omits (nil) for a config that was never assigned a capability tier — the
+// common case, and the existing local-path tests above must stay
+// unaffected by this sprint's addition.
+func TestRoutingPreview_NoCapabilitySubstitutionOutsideClass(t *testing.T) {
+	s, db, _ := newRoutingPreviewTestServer(t)
+	seedLocalConfig(t, db, "solo-model", "visible")
+
+	w := do(t, s, authedRequest("GET", "/api/v1/routing/preview?model=solo-model", nil))
+	if w.Code != 200 {
+		t.Fatalf("preview = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var resp routingPreviewResponse
+	decodeJSON(t, w.Body, &resp)
+	if resp.CapabilitySubstitution != nil {
+		t.Errorf("CapabilitySubstitution = %+v, want nil (config is in no capability tier)", resp.CapabilitySubstitution)
 	}
 }
 

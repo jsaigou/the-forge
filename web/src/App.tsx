@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { MaintenanceBanner } from "./components/MaintenanceBanner";
+import { PWAUpdateBanner } from "./components/PWAUpdateBanner";
 import { useProfileProgress, useProfileRunTracker, useStatus } from "./lib/queries";
 import { useLiveEvents } from "./lib/sse";
 import { useSession } from "./lib/session";
@@ -232,6 +233,7 @@ export function App() {
 
   return (
     <div className="wrap">
+      <PWAUpdateBanner />
       <div className="top">
         <div className="brand">
           <img src="/favicon.svg" alt="" className="brand-mark" width={34} height={34} />

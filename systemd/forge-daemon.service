@@ -1,7 +1,7 @@
 # /etc/systemd/system/forge-daemon.service
-# The Forge v0.5 single-binary daemon: dashboard (:5000) + a0 router (:8085) + MCP (:8095).
+# The Forge v0.6 single-binary daemon: dashboard (:5000) + a0 router (:8085) + MCP (:8095).
 [Unit]
-Description=The Forge — v0.5 daemon (dashboard + a0 router + MCP)
+Description=The Forge — v0.6 daemon (dashboard + a0 router + MCP)
 After=network.target
 
 [Service]

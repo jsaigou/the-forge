@@ -202,7 +202,7 @@ Full list in [docs/pitfalls.md](docs/pitfalls.md).
 
 Early public release: source and installer are published for review. Binaries and model weights
 aren't distributed — build from source against your own llama.cpp. Expect churn in the scheduler
-and auth surfaces while the v0.5 line stabilizes.
+and auth surfaces while the v0.6 line stabilizes.
 
 ## Support
 

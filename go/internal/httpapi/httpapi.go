@@ -465,6 +465,7 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/status", s.handleStatus)
 	mux.HandleFunc("GET /api/v1/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/v1/scheduler/status", s.handleSchedulerStatus)
+	mux.HandleFunc("GET /api/v1/scheduler/could-load", s.handleSchedulerCouldLoad)
 	mux.HandleFunc("GET /api/v1/infra-services", s.handleInfraServices)
 	mux.HandleFunc("GET /api/v1/usage", s.handleUsage)
 	mux.HandleFunc("GET /api/v1/usage/events", s.handleUsageEvents)
@@ -602,6 +603,13 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/smith/conversations/{id}", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithConversationDetail)))
 	mux.Handle("DELETE /api/v1/smith/conversations/{id}", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithConversationDelete)))
 	mux.Handle("POST /api/v1/smith/chat", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithChat)))
+	// Same gate as POST /api/v1/smith/actions above — this endpoint also
+	// creates catalog_change actions (pending, unexecuted; see
+	// smith.ProposeCapabilityTiers' doc comment).
+	mux.Handle("POST /api/v1/smith/capability-tiers/propose",
+		s.requireRole(authz.RoleOperator)(
+			s.requireAssurance(authz.ResourceActionSmithExecute)(
+				http.HandlerFunc(s.handleSmithCapabilityTiersPropose))))
 	mux.Handle("GET /api/v1/smith/settings", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithSettingsGet)))
 	mux.Handle("PUT /api/v1/smith/settings", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithSettingsPut)))
 
@@ -847,6 +855,38 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/catalog/formats", s.handleCatalogFormatsList)
 	mux.HandleFunc("GET /api/v1/catalog/engines", s.handleCatalogEnginesList)
 	mux.HandleFunc("GET /api/v1/catalog/builds", s.handleCatalogBuildsList)
+
+	// CapabilityTier CRUD (capability-tier substitution, Sprint P1, 2026-09-13 —
+	// see store.CapabilityTier's doc comment).
+	mux.HandleFunc("GET /api/v1/catalog/capability-tiers", s.handleCatalogCapabilityTiersList)
+	mux.HandleFunc("GET /api/v1/catalog/capability-tiers/{id}", s.handleCatalogCapabilityTierGet)
+	mux.Handle("POST /api/v1/catalog/capability-tiers",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogCapabilityTierCreate))))
+	mux.Handle("PUT /api/v1/catalog/capability-tiers/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogCapabilityTierUpdate))))
+	mux.Handle("DELETE /api/v1/catalog/capability-tiers/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogCapabilityTierDelete))))
+
+	// VirtualModel CRUD (2026-09-15 — see store.VirtualModel's doc comment).
+	mux.HandleFunc("GET /api/v1/catalog/virtual-models", s.handleCatalogVirtualModelsList)
+	mux.HandleFunc("GET /api/v1/catalog/virtual-models/{id}", s.handleCatalogVirtualModelGet)
+	mux.Handle("POST /api/v1/catalog/virtual-models",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogVirtualModelCreate))))
+	mux.Handle("PUT /api/v1/catalog/virtual-models/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogVirtualModelUpdate))))
+	mux.Handle("DELETE /api/v1/catalog/virtual-models/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogVirtualModelDelete))))
+
+	// ModelAlias CRUD (per-request thinking control, Sprint T3, 2026-09-14
+	// — see store.ModelAlias's doc comment).
+	mux.HandleFunc("GET /api/v1/catalog/model-aliases", s.handleCatalogModelAliasesList)
+	mux.HandleFunc("GET /api/v1/catalog/model-aliases/{id}", s.handleCatalogModelAliasGet)
+	mux.Handle("POST /api/v1/catalog/model-aliases",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogModelAliasCreate))))
+	mux.Handle("PUT /api/v1/catalog/model-aliases/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogModelAliasUpdate))))
+	mux.Handle("DELETE /api/v1/catalog/model-aliases/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogModelAliasDelete))))
 	mux.HandleFunc("GET /api/v1/catalog/artifacts", s.handleCatalogArtifactsList)
 
 	mux.HandleFunc("GET /api/v1/catalog/models", s.handleCatalogModelsList)
