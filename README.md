@@ -10,11 +10,11 @@
 
 </div>
 
+**Intelligent orchestration for multi-model inference.**
+
 The Forge is a single Go binary for running several local LLMs on one machine: a scheduler that
 loads models on demand and evicts by memory budget, a router with cloud failover, a live model
 catalog, and an in-process agent (Smith) that watches the host and can act on what it finds.
-Built for AMD's unified-memory APUs (Ryzen AI Max+ 395 / "Strix Halo"), where GPU and CPU share
-one pool of RAM.
 
 <p align="center">
   <img src="docs/assets/console-light-dark.png" alt="The Forge console, light and dark theme" width="100%">
@@ -50,19 +50,6 @@ one pool of RAM.
 </table>
 
 ---
-
-## Why unified memory changes things
-
-On Strix Halo-class hardware there's no discrete VRAM — the GPU draws from the same pool as the
-OS, through GTT allocation most llama.cpp tooling isn't tuned for.
-
-- **ROCm vs. Vulkan is a per-model decision.** Vulkan tops out around 63 GB; ROCm with
-  `GGML_CUDA_ENABLE_UNIFIED_MEMORY=ON` reaches the full ~120 GB GTT pool, at a higher launch
-  cost and its own memory accounting.
-- **The kernel can silently reduce your context window** if it can't find a contiguous GTT
-  block, with nothing in a stock llama-server deployment reporting it.
-- **Running several models at once** — a coding model, a small router brain, an image
-  pipeline — needs real memory budgeting and eviction, not a restart to switch models.
 
 ## What it does
 
