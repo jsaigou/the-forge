@@ -25,6 +25,7 @@ import (
 
 	"github.com/jsaigou/the-forge/internal/activity"
 	"github.com/jsaigou/the-forge/internal/authz"
+	"github.com/jsaigou/the-forge/internal/registry"
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/store"
 )
@@ -84,6 +85,14 @@ type Deps struct {
 	// request start and again when the upstream body is fully streamed.
 	// Nil → no attribution.
 	Activity *activity.Registry
+	// Registry is the config-card assembler (go/internal/registry), used
+	// only by "throughput"-kind virtual models to read real measured
+	// decode_tps (the same merged benchmark+live-profile figure the
+	// Settings UI shows — never reimplemented here, see registry.Registry's
+	// own doc comment for why a second estimator would drift). Nil → every
+	// throughput virtual model resolves as unavailable; capability_tier
+	// virtual models are unaffected (they only need StoreCatalog).
+	Registry registry.Registry
 }
 
 // Server is the a0 router.

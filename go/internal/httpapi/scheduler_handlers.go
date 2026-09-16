@@ -206,6 +206,62 @@ func (s *Server) handleReservationCancel(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "label": label})
 }
 
+// couldLoadResponse mirrors sched.Placement for the wire (performance-level
+// routing, Sprint P2, 2026-09-13).
+type couldLoadResponse struct {
+	Slot       string              `json:"slot"`
+	Evict      []string            `json:"evict"`
+	EvictComfy bool                `json:"evict_comfyui"`
+	Message    string              `json:"message"`
+	Terminal   bool                `json:"terminal"`
+	Reason     sched.RefusalReason `json:"reason,omitempty"`
+}
+
+// handleSchedulerCouldLoad answers "would EnsureLoaded(model) succeed right
+// now, and what would it have to evict?" without loading, unloading, or
+// queuing anything — a live-verification surface for performance-level
+// routing's feasibility check (sched.Core.CouldLoad) and generally useful
+// for an operator sanity-checking placement before committing to a load.
+// horizon_s defaults to the router's own ensure_loaded_timeout_s, since
+// that's the budget a real a0 request would give EnsureLoaded — matching
+// horizons is what makes Terminal here predictive of what a real request
+// would see.
+func (s *Server) handleSchedulerCouldLoad(w http.ResponseWriter, r *http.Request) {
+	model := r.URL.Query().Get("model")
+	if model == "" {
+		writeValidationError(w, map[string]string{"model": "is required"})
+		return
+	}
+	if s.deps.Sched == nil {
+		writeError(w, http.StatusServiceUnavailable, "scheduler not configured")
+		return
+	}
+	horizon := time.Duration(routerDefaultEnsureLoadedTimeoutS * float64(time.Second))
+	if raw := r.URL.Query().Get("horizon_s"); raw != "" {
+		var secs float64
+		if _, err := fmt.Sscanf(raw, "%f", &secs); err != nil || secs <= 0 {
+			writeValidationError(w, map[string]string{"horizon_s": "must be a positive number"})
+			return
+		}
+		horizon = time.Duration(secs * float64(time.Second))
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	pl, err := s.deps.Sched.CouldLoad(ctx, model, horizon)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	evict := pl.Evict
+	if evict == nil {
+		evict = []string{}
+	}
+	writeJSON(w, http.StatusOK, couldLoadResponse{
+		Slot: pl.Slot, Evict: evict, EvictComfy: pl.EvictComfy,
+		Message: pl.Message, Terminal: pl.Terminal, Reason: pl.Reason,
+	})
+}
+
 // handleSchedulerConfigGet returns the scheduler tunables (Contract 1 §2
 // #16).
 func (s *Server) handleSchedulerConfigGet(w http.ResponseWriter, _ *http.Request) {
@@ -742,7 +798,7 @@ func (s *Server) runUnloadAllBackground(parent context.Context) {
 // request by the router itself, so this GET always reflects live state, not
 // a cached snapshot.
 func (s *Server) resolvedRouterSettings(ctx context.Context) routerSettingsResponse {
-	resp := routerSettingsResponse{BusyMode: "wait", InjectStreamUsage: true, CompressorLocalEnabled: false, ProviderFailover: false}
+	resp := routerSettingsResponse{BusyMode: "wait", InjectStreamUsage: true, CompressorLocalEnabled: false, ProviderFailover: false, CapabilitySubstitution: "off"}
 	if s.deps.Settings == nil {
 		return resp
 	}
@@ -757,6 +813,9 @@ func (s *Server) resolvedRouterSettings(ctx context.Context) routerSettingsRespo
 	}
 	if raw, err := s.deps.Settings.Get(ctx, "router.provider_failover"); err == nil {
 		_ = json.Unmarshal(raw, &resp.ProviderFailover)
+	}
+	if raw, err := s.deps.Settings.Get(ctx, "router.capability_substitution"); err == nil {
+		_ = json.Unmarshal(raw, &resp.CapabilitySubstitution)
 	}
 	return resp
 }
@@ -788,6 +847,14 @@ func (s *Server) handleRouterSettingsPut(w http.ResponseWriter, r *http.Request)
 		writeValidationError(w, map[string]string{"busy_mode": "must be \"wait\" or \"fail_fast\""})
 		return
 	}
+	if body.CapabilitySubstitution != nil {
+		switch *body.CapabilitySubstitution {
+		case "off", "fallback_only", "prefer_smarter":
+		default:
+			writeValidationError(w, map[string]string{"capability_substitution": "must be \"off\", \"fallback_only\", or \"prefer_smarter\""})
+			return
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
@@ -815,6 +882,13 @@ func (s *Server) handleRouterSettingsPut(w http.ResponseWriter, r *http.Request)
 	if body.ProviderFailover != nil {
 		raw, _ := json.Marshal(*body.ProviderFailover)
 		if err := s.deps.Settings.Set(ctx, "router.provider_failover", raw); err != nil {
+			writeInternalError(w, err)
+			return
+		}
+	}
+	if body.CapabilitySubstitution != nil {
+		raw, _ := json.Marshal(*body.CapabilitySubstitution)
+		if err := s.deps.Settings.Set(ctx, "router.capability_substitution", raw); err != nil {
 			writeInternalError(w, err)
 			return
 		}

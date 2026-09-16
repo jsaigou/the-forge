@@ -1,6 +1,6 @@
 # The Forge Installer
 
-This directory contains the host-provisioning track for The Forge v0.5:
+This directory contains the host-provisioning track for The Forge v0.6:
 
 ```
 install.sh                    dual-target installer (dev | public)
@@ -24,8 +24,8 @@ sudo ./install.sh --target=public
    GTT pool (fail < 48 GB, warn < 96 GB), RAM (fail < 96 GB, warn < 128 GB),
    ≥ 250 GB free disk, curl/python3/systemctl present.
 2. Shared steps: OS/CPU/GPU/ROCm/llama.cpp/prereqs/model inventory.
-   Reference-host specifics (Fedora-only gates, BIOS checklist, PairNode
-   probe, uv venv) are dev-target only.
+   Reference-host specifics (Fedora-only gates, BIOS checklist, uv venv)
+   are dev-target only.
 3. Systemd unit installation (same units on both targets).
 4. **KGC match** (`installer/kgc-match.py`) — on a match writes
    `FORGE_KGC_PROFILE=<id>` to `/etc/sysconfig/forge-kgc`. The scheduler's
@@ -92,4 +92,4 @@ ceiling, and per-model performance baselines. Baselines marked
 
 `sudo ./install.sh` (default) preserves the historical reference-host flow:
 strict Fedora/kernel gates, BIOS checklist, `/opt/forge` paths, SELinux
-relabels, uv strict-mode package verification, PairNode ComfyUI probe.
+relabels, uv strict-mode package verification.

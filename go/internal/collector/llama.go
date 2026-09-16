@@ -290,6 +290,36 @@ func (l *LlamaClient) PropsInfo(ctx context.Context, port int) (Props, error) {
 	return p, nil
 }
 
+// ChatTemplateCaps queries /props for the raw chat_template_caps object,
+// keyed by llama.cpp's own field names (e.g. "supports_reasoning_effort",
+// "supports_tool_calls") — deliberately an open map rather than a fixed
+// struct, since the field set is genuinely build-dependent (T1, per-request
+// thinking control). Non-boolean values are dropped rather than failing the
+// whole probe, so one unexpected field can't blind every other capability.
+// A separate call from PropsInfo/NCtx (same rationale as PropsInfo's own
+// doc comment: those callers never needed this, and this one is only
+// invoked once per successful load, not on any hot path).
+func (l *LlamaClient) ChatTemplateCaps(ctx context.Context, port int) (map[string]bool, error) {
+	raw, err := l.get(ctx, port, "/props")
+	if err != nil {
+		return nil, err
+	}
+	var parsed struct {
+		ChatTemplateCaps map[string]json.RawMessage `json:"chat_template_caps"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(parsed.ChatTemplateCaps))
+	for k, v := range parsed.ChatTemplateCaps {
+		var b bool
+		if json.Unmarshal(v, &b) == nil {
+			out[k] = b
+		}
+	}
+	return out, nil
+}
+
 // Healthy queries /health. llama.cpp returns {"status":"ok"}; vLLM returns
 // an empty body (any 200 = ready).
 func (l *LlamaClient) Healthy(ctx context.Context, port int) bool {

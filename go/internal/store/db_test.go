@@ -19,8 +19,8 @@ func TestMigrateFresh(t *testing.T) {
 	).Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 81 {
-		t.Fatalf("schema version = %d, want 81", version)
+	if version != 88 {
+		t.Fatalf("schema version = %d, want 88", version)
 	}
 
 	// Every Contract 3 table (0001) plus the Sprint 0 §0.11 polish tables
@@ -30,7 +30,9 @@ func TestMigrateFresh(t *testing.T) {
 		"users", "sessions", "api_keys", "slot_state", "sched_queue",
 		"reservations", "usage_events", "compressor_savings_totals",
 		"compressor_proxies", "router_providers", "mode_history",
-		"settings", "nodes", "audit_log",
+		"settings", "audit_log",
+		// nodes dropped in 0084 (PairNode deprecation — the Forge Node Agent's
+		// only table, never had a reader in v0.5).
 		// 0002_polish.sql (provider_models dropped in 0043, Phase 7 — dead table):
 		"fx_rates", "provider_state", "metric_samples",
 		// 0004_auth_v2.sql:

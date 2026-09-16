@@ -17,7 +17,7 @@ func TestTailscalePeers_RegisteredDeepOnly(t *testing.T) {
 }
 
 func TestTailscalePeers_NilSeam(t *testing.T) {
-	env := &CheckEnv{TailscaleWatchPeers: []string{"pairnode"}}
+	env := &CheckEnv{TailscaleWatchPeers: []string{"peer-a"}}
 	f := runTailscalePeers(context.Background(), env)
 	if f.Severity != SeverityInfo || f.Evidence["skipped"] == nil {
 		t.Errorf("f = %+v, want a skip finding", f)
@@ -36,7 +36,7 @@ func TestTailscalePeers_NoWatchList(t *testing.T) {
 
 func TestTailscalePeers_FetchFailure(t *testing.T) {
 	env := &CheckEnv{
-		TailscaleWatchPeers: []string{"pairnode"},
+		TailscaleWatchPeers: []string{"peer-a"},
 		TailscalePeers:      func(context.Context) ([]collector.Peer, bool) { return nil, false },
 	}
 	f := runTailscalePeers(context.Background(), env)
@@ -47,10 +47,10 @@ func TestTailscalePeers_FetchFailure(t *testing.T) {
 
 func TestTailscalePeers_AllOnline(t *testing.T) {
 	env := &CheckEnv{
-		TailscaleWatchPeers: []string{"pairnode", "core"},
+		TailscaleWatchPeers: []string{"peer-a", "core"},
 		TailscalePeers: func(context.Context) ([]collector.Peer, bool) {
 			return []collector.Peer{
-				{DNSName: "pairnode.example.ts.net.", Online: true},
+				{DNSName: "peer-a.example.ts.net.", Online: true},
 				{DNSName: "core.example.ts.net.", Online: true},
 				{DNSName: "examplehost.example.ts.net.", Online: false}, // unwatched, must not affect result
 			}, true
@@ -64,10 +64,10 @@ func TestTailscalePeers_AllOnline(t *testing.T) {
 
 func TestTailscalePeers_OneOffline(t *testing.T) {
 	env := &CheckEnv{
-		TailscaleWatchPeers: []string{"pairnode", "core"},
+		TailscaleWatchPeers: []string{"peer-a", "core"},
 		TailscalePeers: func(context.Context) ([]collector.Peer, bool) {
 			return []collector.Peer{
-				{DNSName: "pairnode.example.ts.net.", Online: false},
+				{DNSName: "peer-a.example.ts.net.", Online: false},
 				{DNSName: "core.example.ts.net.", Online: true},
 			}, true
 		},
@@ -88,7 +88,7 @@ func TestTailscalePeers_WatchedPeerNotAPeerAtAll(t *testing.T) {
 	env := &CheckEnv{
 		TailscaleWatchPeers: []string{"nonexistent-host"},
 		TailscalePeers: func(context.Context) ([]collector.Peer, bool) {
-			return []collector.Peer{{DNSName: "pairnode.example.ts.net.", Online: true}}, true
+			return []collector.Peer{{DNSName: "peer-a.example.ts.net.", Online: true}}, true
 		},
 	}
 	f := runTailscalePeers(context.Background(), env)

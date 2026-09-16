@@ -201,6 +201,70 @@ type Config struct {
 	// = use verbatim, even if that means "text only" despite a capable
 	// model (Sprint J1).
 	Modalities *[]string
+	// CapabilityTierID groups this config with others that may substitute for
+	// each other under capability-tier substitution (0 → NULL — no class, never
+	// substitutes or is substituted). See CapabilityTier's doc comment.
+	CapabilityTierID int64
+	// CapabilityRank orders configs within a CapabilityTier — LOWER is more capable.
+	// Equal ranks are freely interchangeable. Meaningless when CapabilityTierID
+	// is 0.
+	CapabilityRank int
+	// ChatTemplateCaps is the last llama.cpp /props chat_template_caps
+	// probe result for this config, captured automatically at the end of
+	// every successful load (T1, per-request thinking control — see
+	// engine.Manager.probeChatTemplateCaps). nil/empty = never probed.
+	// Keyed by llama.cpp's own field names (e.g.
+	// "supports_reasoning_effort", "supports_tool_calls") rather than a
+	// fixed struct: the field set is genuinely build-dependent, and a
+	// fixed struct would silently drop whatever a future llama.cpp build
+	// adds. Callers outside store should read EffectiveChatTemplateCaps,
+	// not this field directly.
+	ChatTemplateCaps map[string]bool
+	// ChatTemplateCapsProbedAt is when ChatTemplateCaps was last captured;
+	// the zero time means never probed.
+	ChatTemplateCapsProbedAt time.Time
+	// ChatTemplateCapsOverride is an operator-curated correction, merged
+	// over ChatTemplateCaps by EffectiveChatTemplateCaps for the cases the
+	// live probe gets wrong (a build misreports a capability, or one the
+	// probe can't observe at all). nil = no override for any key.
+	ChatTemplateCapsOverride map[string]bool
+	// ReasoningEffortDefault is the per-config default reasoning_effort
+	// level ("" | none | low | medium | high — T2, per-request thinking
+	// control) applied by the router's reasoning_effort translation layer
+	// (internal/router/reasoning.go) whenever a request sends none of its
+	// own. "" means no default — replaces the old launch-time
+	// --chat-template-kwargs/--reasoning-budget flags as the mechanism for
+	// a config's default thinking behavior.
+	ReasoningEffortDefault string
+}
+
+// EffectiveChatTemplateCaps merges ChatTemplateCapsOverride over
+// ChatTemplateCaps (override wins per key) — the value every caller
+// outside store should read rather than the two fields separately.
+func (c Config) EffectiveChatTemplateCaps() map[string]bool {
+	out := make(map[string]bool, len(c.ChatTemplateCaps)+len(c.ChatTemplateCapsOverride))
+	for k, v := range c.ChatTemplateCaps {
+		out[k] = v
+	}
+	for k, v := range c.ChatTemplateCapsOverride {
+		out[k] = v
+	}
+	return out
+}
+
+// CapabilityTier is an operator-curated group of configs considered
+// equivalent-or-rankable for capability-tier substitution (Sprint P1,
+// 2026-09-13) — a0 substituting an already-loaded model for a requested one
+// to avoid a load wait or to prefer a smarter resident model. Deliberately
+// curated rather than derived from `benchmarks` scores, following the same
+// pattern as `smith.brain_chain`; see 0082_perf_classes.sql for the full
+// rationale. Mode overrides the global `router.capability_substitution` setting for
+// every config in this class; "" (stored NULL) inherits the global setting.
+type CapabilityTier struct {
+	ID    int64
+	Name  string
+	Mode  string // "" | off | fallback_only | prefer_smarter
+	Notes string
 }
 
 // Slot is one of the fixed inference bays (A1-A4) a Config gets loaded onto
@@ -244,9 +308,9 @@ type Offering struct {
 	// ProviderID is the real FK (0042) — write this. ProviderName is a
 	// read-only join-derived projection populated by ListOfferings/
 	// GetOffering for display; ignored on write.
-	ProviderID   int64
-	ProviderName string
-	WireModel    string
+	ProviderID    int64
+	ProviderName  string
+	WireModel     string
 	PriceInPer1M  float64
 	PriceOutPer1M float64
 	Currency      string
@@ -382,6 +446,48 @@ type Catalog interface {
 	ConfigByName(ctx context.Context, name string) (Config, error)
 	ListConfigs(ctx context.Context) ([]Config, error)
 	ListConfigsForVariant(ctx context.Context, variantID int64) ([]Config, error)
+
+	// UpdateConfigChatTemplateCaps persists a fresh /props chat_template_caps
+	// probe (T1, per-request thinking control) — a narrow write touching
+	// only chat_template_caps + chat_template_caps_probed_at (set to now),
+	// deliberately separate from UpdateConfig so the engine's post-load
+	// probe can never race an operator's concurrent Settings edit into
+	// clobbering the rest of the row (see feedback memory on full-replace
+	// writes). ChatTemplateCapsOverride is untouched.
+	UpdateConfigChatTemplateCaps(ctx context.Context, id int64, caps map[string]bool) error
+
+	// CapabilityTier CRUD (capability-tier substitution, Sprint P1, 2026-09-13 — see
+	// CapabilityTier's doc comment).
+	CreateCapabilityTier(ctx context.Context, p CapabilityTier) (int64, error)
+	GetCapabilityTier(ctx context.Context, id int64) (CapabilityTier, error)
+	UpdateCapabilityTier(ctx context.Context, p CapabilityTier) error
+	DeleteCapabilityTier(ctx context.Context, id int64) error
+	CapabilityTierByName(ctx context.Context, name string) (CapabilityTier, error)
+	ListCapabilityTiers(ctx context.Context) ([]CapabilityTier, error)
+	ListConfigsForCapabilityTier(ctx context.Context, capabilityTierID int64) ([]Config, error)
+	// UpdateConfigCapabilityTier assigns (or clears, with capabilityTierID 0) a
+	// config's capability tier + rank without touching any other field —
+	// same rationale as UpdateConfigChatTemplateCaps just above: a
+	// full-replace UpdateConfig call risks clobbering the rest of the row.
+	UpdateConfigCapabilityTier(ctx context.Context, id, capabilityTierID, capabilityRank int64) error
+
+	// ModelAlias CRUD (per-request thinking control, Sprint T3, 2026-09-14
+	// — see ModelAlias's doc comment).
+	CreateModelAlias(ctx context.Context, a ModelAlias) (int64, error)
+	GetModelAlias(ctx context.Context, id int64) (ModelAlias, error)
+	UpdateModelAlias(ctx context.Context, a ModelAlias) error
+	DeleteModelAlias(ctx context.Context, id int64) error
+	ModelAliasByName(ctx context.Context, name string) (ModelAlias, error)
+	ListModelAliases(ctx context.Context) ([]ModelAlias, error)
+
+	// VirtualModel CRUD (2026-09-15 — see VirtualModel's doc comment).
+	CreateVirtualModel(ctx context.Context, m VirtualModel) (int64, error)
+	GetVirtualModel(ctx context.Context, id int64) (VirtualModel, error)
+	UpdateVirtualModel(ctx context.Context, m VirtualModel) error
+	DeleteVirtualModel(ctx context.Context, id int64) error
+	VirtualModelByName(ctx context.Context, name string) (VirtualModel, error)
+	ListVirtualModels(ctx context.Context) ([]VirtualModel, error)
+
 	CreateService(ctx context.Context, s Service) (int64, error)
 	GetService(ctx context.Context, id int64) (Service, error)
 	UpdateService(ctx context.Context, s Service) error
@@ -518,6 +624,45 @@ func parseNullJSONList(ns sql.NullString) *[]string {
 	}
 	out := parseJSONList(ns.String)
 	return &out
+}
+
+// jsonBoolMap marshals a map[string]bool to JSON for TEXT columns. Returns
+// "{}" for nil or empty so a NOT NULL column never holds a bare "".
+func jsonBoolMap(m map[string]bool) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+// parseBoolMap unmarshals a JSON TEXT column back to map[string]bool. An
+// empty or "{}" value yields a non-nil empty map.
+func parseBoolMap(raw string) map[string]bool {
+	out := map[string]bool{}
+	if raw == "" {
+		return out
+	}
+	_ = json.Unmarshal([]byte(raw), &out)
+	return out
+}
+
+// nullJSONBoolMap marshals a nullable map[string]bool to a sql.NullString
+// (Config.ChatTemplateCapsOverride: nil = "no override", distinct from an
+// explicit empty map — mirrors nullJSONList's nil-preserving convention).
+func nullJSONBoolMap(m map[string]bool) sql.NullString {
+	if m == nil {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: jsonBoolMap(m), Valid: true}
+}
+
+// parseNullJSONBoolMap is nullJSONBoolMap's inverse for scanning.
+func parseNullJSONBoolMap(ns sql.NullString) map[string]bool {
+	if !ns.Valid {
+		return nil
+	}
+	return parseBoolMap(ns.String)
 }
 
 // ── Identity & Derivation: implementation ────────────────────────────────────
@@ -1019,13 +1164,15 @@ func (v catalogView) CreateConfig(ctx context.Context, c Config) (int64, error) 
 	res, err := v.d.sql.ExecContext(ctx,
 		`INSERT INTO configs (name, variant_id, weight_artifact_id, engine_id,
 		   build_id, mmproj_artifact_id, n_ctx, parallel, extra_args, status,
-		   visibility, is_default, fingerprint, created_at, logo, logo_dark, modalities)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   visibility, is_default, fingerprint, created_at, logo, logo_dark, modalities,
+		   capability_tier_id, capability_rank, chat_template_caps_override, reasoning_effort_default)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.Name, c.VariantID, c.WeightArtifactID, c.EngineID,
 		nullInt64(c.BuildID), nullInt64(c.MMProjArtifactID),
 		c.NCtx, c.Parallel, jsonList(c.ExtraArgs), c.Status, c.Visibility,
 		boolInt(c.IsDefault), c.Fingerprint, unixOf(orNow(c.CreatedAt)), c.Logo, c.LogoDark,
-		nullJSONList(c.Modalities))
+		nullJSONList(c.Modalities), nullInt64(c.CapabilityTierID), c.CapabilityRank,
+		nullJSONBoolMap(c.ChatTemplateCapsOverride), c.ReasoningEffortDefault)
 	if err != nil {
 		return 0, fmt.Errorf("store: catalog.create_config: %w", err)
 	}
@@ -1037,7 +1184,10 @@ func (v catalogView) ListConfigs(ctx context.Context) ([]Config, error) {
 	rows, err := v.d.sql.QueryContext(ctx,
 		`SELECT id, name, variant_id, weight_artifact_id, engine_id, build_id,
 		   mmproj_artifact_id, n_ctx, parallel, extra_args, status, visibility,
-		   is_default, fingerprint, created_at, logo, logo_dark, modalities
+		   is_default, fingerprint, created_at, logo, logo_dark, modalities,
+		   capability_tier_id, capability_rank,
+		   chat_template_caps, chat_template_caps_probed_at, chat_template_caps_override,
+		   reasoning_effort_default
 		 FROM configs ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("store: catalog.list_configs: %w", err)
@@ -1046,14 +1196,16 @@ func (v catalogView) ListConfigs(ctx context.Context) ([]Config, error) {
 	out := []Config{}
 	for rows.Next() {
 		var c Config
-		var buildID, mmprojID sql.NullInt64
+		var buildID, mmprojID, capabilityTierID, capsProbedAt sql.NullInt64
 		var isDefault int64
 		var ea string
 		var createdAt int64
-		var mod sql.NullString
+		var mod, caps, capsOverride sql.NullString
 		if err := rows.Scan(&c.ID, &c.Name, &c.VariantID, &c.WeightArtifactID,
 			&c.EngineID, &buildID, &mmprojID, &c.NCtx, &c.Parallel, &ea,
-			&c.Status, &c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod); err != nil {
+			&c.Status, &c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod,
+			&capabilityTierID, &c.CapabilityRank, &caps, &capsProbedAt, &capsOverride,
+			&c.ReasoningEffortDefault); err != nil {
 			return nil, fmt.Errorf("store: catalog.list_configs: %w", err)
 		}
 		c.BuildID = intOf(buildID)
@@ -1062,6 +1214,10 @@ func (v catalogView) ListConfigs(ctx context.Context) ([]Config, error) {
 		c.IsDefault = isDefault != 0
 		c.CreatedAt = time.Unix(createdAt, 0).UTC()
 		c.Modalities = parseNullJSONList(mod)
+		c.CapabilityTierID = intOf(capabilityTierID)
+		c.ChatTemplateCaps = parseBoolMap(caps.String)
+		c.ChatTemplateCapsProbedAt = timeOf(capsProbedAt)
+		c.ChatTemplateCapsOverride = parseNullJSONBoolMap(capsOverride)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -1539,19 +1695,24 @@ func (v catalogView) ListFormats(ctx context.Context) ([]Format, error) {
 
 func (v catalogView) GetConfig(ctx context.Context, id int64) (Config, error) {
 	var c Config
-	var buildID, mmprojID sql.NullInt64
+	var buildID, mmprojID, capabilityTierID, capsProbedAt sql.NullInt64
 	var isDefault int64
 	var ea string
 	var createdAt int64
-	var mod sql.NullString
+	var mod, caps, capsOverride sql.NullString
 	err := v.d.sql.QueryRowContext(ctx,
 		`SELECT id, name, variant_id, weight_artifact_id, engine_id, build_id,
 		   mmproj_artifact_id, n_ctx, parallel, extra_args, status, visibility,
-		   is_default, fingerprint, created_at, logo, logo_dark, modalities
+		   is_default, fingerprint, created_at, logo, logo_dark, modalities,
+		   capability_tier_id, capability_rank,
+		   chat_template_caps, chat_template_caps_probed_at, chat_template_caps_override,
+		   reasoning_effort_default
 		 FROM configs WHERE id = ?`, id).
 		Scan(&c.ID, &c.Name, &c.VariantID, &c.WeightArtifactID, &c.EngineID,
 			&buildID, &mmprojID, &c.NCtx, &c.Parallel, &ea, &c.Status,
-			&c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod)
+			&c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod,
+			&capabilityTierID, &c.CapabilityRank, &caps, &capsProbedAt, &capsOverride,
+			&c.ReasoningEffortDefault)
 	if err == sql.ErrNoRows {
 		return Config{}, fmt.Errorf("%w: config %d", ErrNotFound, id)
 	}
@@ -1564,6 +1725,10 @@ func (v catalogView) GetConfig(ctx context.Context, id int64) (Config, error) {
 	c.IsDefault = isDefault != 0
 	c.CreatedAt = time.Unix(createdAt, 0).UTC()
 	c.Modalities = parseNullJSONList(mod)
+	c.CapabilityTierID = intOf(capabilityTierID)
+	c.ChatTemplateCaps = parseBoolMap(caps.String)
+	c.ChatTemplateCapsProbedAt = timeOf(capsProbedAt)
+	c.ChatTemplateCapsOverride = parseNullJSONBoolMap(capsOverride)
 	return c, nil
 }
 
@@ -1574,15 +1739,22 @@ func (v catalogView) UpdateConfig(ctx context.Context, c Config) error {
 	if c.Visibility == "" {
 		c.Visibility = "visible"
 	}
+	// Deliberately excludes chat_template_caps / chat_template_caps_probed_at
+	// — those are written only by UpdateConfigChatTemplateCaps, the engine's
+	// narrow post-load probe write, so a routine operator edit here can
+	// never clobber the last live probe result.
 	res, err := v.d.sql.ExecContext(ctx,
 		`UPDATE configs SET name=?, variant_id=?, weight_artifact_id=?, engine_id=?,
 		   build_id=?, mmproj_artifact_id=?, n_ctx=?, parallel=?, extra_args=?,
-		   status=?, visibility=?, is_default=?, fingerprint=?, logo=?, logo_dark=?, modalities=?
+		   status=?, visibility=?, is_default=?, fingerprint=?, logo=?, logo_dark=?, modalities=?,
+		   capability_tier_id=?, capability_rank=?, chat_template_caps_override=?, reasoning_effort_default=?
 		 WHERE id=?`,
 		c.Name, c.VariantID, c.WeightArtifactID, c.EngineID,
 		nullInt64(c.BuildID), nullInt64(c.MMProjArtifactID),
 		c.NCtx, c.Parallel, jsonList(c.ExtraArgs), c.Status, c.Visibility,
-		boolInt(c.IsDefault), c.Fingerprint, c.Logo, c.LogoDark, nullJSONList(c.Modalities), c.ID)
+		boolInt(c.IsDefault), c.Fingerprint, c.Logo, c.LogoDark, nullJSONList(c.Modalities),
+		nullInt64(c.CapabilityTierID), c.CapabilityRank, nullJSONBoolMap(c.ChatTemplateCapsOverride),
+		c.ReasoningEffortDefault, c.ID)
 	if err != nil {
 		return fmt.Errorf("store: catalog.update_config: %w", err)
 	}
@@ -1605,19 +1777,24 @@ func (v catalogView) DeleteConfig(ctx context.Context, id int64) error {
 
 func (v catalogView) ConfigByName(ctx context.Context, name string) (Config, error) {
 	var c Config
-	var buildID, mmprojID sql.NullInt64
+	var buildID, mmprojID, capabilityTierID, capsProbedAt sql.NullInt64
 	var isDefault int64
 	var ea string
 	var createdAt int64
-	var mod sql.NullString
+	var mod, caps, capsOverride sql.NullString
 	err := v.d.sql.QueryRowContext(ctx,
 		`SELECT id, name, variant_id, weight_artifact_id, engine_id, build_id,
 		   mmproj_artifact_id, n_ctx, parallel, extra_args, status, visibility,
-		   is_default, fingerprint, created_at, logo, logo_dark, modalities
+		   is_default, fingerprint, created_at, logo, logo_dark, modalities,
+		   capability_tier_id, capability_rank,
+		   chat_template_caps, chat_template_caps_probed_at, chat_template_caps_override,
+		   reasoning_effort_default
 		 FROM configs WHERE name = ?`, name).
 		Scan(&c.ID, &c.Name, &c.VariantID, &c.WeightArtifactID, &c.EngineID,
 			&buildID, &mmprojID, &c.NCtx, &c.Parallel, &ea, &c.Status,
-			&c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod)
+			&c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod,
+			&capabilityTierID, &c.CapabilityRank, &caps, &capsProbedAt, &capsOverride,
+			&c.ReasoningEffortDefault)
 	if err == sql.ErrNoRows {
 		return Config{}, fmt.Errorf("%w: config %q", ErrNotFound, name)
 	}
@@ -1630,6 +1807,10 @@ func (v catalogView) ConfigByName(ctx context.Context, name string) (Config, err
 	c.IsDefault = isDefault != 0
 	c.CreatedAt = time.Unix(createdAt, 0).UTC()
 	c.Modalities = parseNullJSONList(mod)
+	c.CapabilityTierID = intOf(capabilityTierID)
+	c.ChatTemplateCaps = parseBoolMap(caps.String)
+	c.ChatTemplateCapsProbedAt = timeOf(capsProbedAt)
+	c.ChatTemplateCapsOverride = parseNullJSONBoolMap(capsOverride)
 	return c, nil
 }
 
@@ -1637,7 +1818,10 @@ func (v catalogView) ListConfigsForVariant(ctx context.Context, variantID int64)
 	rows, err := v.d.sql.QueryContext(ctx,
 		`SELECT id, name, variant_id, weight_artifact_id, engine_id, build_id,
 		   mmproj_artifact_id, n_ctx, parallel, extra_args, status, visibility,
-		   is_default, fingerprint, created_at, logo, logo_dark, modalities
+		   is_default, fingerprint, created_at, logo, logo_dark, modalities,
+		   capability_tier_id, capability_rank,
+		   chat_template_caps, chat_template_caps_probed_at, chat_template_caps_override,
+		   reasoning_effort_default
 		 FROM configs WHERE variant_id = ? ORDER BY name`, variantID)
 	if err != nil {
 		return nil, fmt.Errorf("store: catalog.list_configs_for_variant: %w", err)
@@ -1646,14 +1830,16 @@ func (v catalogView) ListConfigsForVariant(ctx context.Context, variantID int64)
 	out := []Config{}
 	for rows.Next() {
 		var c Config
-		var buildID, mmprojID sql.NullInt64
+		var buildID, mmprojID, capabilityTierID, capsProbedAt sql.NullInt64
 		var isDefault int64
 		var ea string
 		var createdAt int64
-		var mod sql.NullString
+		var mod, caps, capsOverride sql.NullString
 		if err := rows.Scan(&c.ID, &c.Name, &c.VariantID, &c.WeightArtifactID,
 			&c.EngineID, &buildID, &mmprojID, &c.NCtx, &c.Parallel, &ea,
-			&c.Status, &c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod); err != nil {
+			&c.Status, &c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod,
+			&capabilityTierID, &c.CapabilityRank, &caps, &capsProbedAt, &capsOverride,
+			&c.ReasoningEffortDefault); err != nil {
 			return nil, fmt.Errorf("store: catalog.list_configs_for_variant: %w", err)
 		}
 		c.BuildID = intOf(buildID)
@@ -1662,7 +1848,427 @@ func (v catalogView) ListConfigsForVariant(ctx context.Context, variantID int64)
 		c.IsDefault = isDefault != 0
 		c.CreatedAt = time.Unix(createdAt, 0).UTC()
 		c.Modalities = parseNullJSONList(mod)
+		c.CapabilityTierID = intOf(capabilityTierID)
+		c.ChatTemplateCaps = parseBoolMap(caps.String)
+		c.ChatTemplateCapsProbedAt = timeOf(capsProbedAt)
+		c.ChatTemplateCapsOverride = parseNullJSONBoolMap(capsOverride)
 		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ListConfigsForCapabilityTier returns every config in a capability tier,
+// ordered most-capable-first (CapabilityRank ascending) — the substitution
+// preference order.
+func (v catalogView) ListConfigsForCapabilityTier(ctx context.Context, capabilityTierID int64) ([]Config, error) {
+	rows, err := v.d.sql.QueryContext(ctx,
+		`SELECT id, name, variant_id, weight_artifact_id, engine_id, build_id,
+		   mmproj_artifact_id, n_ctx, parallel, extra_args, status, visibility,
+		   is_default, fingerprint, created_at, logo, logo_dark, modalities,
+		   capability_tier_id, capability_rank,
+		   chat_template_caps, chat_template_caps_probed_at, chat_template_caps_override,
+		   reasoning_effort_default
+		 FROM configs WHERE capability_tier_id = ? ORDER BY capability_rank, name`, capabilityTierID)
+	if err != nil {
+		return nil, fmt.Errorf("store: catalog.list_configs_for_capability_tier: %w", err)
+	}
+	defer rows.Close()
+	out := []Config{}
+	for rows.Next() {
+		var c Config
+		var buildID, mmprojID, capabilityTierIDCol, capsProbedAt sql.NullInt64
+		var isDefault int64
+		var ea string
+		var createdAt int64
+		var mod, caps, capsOverride sql.NullString
+		if err := rows.Scan(&c.ID, &c.Name, &c.VariantID, &c.WeightArtifactID,
+			&c.EngineID, &buildID, &mmprojID, &c.NCtx, &c.Parallel, &ea,
+			&c.Status, &c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod,
+			&capabilityTierIDCol, &c.CapabilityRank, &caps, &capsProbedAt, &capsOverride,
+			&c.ReasoningEffortDefault); err != nil {
+			return nil, fmt.Errorf("store: catalog.list_configs_for_capability_tier: %w", err)
+		}
+		c.BuildID = intOf(buildID)
+		c.MMProjArtifactID = intOf(mmprojID)
+		c.ExtraArgs = parseJSONList(ea)
+		c.IsDefault = isDefault != 0
+		c.CreatedAt = time.Unix(createdAt, 0).UTC()
+		c.Modalities = parseNullJSONList(mod)
+		c.CapabilityTierID = intOf(capabilityTierIDCol)
+		c.ChatTemplateCaps = parseBoolMap(caps.String)
+		c.ChatTemplateCapsProbedAt = timeOf(capsProbedAt)
+		c.ChatTemplateCapsOverride = parseNullJSONBoolMap(capsOverride)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// UpdateConfigChatTemplateCaps persists a fresh /props probe — see the
+// Catalog interface doc comment for why this is separate from UpdateConfig.
+func (v catalogView) UpdateConfigChatTemplateCaps(ctx context.Context, id int64, caps map[string]bool) error {
+	res, err := v.d.sql.ExecContext(ctx,
+		`UPDATE configs SET chat_template_caps=?, chat_template_caps_probed_at=? WHERE id=?`,
+		jsonBoolMap(caps), unixOf(time.Now()), id)
+	if err != nil {
+		return fmt.Errorf("store: catalog.update_config_chat_template_caps: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: config %d", ErrNotFound, id)
+	}
+	return nil
+}
+
+// UpdateConfigCapabilityTier assigns a config's capability_tier_id/capability_rank in
+// isolation — see the interface doc comment for why this is separate from
+// UpdateConfig. capabilityTierID 0 clears the assignment (NULL — never
+// substitutes, never substituted for), matching CapabilityTierID's own zero-value
+// convention elsewhere in this file (intOf/nullInt64).
+func (v catalogView) UpdateConfigCapabilityTier(ctx context.Context, id, capabilityTierID, capabilityRank int64) error {
+	res, err := v.d.sql.ExecContext(ctx,
+		`UPDATE configs SET capability_tier_id=?, capability_rank=? WHERE id=?`,
+		nullInt64(capabilityTierID), capabilityRank, id)
+	if err != nil {
+		return fmt.Errorf("store: catalog.update_config_capability_tier: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: config %d", ErrNotFound, id)
+	}
+	return nil
+}
+
+// ── CapabilityTier CRUD (Sprint P1, 2026-09-13) ──────────────────────────────────
+// Mirrors the Genealogy CRUD pattern exactly — CapabilityTier is a small
+// vocabulary table one level up from Config.
+
+func (v catalogView) CreateCapabilityTier(ctx context.Context, p CapabilityTier) (int64, error) {
+	res, err := v.d.sql.ExecContext(ctx,
+		`INSERT INTO capability_tiers (name, mode, notes) VALUES (?, ?, ?)`,
+		p.Name, nullStr(p.Mode), p.Notes)
+	if err != nil {
+		return 0, fmt.Errorf("store: catalog.create_capability_tier: %w", err)
+	}
+	id, _ := res.LastInsertId()
+	return id, nil
+}
+
+func (v catalogView) GetCapabilityTier(ctx context.Context, id int64) (CapabilityTier, error) {
+	var p CapabilityTier
+	var mode sql.NullString
+	err := v.d.sql.QueryRowContext(ctx,
+		`SELECT id, name, mode, notes FROM capability_tiers WHERE id = ?`, id).
+		Scan(&p.ID, &p.Name, &mode, &p.Notes)
+	if err == sql.ErrNoRows {
+		return CapabilityTier{}, fmt.Errorf("%w: capability_tier %d", ErrNotFound, id)
+	}
+	if err != nil {
+		return CapabilityTier{}, fmt.Errorf("store: catalog.get_capability_tier: %w", err)
+	}
+	p.Mode = mode.String
+	return p, nil
+}
+
+func (v catalogView) UpdateCapabilityTier(ctx context.Context, p CapabilityTier) error {
+	res, err := v.d.sql.ExecContext(ctx,
+		`UPDATE capability_tiers SET name = ?, mode = ?, notes = ? WHERE id = ?`,
+		p.Name, nullStr(p.Mode), p.Notes, p.ID)
+	if err != nil {
+		return fmt.Errorf("store: catalog.update_capability_tier: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: capability_tier %d", ErrNotFound, p.ID)
+	}
+	return nil
+}
+
+// DeleteCapabilityTier removes a capability tier. Configs referencing it fall
+// back to no class (ON DELETE SET NULL) — i.e. they stop participating in
+// substitution — rather than being deleted themselves.
+func (v catalogView) DeleteCapabilityTier(ctx context.Context, id int64) error {
+	res, err := v.d.sql.ExecContext(ctx, `DELETE FROM capability_tiers WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("store: catalog.delete_capability_tier: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: capability_tier %d", ErrNotFound, id)
+	}
+	return nil
+}
+
+func (v catalogView) CapabilityTierByName(ctx context.Context, name string) (CapabilityTier, error) {
+	var p CapabilityTier
+	var mode sql.NullString
+	err := v.d.sql.QueryRowContext(ctx,
+		`SELECT id, name, mode, notes FROM capability_tiers WHERE name = ?`, name).
+		Scan(&p.ID, &p.Name, &mode, &p.Notes)
+	if err == sql.ErrNoRows {
+		return CapabilityTier{}, fmt.Errorf("%w: capability_tier %q", ErrNotFound, name)
+	}
+	if err != nil {
+		return CapabilityTier{}, fmt.Errorf("store: catalog.capability_tier_by_name: %w", err)
+	}
+	p.Mode = mode.String
+	return p, nil
+}
+
+func (v catalogView) ListCapabilityTiers(ctx context.Context) ([]CapabilityTier, error) {
+	rows, err := v.d.sql.QueryContext(ctx, `SELECT id, name, mode, notes FROM capability_tiers ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("store: catalog.list_capability_tiers: %w", err)
+	}
+	defer rows.Close()
+	out := []CapabilityTier{}
+	for rows.Next() {
+		var p CapabilityTier
+		var mode sql.NullString
+		if err := rows.Scan(&p.ID, &p.Name, &mode, &p.Notes); err != nil {
+			return nil, fmt.Errorf("store: catalog.list_capability_tiers: %w", err)
+		}
+		p.Mode = mode.String
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ── ModelAlias CRUD (per-request thinking control, Sprint T3, 2026-09-14) ──
+// See 0086_model_aliases.sql for the full rationale.
+
+// ModelAlias is a wire-visible model name that resolves to a real Config
+// plus request fields FORCED onto every request routed through this name —
+// see 0086_model_aliases.sql's doc comment for why this is distinct from
+// Config.ReasoningEffortDefault (which only applies when the client sends
+// nothing; an alias's RequestDefaults always win, even over a client-sent
+// value).
+type ModelAlias struct {
+	ID       int64
+	Name     string
+	ConfigID int64
+	// RequestDefaults is merged onto (overwriting) every request body
+	// routed through this alias — e.g. {"reasoning_effort": "none"} for a
+	// consumer that cannot send that field itself. Never nil in a value
+	// read from the store (an empty alias still has an empty, non-nil map).
+	RequestDefaults map[string]any
+	Visibility      string // visible | hidden
+}
+
+func jsonMap(m map[string]any) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+func parseJSONMap(raw string) map[string]any {
+	out := map[string]any{}
+	if raw == "" {
+		return out
+	}
+	_ = json.Unmarshal([]byte(raw), &out)
+	return out
+}
+
+func (v catalogView) CreateModelAlias(ctx context.Context, a ModelAlias) (int64, error) {
+	if a.Visibility == "" {
+		a.Visibility = "visible"
+	}
+	res, err := v.d.sql.ExecContext(ctx,
+		`INSERT INTO model_aliases (name, config_id, request_defaults, visibility) VALUES (?, ?, ?, ?)`,
+		a.Name, a.ConfigID, jsonMap(a.RequestDefaults), a.Visibility)
+	if err != nil {
+		return 0, fmt.Errorf("store: catalog.create_model_alias: %w", err)
+	}
+	id, _ := res.LastInsertId()
+	return id, nil
+}
+
+func (v catalogView) GetModelAlias(ctx context.Context, id int64) (ModelAlias, error) {
+	var a ModelAlias
+	var defaults string
+	err := v.d.sql.QueryRowContext(ctx,
+		`SELECT id, name, config_id, request_defaults, visibility FROM model_aliases WHERE id = ?`, id).
+		Scan(&a.ID, &a.Name, &a.ConfigID, &defaults, &a.Visibility)
+	if err == sql.ErrNoRows {
+		return ModelAlias{}, fmt.Errorf("%w: model_alias %d", ErrNotFound, id)
+	}
+	if err != nil {
+		return ModelAlias{}, fmt.Errorf("store: catalog.get_model_alias: %w", err)
+	}
+	a.RequestDefaults = parseJSONMap(defaults)
+	return a, nil
+}
+
+func (v catalogView) UpdateModelAlias(ctx context.Context, a ModelAlias) error {
+	if a.Visibility == "" {
+		a.Visibility = "visible"
+	}
+	res, err := v.d.sql.ExecContext(ctx,
+		`UPDATE model_aliases SET name=?, config_id=?, request_defaults=?, visibility=? WHERE id=?`,
+		a.Name, a.ConfigID, jsonMap(a.RequestDefaults), a.Visibility, a.ID)
+	if err != nil {
+		return fmt.Errorf("store: catalog.update_model_alias: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: model_alias %d", ErrNotFound, a.ID)
+	}
+	return nil
+}
+
+func (v catalogView) DeleteModelAlias(ctx context.Context, id int64) error {
+	res, err := v.d.sql.ExecContext(ctx, `DELETE FROM model_aliases WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("store: catalog.delete_model_alias: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: model_alias %d", ErrNotFound, id)
+	}
+	return nil
+}
+
+func (v catalogView) ModelAliasByName(ctx context.Context, name string) (ModelAlias, error) {
+	var a ModelAlias
+	var defaults string
+	err := v.d.sql.QueryRowContext(ctx,
+		`SELECT id, name, config_id, request_defaults, visibility FROM model_aliases WHERE name = ?`, name).
+		Scan(&a.ID, &a.Name, &a.ConfigID, &defaults, &a.Visibility)
+	if err == sql.ErrNoRows {
+		return ModelAlias{}, fmt.Errorf("%w: model_alias %q", ErrNotFound, name)
+	}
+	if err != nil {
+		return ModelAlias{}, fmt.Errorf("store: catalog.model_alias_by_name: %w", err)
+	}
+	a.RequestDefaults = parseJSONMap(defaults)
+	return a, nil
+}
+
+func (v catalogView) ListModelAliases(ctx context.Context) ([]ModelAlias, error) {
+	rows, err := v.d.sql.QueryContext(ctx,
+		`SELECT id, name, config_id, request_defaults, visibility FROM model_aliases ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("store: catalog.list_model_aliases: %w", err)
+	}
+	defer rows.Close()
+	out := []ModelAlias{}
+	for rows.Next() {
+		var a ModelAlias
+		var defaults string
+		if err := rows.Scan(&a.ID, &a.Name, &a.ConfigID, &defaults, &a.Visibility); err != nil {
+			return nil, fmt.Errorf("store: catalog.list_model_aliases: %w", err)
+		}
+		a.RequestDefaults = parseJSONMap(defaults)
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// ── VirtualModel CRUD (2026-09-15) ──────────────────────────────────────
+// See 0088_virtual_models.sql for the full rationale.
+
+// VirtualModel is a wire-visible model name that resolves to a real Config
+// dynamically at request time — "give me whatever's smart" or "give me
+// whatever's fast" — rather than a fixed config_id the way ModelAlias
+// works. Kind "capability_tier" ranks by CapabilityTierID's curated
+// members; kind "throughput" ranks by real measured decode_tps across
+// every visible config and ignores capability tiers entirely (see the
+// migration's doc comment for why these are deliberately different axes).
+// CapabilityTierID is 0 (unset) for a throughput virtual model.
+type VirtualModel struct {
+	ID               int64
+	Name             string
+	Kind             string // capability_tier | throughput
+	CapabilityTierID int64
+	Visibility       string // visible | hidden
+	Notes            string
+}
+
+func (v catalogView) CreateVirtualModel(ctx context.Context, m VirtualModel) (int64, error) {
+	if m.Visibility == "" {
+		m.Visibility = "visible"
+	}
+	res, err := v.d.sql.ExecContext(ctx,
+		`INSERT INTO virtual_models (name, kind, capability_tier_id, visibility, notes) VALUES (?, ?, ?, ?, ?)`,
+		m.Name, m.Kind, nullInt64(m.CapabilityTierID), m.Visibility, m.Notes)
+	if err != nil {
+		return 0, fmt.Errorf("store: catalog.create_virtual_model: %w", err)
+	}
+	id, _ := res.LastInsertId()
+	return id, nil
+}
+
+func (v catalogView) GetVirtualModel(ctx context.Context, id int64) (VirtualModel, error) {
+	var m VirtualModel
+	var tierID sql.NullInt64
+	err := v.d.sql.QueryRowContext(ctx,
+		`SELECT id, name, kind, capability_tier_id, visibility, notes FROM virtual_models WHERE id = ?`, id).
+		Scan(&m.ID, &m.Name, &m.Kind, &tierID, &m.Visibility, &m.Notes)
+	if err == sql.ErrNoRows {
+		return VirtualModel{}, fmt.Errorf("%w: virtual_model %d", ErrNotFound, id)
+	}
+	if err != nil {
+		return VirtualModel{}, fmt.Errorf("store: catalog.get_virtual_model: %w", err)
+	}
+	m.CapabilityTierID = intOf(tierID)
+	return m, nil
+}
+
+func (v catalogView) UpdateVirtualModel(ctx context.Context, m VirtualModel) error {
+	if m.Visibility == "" {
+		m.Visibility = "visible"
+	}
+	res, err := v.d.sql.ExecContext(ctx,
+		`UPDATE virtual_models SET name=?, kind=?, capability_tier_id=?, visibility=?, notes=? WHERE id=?`,
+		m.Name, m.Kind, nullInt64(m.CapabilityTierID), m.Visibility, m.Notes, m.ID)
+	if err != nil {
+		return fmt.Errorf("store: catalog.update_virtual_model: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: virtual_model %d", ErrNotFound, m.ID)
+	}
+	return nil
+}
+
+func (v catalogView) DeleteVirtualModel(ctx context.Context, id int64) error {
+	res, err := v.d.sql.ExecContext(ctx, `DELETE FROM virtual_models WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("store: catalog.delete_virtual_model: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: virtual_model %d", ErrNotFound, id)
+	}
+	return nil
+}
+
+func (v catalogView) VirtualModelByName(ctx context.Context, name string) (VirtualModel, error) {
+	var m VirtualModel
+	var tierID sql.NullInt64
+	err := v.d.sql.QueryRowContext(ctx,
+		`SELECT id, name, kind, capability_tier_id, visibility, notes FROM virtual_models WHERE name = ?`, name).
+		Scan(&m.ID, &m.Name, &m.Kind, &tierID, &m.Visibility, &m.Notes)
+	if err == sql.ErrNoRows {
+		return VirtualModel{}, fmt.Errorf("%w: virtual_model %q", ErrNotFound, name)
+	}
+	if err != nil {
+		return VirtualModel{}, fmt.Errorf("store: catalog.virtual_model_by_name: %w", err)
+	}
+	m.CapabilityTierID = intOf(tierID)
+	return m, nil
+}
+
+func (v catalogView) ListVirtualModels(ctx context.Context) ([]VirtualModel, error) {
+	rows, err := v.d.sql.QueryContext(ctx,
+		`SELECT id, name, kind, capability_tier_id, visibility, notes FROM virtual_models ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("store: catalog.list_virtual_models: %w", err)
+	}
+	defer rows.Close()
+	out := []VirtualModel{}
+	for rows.Next() {
+		var m VirtualModel
+		var tierID sql.NullInt64
+		if err := rows.Scan(&m.ID, &m.Name, &m.Kind, &tierID, &m.Visibility, &m.Notes); err != nil {
+			return nil, fmt.Errorf("store: catalog.list_virtual_models: %w", err)
+		}
+		m.CapabilityTierID = intOf(tierID)
+		out = append(out, m)
 	}
 	return out, rows.Err()
 }

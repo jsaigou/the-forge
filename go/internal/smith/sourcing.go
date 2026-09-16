@@ -53,8 +53,15 @@ var ErrCatalogChangeUnwired = errors.New("smith: catalog not wired")
 // Model/Variant/Artifact/Config sequencing this comment used to flag as
 // follow-up work now exists, but as its own atomic store method
 // (store.Catalog.RegisterDownloadedModel) rather than through this seam;
-// see internal/hfdownload/registrar.go. KindCatalogChange actions are this
-// function's only remaining caller (execute.go's dispatchCatalogChange).
+// see internal/hfdownload/registrar.go.
+//
+// Sprint "capability tier curation" (2026-09-14, docs/v5-smith.md §capability-tier
+// curation) added two more tables: "capability_tier" (create|update against
+// store.CapabilityTier) and "config_capability" (update only — a config's
+// capability_tier_id/capability_rank in isolation, via UpdateConfigCapabilityTier, never a
+// full store.Config replace — see that method's own doc comment for why).
+// KindCatalogChange actions are this function's only remaining caller
+// (execute.go's dispatchCatalogChange).
 func (s *Smith) applyCatalogChange(ctx context.Context, d catalogChangeDetail) error {
 	if s.d.Catalog == nil {
 		return ErrCatalogChangeUnwired
@@ -82,9 +89,56 @@ func (s *Smith) applyCatalogChange(ctx context.Context, d catalogChangeDetail) e
 		default:
 			return fmt.Errorf("smith: catalog_change op %q not supported (create|update)", d.Op)
 		}
+	case "capability_tier":
+		var p store.CapabilityTier
+		if err := json.Unmarshal(d.Row, &p); err != nil {
+			return fmt.Errorf("smith: catalog_change capability_tier row: %w", err)
+		}
+		switch d.Op {
+		case "create":
+			if _, err := s.d.Catalog.CreateCapabilityTier(ctx, p); err != nil {
+				return fmt.Errorf("smith: catalog_change create capability_tier: %w", err)
+			}
+			return nil
+		case "update":
+			if p.ID == 0 {
+				return errors.New("smith: catalog_change update capability_tier requires a row id")
+			}
+			if err := s.d.Catalog.UpdateCapabilityTier(ctx, p); err != nil {
+				return fmt.Errorf("smith: catalog_change update capability_tier %d: %w", p.ID, err)
+			}
+			return nil
+		default:
+			return fmt.Errorf("smith: catalog_change op %q not supported (create|update)", d.Op)
+		}
+	case "config_capability":
+		var c configCapabilityRow
+		if err := json.Unmarshal(d.Row, &c); err != nil {
+			return fmt.Errorf("smith: catalog_change config_capability row: %w", err)
+		}
+		if d.Op != "update" {
+			return fmt.Errorf("smith: catalog_change op %q not supported for config_capability (update only)", d.Op)
+		}
+		if c.ConfigID == 0 {
+			return errors.New("smith: catalog_change update config_capability requires a config_id")
+		}
+		if err := s.d.Catalog.UpdateConfigCapabilityTier(ctx, c.ConfigID, c.CapabilityTierID, c.CapabilityRank); err != nil {
+			return fmt.Errorf("smith: catalog_change update config_capability %d: %w", c.ConfigID, err)
+		}
+		return nil
 	default:
-		return fmt.Errorf("smith: catalog_change execution not yet implemented for table %q (artifact only)", d.Table)
+		return fmt.Errorf("smith: catalog_change execution not yet implemented for table %q (artifact|capability_tier|config_capability)", d.Table)
 	}
+}
+
+// configCapabilityRow is the "config_capability" catalog_change Row shape — deliberately
+// just the three fields being assigned, not a full store.Config, so this
+// write path can never clobber an unrelated field (same rationale as
+// UpdateConfigCapabilityTier's own doc comment).
+type configCapabilityRow struct {
+	ConfigID         int64 `json:"config_id"`
+	CapabilityTierID int64 `json:"capability_tier_id"`
+	CapabilityRank   int64 `json:"capability_rank"`
 }
 
 // sourcingFetchTimeout bounds the two HF API calls Evaluate makes.

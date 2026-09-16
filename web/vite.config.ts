@@ -13,6 +13,16 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Manual registration (src/components/PWAUpdateBanner.tsx, via
+      // virtual:pwa-register/react) instead of the auto-injected bare
+      // <script> — the default script just calls
+      // navigator.serviceWorker.register() with no update-detection glue at
+      // all, so an already-open tab never learns a new version exists and
+      // silently keeps running stale JS forever (found live, 2026-09-14:
+      // three deploys in one session were invisible in an open tab even
+      // though the server was serving the new build correctly). The manual
+      // hook polls for updates and surfaces a "reload now" prompt instead.
+      injectRegister: false,
       manifest: {
         name: 'The Forge — Orchestration Console',
         short_name: 'Forge',
@@ -39,6 +49,17 @@ export default defineConfig({
             handler: 'NetworkOnly',
           },
         ],
+        // clientsClaim (found live, 2026-09-14, chasing the same stale-tab
+        // bug the injectRegister fix above targets): a new SW calling
+        // self.skipWaiting() becomes "activated" but does NOT take control
+        // of already-open tabs without this — navigator.serviceWorker.
+        // controller keeps pointing at the OLD worker, so controllerchange
+        // never fires and PWAUpdateBanner's "reload now" click silently did
+        // nothing. Confirmed by hand: sent {type:'SKIP_WAITING'} directly to
+        // a waiting worker with clientsClaim absent — no controllerchange
+        // within 3s. registerType:'autoUpdate' does NOT imply this; it's a
+        // separate opt-in.
+        clientsClaim: true,
       },
     }),
   ],

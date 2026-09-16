@@ -24,6 +24,14 @@ type SlotProbe struct {
 	Healthy   bool
 	NCtx      int
 	ModelPath string
+	// SupportsTools is the live slot's own self-reported tool-calling
+	// capability (/props' chat_template_caps.supports_tool_calls, falling
+	// back to supports_tools — builds vary which key they emit), captured
+	// on the same /props fetch as NCtx/ModelPath at zero extra round-trip
+	// cost. Ground-truth for capability-tier substitution's tools gate
+	// (capability_substitution.go) — no catalog column claims this today, since it's
+	// a build/template property, not a stored fact.
+	SupportsTools bool
 }
 
 // SlotCatalog answers health/busy/wire-model questions about forge-local
@@ -123,8 +131,8 @@ func (c *ttlCatalog) probeSlot(port int) SlotProbe {
 	if !c.slotHealthy(port) {
 		return SlotProbe{}
 	}
-	nCtx, modelPath := c.slotProps(port)
-	return SlotProbe{Healthy: true, NCtx: nCtx, ModelPath: modelPath}
+	nCtx, modelPath, supportsTools := c.slotProps(port)
+	return SlotProbe{Healthy: true, NCtx: nCtx, ModelPath: modelPath, SupportsTools: supportsTools}
 }
 
 // slotHealthy returns true if /health responds with {"status": "ok"} (or
@@ -142,12 +150,13 @@ func (c *ttlCatalog) slotHealthy(port int) bool {
 	return status.Status == "" || status.Status == "ok"
 }
 
-// slotProps reads /props for n_ctx + model_path. Best-effort: /health
-// already confirmed the slot is up; /props failure leaves them zero/empty.
-func (c *ttlCatalog) slotProps(port int) (nCtx int, modelPath string) {
+// slotProps reads /props for n_ctx + model_path + chat_template_caps.
+// Best-effort: /health already confirmed the slot is up; /props failure
+// leaves everything zero/empty/false.
+func (c *ttlCatalog) slotProps(port int) (nCtx int, modelPath string, supportsTools bool) {
 	raw, err := c.getRaw(port, "/props", propsTimeout)
 	if err != nil {
-		return 0, ""
+		return 0, "", false
 	}
 	var top struct {
 		NCtx       int    `json:"n_ctx"`
@@ -155,6 +164,10 @@ func (c *ttlCatalog) slotProps(port int) (nCtx int, modelPath string) {
 		DefaultGen struct {
 			NCtx int `json:"n_ctx"`
 		} `json:"default_generation_settings"`
+		ChatTemplateCaps struct {
+			SupportsToolCalls bool `json:"supports_tool_calls"`
+			SupportsTools     bool `json:"supports_tools"`
+		} `json:"chat_template_caps"`
 	}
 	_ = json.Unmarshal(raw, &top)
 	if top.NCtx == 0 {
@@ -162,7 +175,8 @@ func (c *ttlCatalog) slotProps(port int) (nCtx int, modelPath string) {
 	} else {
 		nCtx = top.NCtx
 	}
-	return nCtx, top.ModelPath
+	supportsTools = top.ChatTemplateCaps.SupportsToolCalls || top.ChatTemplateCaps.SupportsTools
+	return nCtx, top.ModelPath, supportsTools
 }
 
 // probeBusy returns true if llama-server is currently processing a request.
@@ -557,6 +571,87 @@ func BuildModelsResponse(ctx context.Context, storeCat store.Catalog, providers 
 				modelID := modSnap.modelIDByVar[c.VariantID]
 				nameCandidates = append(nameCandidates, modSnap.modelByID[modelID].Name)
 				seen[c.Name] = true
+			}
+		}
+	}
+
+	// Store-backed model aliases (T3, per-request thinking control,
+	// 2026-09-14): a wire-visible name that resolves to a real Config plus
+	// forced request defaults (catalogChain in routing.go). Listed under
+	// its own name — separately from that Config's own entry above — so an
+	// existing consumer that can only be pointed at one fixed model string
+	// (e.g. podcast_creator, which cannot send custom chat_template_kwargs
+	// per request) keeps working unchanged after its dedicated duplicate
+	// Config is retired in favor of an alias. ContextLength/Architecture
+	// mirror the target Config's own, since that's what actually serves
+	// the request.
+	if storeCat != nil {
+		aliases, err := storeCat.ListModelAliases(ctx)
+		if err == nil {
+			now := time.Now().Unix()
+			for _, a := range aliases {
+				if a.Visibility == "hidden" {
+					continue
+				}
+				if seen[a.Name] {
+					continue
+				}
+				target, terr := storeCat.GetConfig(ctx, a.ConfigID)
+				if terr != nil || target.Visibility == "hidden" {
+					continue
+				}
+				entry := ModelEntry{
+					ID:      a.Name,
+					Object:  "model",
+					Created: now,
+					OwnedBy: "forge-local",
+				}
+				if target.NCtx > 0 {
+					entry.ContextLength = target.NCtx
+				}
+				entry.Architecture = architectureFor(modSnap.configModalities(target))
+				data = append(data, entry)
+				modelID := modSnap.modelIDByVar[target.VariantID]
+				nameCandidates = append(nameCandidates, modSnap.modelByID[modelID].Name)
+				seen[a.Name] = true
+			}
+		}
+	}
+
+	// Virtual models (2026-09-15): a wire-visible name that resolves to a
+	// real Config dynamically per-request (virtual_models.go), not a fixed
+	// one — so unlike a ModelAlias above, there is no single target Config
+	// to read ContextLength/Architecture from here. Listed with best-effort
+	// metadata from a capability_tier virtual model's own rank-1 member
+	// (a real, stable fact about that tier); a throughput virtual model's
+	// target can be any profiled config, so it's listed with no context
+	// length claim rather than guessing one that may not hold for whichever
+	// config actually serves a given request.
+	if storeCat != nil {
+		vms, err := storeCat.ListVirtualModels(ctx)
+		if err == nil {
+			now := time.Now().Unix()
+			for _, vm := range vms {
+				if vm.Visibility == "hidden" || seen[vm.Name] {
+					continue
+				}
+				entry := ModelEntry{ID: vm.Name, Object: "model", Created: now, OwnedBy: "forge-local"}
+				if vm.Kind == "capability_tier" && vm.CapabilityTierID != 0 {
+					if members, merr := storeCat.ListConfigsForCapabilityTier(ctx, vm.CapabilityTierID); merr == nil && len(members) > 0 {
+						top := members[0]
+						for _, m := range members[1:] {
+							if m.CapabilityRank < top.CapabilityRank {
+								top = m
+							}
+						}
+						if top.NCtx > 0 {
+							entry.ContextLength = top.NCtx
+						}
+						entry.Architecture = architectureFor(modSnap.configModalities(top))
+					}
+				}
+				data = append(data, entry)
+				seen[vm.Name] = true
 			}
 		}
 	}

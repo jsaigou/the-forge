@@ -90,6 +90,9 @@ func (m *Manager) SwitchMode(ctx context.Context, modeName string) Result {
 			}
 			actual := m.verifiedContext(ctx, port, svc)
 			m.recordHistory(modeName, svc, actualPtr(actual), m.d.Now().Sub(start), false)
+			if actual > 0 && svc.Backend != "vllm" {
+				m.probeChatTemplateCaps(ctx, port, mode.ConfigID)
+			}
 			m.setSlotMode(svc.PortRole, modeName)
 			if verifiedCtx == 0 {
 				verifiedCtx = actual
@@ -235,6 +238,9 @@ func (m *Manager) Load(ctx context.Context, modeName, slot string) Result {
 
 	actual := m.verifiedContext(ctx, port, svc)
 	m.recordHistory(modeName, svc, actualPtr(actual), m.d.Now().Sub(start), false)
+	if actual > 0 && svc.Backend != "vllm" {
+		m.probeChatTemplateCaps(ctx, port, mode.ConfigID)
+	}
 	m.setSlotMode(slot, modeName)
 	m.notifySwitchComplete()
 	m.logf("slot %s active with %s", slot, modeName)
@@ -440,6 +446,26 @@ func (m *Manager) verifiedContext(ctx context.Context, port int, svc config.Serv
 	}
 	_, actual := m.verifyModelContext(ctx, port, svc.Context)
 	return actual
+}
+
+// probeChatTemplateCaps captures /props' chat_template_caps for a freshly
+// loaded config (T1, per-request thinking control) and persists it via the
+// store — best-effort, mirroring recordHistory: a probe or store failure
+// here must never fail the load itself, only logged. configID 0 means the
+// mode has no catalog config (file-config mode, or a service mode) and is
+// silently skipped, same as WeightEstimateBytes/ProfileBytes elsewhere.
+func (m *Manager) probeChatTemplateCaps(ctx context.Context, port int, configID int64) {
+	if configID == 0 || port == 0 || m.d.UpdateChatTemplateCaps == nil {
+		return
+	}
+	caps, err := m.llama.ChatTemplateCaps(ctx, port)
+	if err != nil {
+		m.logf("WARN: chat_template_caps probe failed on port %d: %v", port, err)
+		return
+	}
+	if err := m.d.UpdateChatTemplateCaps(ctx, configID, caps); err != nil {
+		m.logf("WARN: chat_template_caps persist failed for config %d: %v", configID, err)
+	}
 }
 
 // verifyModelContext queries /props and warns when llama.cpp silently

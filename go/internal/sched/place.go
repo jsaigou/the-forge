@@ -21,6 +21,7 @@ package sched
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -35,12 +36,12 @@ import (
 // larger than the whole box) from "retry as conditions change" (idle
 // thresholds crossing, reservations opening, busy slots draining).
 type placement struct {
-	slot      string
-	evict     []string
+	slot       string
+	evict      []string
 	evictComfy bool
-	message   string
-	terminal  bool
-	reason    RefusalReason
+	message    string
+	terminal   bool
+	reason     RefusalReason
 }
 
 // RefusalReason classifies why place() could not place a model right now,
@@ -68,6 +69,67 @@ const (
 	ReasonNoEvictableReserved    RefusalReason = "no_evictable_slot_reserved"
 	ReasonNoEvictableIdle        RefusalReason = "no_evictable_slot_idle"
 )
+
+// Placement is the exported mirror of placement — a non-mutating feasibility
+// verdict for a model, safe to expose to callers outside this package
+// (performance-level routing, Sprint P2, 2026-09-13; a future scheduler
+// status surface; tests). Slot == "" means nothing is placeable right now.
+// Terminal distinguishes "never, without something changing" (unknown mode,
+// model larger than the whole box) from "retry as conditions change" (idle
+// thresholds crossing, reservations opening, busy slots draining) — see
+// RefusalReason's doc comment for the full code set.
+type Placement struct {
+	Slot       string
+	Evict      []string
+	EvictComfy bool
+	Message    string
+	Terminal   bool
+	Reason     RefusalReason
+}
+
+func (p placement) export() Placement {
+	return Placement{
+		Slot: p.slot, Evict: p.evict, EvictComfy: p.evictComfy,
+		Message: p.message, Terminal: p.terminal, Reason: p.reason,
+	}
+}
+
+// CouldLoad answers "would EnsureLoaded(model) succeed right now, and what
+// would it have to evict?" without loading, unloading, or queuing anything
+// — a thin, lock-scoped wrapper around the same place() that attemptLoad
+// uses to actually place a model (core.go), so a feasibility check can
+// never drift from the real placement logic (do not write a second fit
+// estimator here or anywhere else — see place()'s own doc comment on why
+// FitPlan is always live-probed).
+//
+// horizon is the structural-vs-transient boundary, exactly as in
+// EnsureLoaded: a candidate that could become eligible within horizon
+// (e.g. an idle countdown almost done) comes back non-terminal even though
+// it can't be placed this instant. Callers deciding "is this genuinely
+// infeasible, or just not yet" should pass the same budget they'd give
+// EnsureLoaded (e.g. the router's ensure_loaded_timeout_s) and read
+// Terminal, not Slot=="" alone — a non-terminal empty-slot result means
+// "wait", not "never".
+//
+// The one thing this cannot see: the engine's same-weights sibling guard
+// (a second config over the identical GGUF, refused inside Engine.Load
+// itself, below place()) — a caller relying on CouldLoad's answer to skip
+// straight to a substitute should still handle a subsequent EnsureLoaded
+// failure as a second, independent signal, not assume CouldLoad was wrong.
+func (c *Core) CouldLoad(ctx context.Context, model string, horizon time.Duration) (Placement, error) {
+	if model == "" {
+		return Placement{}, errors.New("sched: model is required")
+	}
+	c.mu.Lock()
+	cfg := c.cfg
+	reservations := append([]Reservation(nil), c.reservations...)
+	c.mu.Unlock()
+
+	if slot := c.findLoaded(model, ""); slot != "" {
+		return Placement{Slot: slot}, nil
+	}
+	return c.place(ctx, model, "", cfg, reservations, horizon).export(), nil
+}
 
 // occupancy is the engine's authoritative in-memory slot reconciliation,
 // fed the latest collector snapshot's unit states (one probe per cycle —

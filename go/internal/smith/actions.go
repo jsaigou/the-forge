@@ -23,9 +23,12 @@ const (
 	KindUnloadSlot       = "unload_slot"
 	KindRestartForgeUnit = "restart_forge_unit"
 	KindSettingsChange   = "settings_change"
-	// KindCatalogChange executes a create/update against store.Catalog
-	// (P6 FR4 — model sourcing proposals). Risk is always RiskLow: it only
-	// ever adds or edits catalog rows, never deletes.
+	// KindCatalogChange executes a create/update against store.Catalog.
+	// Introduced for P6 FR4 (model sourcing proposals, artifact rows only)
+	// and extended for capability-tier curation (2026-09-14, capability_tier +
+	// config_capability rows) — see sourcing.go's applyCatalogChange for the full
+	// supported-table list. Risk is always RiskLow: it only ever adds or
+	// edits catalog rows, never deletes.
 	KindCatalogChange = "catalog_change"
 	// KindDeleteFiles executes real file deletion, confined to an
 	// allowlisted set of roots (P6 FR7 — ComfyUI model pruning). Risk is
@@ -314,7 +317,23 @@ func (s *Smith) CreateAction(ctx context.Context, d ActionDraft) (*Action, error
 		return nil, fmt.Errorf("smith: unknown action kind %q", d.Kind)
 	}
 	if d.Kind == KindCatalogChange {
-		return nil, errors.New("smith: catalog_change actions are not yet available")
+		cd, err := parseDetail[catalogChangeDetail](d.Detail)
+		if err != nil {
+			return nil, err
+		}
+		switch cd.Table {
+		case "artifact", "capability_tier", "config_capability":
+		default:
+			return nil, fmt.Errorf("smith: catalog_change table %q not supported (artifact|capability_tier|config_capability)", cd.Table)
+		}
+		switch cd.Op {
+		case "create", "update":
+		default:
+			return nil, fmt.Errorf("smith: catalog_change op %q not supported (create|update)", cd.Op)
+		}
+		if len(cd.Row) == 0 || string(cd.Row) == "null" {
+			return nil, errors.New("smith: catalog_change requires a non-empty row")
+		}
 	}
 	if d.Kind == KindProcedure {
 		pd, err := parseDetail[procedureDetail](d.Detail)

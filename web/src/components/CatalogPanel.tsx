@@ -8,7 +8,10 @@
 // merged-config seam picks up changes immediately.
 
 import { useEffect, useState } from "react";
+import type { CapsOverride } from "./ChatTemplateCapsOverrideEditor";
+import { ChatTemplateCapsOverrideEditor } from "./ChatTemplateCapsOverrideEditor";
 import { countryFlag, formatCurrencyPrecise, formatGB } from "../lib/format";
+import type { ConfigWritePayload } from "../lib/configPayload";
 import { familyInheritedIcon, modelInheritedIcon } from "../lib/iconInheritance";
 import { preferredOfferingIds } from "../lib/offeringPreference";
 import { providerIconSlug } from "../lib/providerPresets";
@@ -30,6 +33,7 @@ import {
   useCatalogModels,
   useCatalogNotes,
   useCatalogOfferings,
+  useCatalogCapabilityTiers,
   useCatalogQuantizations,
   useCatalogServices,
   useCatalogVariants,
@@ -71,6 +75,7 @@ import type {
   CatalogModel,
   CatalogModelFile,
   CatalogOffering,
+  CatalogCapabilityTier,
   CatalogService,
   CatalogVariant,
 } from "../lib/types";
@@ -176,6 +181,7 @@ function ConfigsSection({ canAdmin }: { canAdmin: boolean }) {
   const models = useCatalogModels();
   const families = useCatalogFamilies();
   const genealogies = useCatalogGenealogies();
+  const capabilityTiers = useCatalogCapabilityTiers();
   const modelFiles = useModelFiles();
   const create = useCreateCatalogConfig();
   const update = useUpdateCatalogConfig();
@@ -194,10 +200,11 @@ function ConfigsSection({ canAdmin }: { canAdmin: boolean }) {
   const modelList = models.data ?? [];
   const familyList = families.data ?? [];
   const genealogyList = genealogies.data ?? [];
+  const capabilityTierList = capabilityTiers.data ?? [];
 
   const editingConfig = editing === "new" ? null : list.find((c) => c.id === editing);
 
-  function handleSubmit(draft: Partial<CatalogConfig>, id?: number) {
+  function handleSubmit(draft: ConfigWritePayload, id?: number) {
     clearError();
     // Sprint K: delayed close so SaveButton's flash has time to paint.
     if (id) {
@@ -220,11 +227,19 @@ function ConfigsSection({ canAdmin }: { canAdmin: boolean }) {
   // UpdateConfig requires every field, so round-trip the existing config
   // (the same pattern ConfigEditView's submit() already follows for
   // parallel/fingerprint) with only logo/logo_dark changed.
+  // id/chat_template_caps/chat_template_caps_probed_at are stripped before
+  // the body — configBody's decode rejects unknown fields
+  // (DisallowUnknownFields), so a body carrying any of the three 400s as
+  // "unknown field" (found live 2026-09-14; see lib/configPayload.ts's doc
+  // comment for why the type alone can't catch this at a spread site; same
+  // id fix as Routing.tsx's submitPatch).
   function handleIconSelect(id: number, c: CatalogConfig, slug: string, dark = false) {
-    update.mutate({ id, c: dark ? { ...c, logo_dark: slug } : { ...c, logo: slug } }, { onError: showError });
+    const { id: _cid, chat_template_caps: _caps, chat_template_caps_probed_at: _probedAt, ...rest } = c;
+    update.mutate({ id, c: dark ? { ...rest, logo_dark: slug } : { ...rest, logo: slug } }, { onError: showError });
   }
   function handleIconClear(id: number, c: CatalogConfig, dark = false) {
-    update.mutate({ id, c: dark ? { ...c, logo_dark: "" } : { ...c, logo: "" } }, { onError: showError });
+    const { id: _cid, chat_template_caps: _caps, chat_template_caps_probed_at: _probedAt, ...rest } = c;
+    update.mutate({ id, c: dark ? { ...rest, logo_dark: "" } : { ...rest, logo: "" } }, { onError: showError });
   }
 
   // Sprint K: the confirm() gate moved into ConfirmButton itself (arm →
@@ -256,6 +271,7 @@ function ConfigsSection({ canAdmin }: { canAdmin: boolean }) {
           models={modelList}
           families={familyList}
           genealogies={genealogyList}
+          capabilityTiers={capabilityTierList}
           modelFiles={modelFiles.data ?? []}
           showFiles={showFiles}
           onToggleFiles={() => setShowFiles(!showFiles)}
@@ -333,6 +349,7 @@ export function ConfigForm({
   models,
   families,
   genealogies,
+  capabilityTiers,
   modelFiles,
   showFiles,
   onToggleFiles,
@@ -352,10 +369,13 @@ export function ConfigForm({
   models: CatalogModel[];
   families: CatalogFamily[];
   genealogies: CatalogGenealogy[];
+  // Capability-tier substitution (Sprint P1, 2026-09-13) — see
+  // CatalogCapabilityTier's doc comment.
+  capabilityTiers: CatalogCapabilityTier[];
   modelFiles: CatalogModelFile[];
   showFiles: boolean;
   onToggleFiles: () => void;
-  onSubmit: (draft: Partial<CatalogConfig>, id?: number) => void;
+  onSubmit: (draft: ConfigWritePayload, id?: number) => void;
   onCancel: () => void;
   pending: boolean;
   isError?: boolean;
@@ -387,6 +407,10 @@ export function ConfigForm({
   );
   const [overrideVision, setOverrideVision] = useState(existing?.modalities?.includes("vision") ?? false);
   const [overrideAudio, setOverrideAudio] = useState(existing?.modalities?.includes("audio") ?? false);
+  const [capabilityTierId, setCapabilityTierId] = useState(existing?.capability_tier_id ?? 0);
+  const [capabilityRank, setCapabilityRank] = useState(existing?.capability_rank ?? 0);
+  const [reasoningEffortDefault, setReasoningEffortDefault] = useState(existing?.reasoning_effort_default ?? "");
+  const [capsOverride, setCapsOverride] = useState<CapsOverride>(existing?.chat_template_caps_override);
 
   const variant = variants.find((v) => v.id === variantId);
   const weightArtifacts = artifacts.filter((a) => a.variant_id === variantId && a.artifact_type === "weight");
@@ -399,31 +423,34 @@ export function ConfigForm({
   const derivedModalities = mmprojArtifactId === 0 ? ["text"] : (model?.modalities ?? ["text"]);
 
   function submit() {
-    onSubmit(
-      {
-        name,
-        variant_id: variantId,
-        weight_artifact_id: weightArtifactId,
-        engine_id: engineId,
-        build_id: buildId,
-        mmproj_artifact_id: mmprojArtifactId,
-        n_ctx: nCtx,
-        parallel,
-        extra_args: extraArgsFromText(extraArgsText),
-        status,
-        visibility,
-        is_default: isDefault,
-        // Carried through unchanged — same reasoning as ModelForm's submit()
-        // above (Sprint I; UpdateConfig is full-replace).
-        logo: existing?.logo ?? "",
-        logo_dark: existing?.logo_dark ?? "",
-        modalities:
-          modalitiesMode === "override"
-            ? ["text", ...(overrideVision ? ["vision"] : []), ...(overrideAudio ? ["audio"] : [])]
-            : undefined,
-      },
-      existing?.id,
-    );
+    const payload: ConfigWritePayload = {
+      name,
+      variant_id: variantId,
+      weight_artifact_id: weightArtifactId,
+      engine_id: engineId,
+      build_id: buildId,
+      mmproj_artifact_id: mmprojArtifactId,
+      n_ctx: nCtx,
+      parallel,
+      extra_args: extraArgsFromText(extraArgsText),
+      status,
+      visibility,
+      is_default: isDefault,
+      // Carried through unchanged — same reasoning as ModelForm's submit()
+      // above (Sprint I; UpdateConfig is full-replace).
+      fingerprint: existing?.fingerprint ?? "",
+      logo: existing?.logo ?? "",
+      logo_dark: existing?.logo_dark ?? "",
+      modalities:
+        modalitiesMode === "override"
+          ? ["text", ...(overrideVision ? ["vision"] : []), ...(overrideAudio ? ["audio"] : [])]
+          : undefined,
+      capability_tier_id: capabilityTierId,
+      capability_rank: capabilityRank,
+      chat_template_caps_override: capsOverride,
+      reasoning_effort_default: reasoningEffortDefault,
+    };
+    onSubmit(payload, existing?.id);
   }
 
   return (
@@ -509,6 +536,38 @@ export function ConfigForm({
           )}
         </div>
       </div>
+      <label className="form-row">Capability tier
+        <select value={capabilityTierId} onChange={(e) => setCapabilityTierId(Number(e.target.value))}>
+          <option value={0}>— none (never substitutes) —</option>
+          {capabilityTiers.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </label>
+      {capabilityTierId !== 0 && (
+        <label className="form-row">Rank within class
+          <input type="number" value={capabilityRank} onChange={(e) => setCapabilityRank(Number(e.target.value))} />
+          <span style={{ color: "var(--text-mute)", fontSize: 11 }}>Lower = more capable. Equal ranks are freely interchangeable.</span>
+        </label>
+      )}
+      <label className="form-row">Default reasoning effort
+        <select value={reasoningEffortDefault} onChange={(e) => setReasoningEffortDefault(e.target.value as typeof reasoningEffortDefault)}>
+          <option value="">— none (build default) —</option>
+          <option value="none">none (thinking off)</option>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+        </select>
+        <span style={{ color: "var(--text-mute)", fontSize: 11 }}>
+          Applied when a request doesn't send its own reasoning_effort. Translated per this
+          config's own build — see Chat template overrides below.
+        </span>
+      </label>
+      <ChatTemplateCapsOverrideEditor
+        probed={existing?.chat_template_caps ?? {}}
+        override={capsOverride}
+        onChange={setCapsOverride}
+      />
       <label className="form-row">Context (n_ctx)
         <input type="number" min={0} value={nCtx} placeholder="131072" onChange={(e) => setNCtx(Number(e.target.value))} />
       </label>
@@ -763,6 +822,13 @@ function OfferingsSection({ canAdmin }: { canAdmin: boolean }) {
 // (nullable FK); the icon on each level is what the config/model/family
 // chain inherits from when its own logo is unset (registry.resolveLogo).
 
+// 2026-09-14: Capability tiers and Model aliases moved out to the Model
+// Behavior group under Settings → Routing & Compressor
+// (settings/panels/Behavior.tsx, rendered from Routing.tsx) — neither is
+// really a taxonomy concept (this section is genuinely just lineage/icon
+// inheritance), and both had grown into their own operator-facing feature
+// alongside that same day's reasoning_effort/chat_template_caps_override
+// work, which had no home here at all. See Behavior.tsx's header comment.
 function TaxonomySection({ canAdmin }: { canAdmin: boolean }) {
   return (
     <>

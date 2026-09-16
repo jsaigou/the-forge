@@ -159,6 +159,30 @@ type ConfigCard struct {
 
 	// Derived (live: GGUF metadata, file size, history, reliability).
 	Derived Derived `json:"derived"`
+
+	// CapabilityTier groups this config with others that may substitute for each
+	// other under capability-tier substitution (Sprint P1, 2026-09-13) — see
+	// store.CapabilityTier's doc comment. CapabilityTierID 0 / CapabilityTierName "" means
+	// this config is in no class and never substitutes or is substituted
+	// for. CapabilityRank is meaningless when CapabilityTierID is 0.
+	CapabilityTierID   int64  `json:"capability_tier_id"`
+	CapabilityTierName string `json:"capability_tier_name"`
+	CapabilityRank     int    `json:"capability_rank"`
+
+	// ChatTemplateCaps is the effective (probe-merged-with-curated-override)
+	// /props chat_template_caps for this config — see
+	// store.Config.EffectiveChatTemplateCaps. Empty when the config has
+	// never loaded successfully and carries no override. Keyed by
+	// llama.cpp's own field names (e.g. "supports_reasoning_effort").
+	ChatTemplateCaps map[string]bool `json:"chat_template_caps"`
+	// ChatTemplateCapsProbedAt is when ChatTemplateCaps was last captured
+	// from a live load, unix seconds; 0 = never probed (only a curated
+	// override, or nothing at all).
+	ChatTemplateCapsProbedAt float64 `json:"chat_template_caps_probed_at"`
+	// ReasoningEffortDefault (T2, per-request thinking control) is this
+	// config's curated default reasoning_effort level; "" = unset. See
+	// store.Config.ReasoningEffortDefault.
+	ReasoningEffortDefault string `json:"reasoning_effort_default"`
 }
 
 // Card is a model-scoped card: one card per Model. Backs
@@ -313,14 +337,15 @@ type catalogRegistry struct {
 
 // catalogSnapshot holds all catalog tables loaded at once, plus lookup maps.
 type catalogSnapshot struct {
-	configs     []store.Config
-	variants    []store.Variant
-	models      []store.Model
-	families    []store.Family
-	genealogies []store.Genealogy
-	artifacts   []store.Artifact
-	benchmarks  []store.Benchmark
-	builds      []store.Build
+	configs         []store.Config
+	variants        []store.Variant
+	models          []store.Model
+	families        []store.Family
+	genealogies     []store.Genealogy
+	artifacts       []store.Artifact
+	benchmarks      []store.Benchmark
+	builds          []store.Build
+	capabilityTiers []store.CapabilityTier
 
 	variantByID         map[int64]store.Variant
 	modelByID           map[int64]store.Model
@@ -335,6 +360,7 @@ type catalogSnapshot struct {
 	variantsByModel     map[int64][]store.Variant
 	weightArtifactByCfg map[int64]store.Artifact
 	buildByID           map[int64]store.Build
+	capabilityTierByID  map[int64]store.CapabilityTier
 }
 
 // genealogyName returns the genealogy name for a family (product/QA
@@ -499,6 +525,7 @@ func (r *catalogRegistry) loadSnapshot(ctx context.Context) *catalogSnapshot {
 		variantsByModel:     map[int64][]store.Variant{},
 		weightArtifactByCfg: map[int64]store.Artifact{},
 		buildByID:           map[int64]store.Build{},
+		capabilityTierByID:  map[int64]store.CapabilityTier{},
 	}
 
 	if r.cat == nil {
@@ -546,6 +573,11 @@ func (r *catalogRegistry) loadSnapshot(ctx context.Context) *catalogSnapshot {
 		log.Printf("registry: list builds: %v", err)
 		return s
 	}
+	s.capabilityTiers, err = r.cat.ListCapabilityTiers(ctx)
+	if err != nil {
+		log.Printf("registry: list capability tiers: %v", err)
+		return s
+	}
 
 	// Build lookup maps.
 	for _, v := range s.variants {
@@ -581,15 +613,18 @@ func (r *catalogRegistry) loadSnapshot(ctx context.Context) *catalogSnapshot {
 			s.benchByModel[b.SubjectID] = append(s.benchByModel[b.SubjectID], b)
 		case "config":
 			s.benchByConfig[b.SubjectID] = append(s.benchByConfig[b.SubjectID], b)
-		// "offering" is deliberately left unindexed — no card of any kind
-		// (model, config, or otherwise) reads offering-scoped benchmarks,
-		// and none will after Phase 8 either (pre-release feedback sprint).
-		// Do not "complete" this switch; see BenchmarkForm's legacy-offering
-		// handling on the FE for where those rows are actually surfaced.
+			// "offering" is deliberately left unindexed — no card of any kind
+			// (model, config, or otherwise) reads offering-scoped benchmarks,
+			// and none will after Phase 8 either (pre-release feedback sprint).
+			// Do not "complete" this switch; see BenchmarkForm's legacy-offering
+			// handling on the FE for where those rows are actually surfaced.
 		}
 	}
 	for _, b := range s.builds {
 		s.buildByID[b.ID] = b
+	}
+	for _, p := range s.capabilityTiers {
+		s.capabilityTierByID[p.ID] = p
 	}
 
 	r.mu.Lock()
@@ -629,7 +664,8 @@ func (r *catalogRegistry) Cards(ctx context.Context, since time.Time) ([]ConfigC
 		logo, logoDark := snap.resolveLogos(c.Logo, c.LogoDark, mdl, fam)
 		modalities, modalitiesUnavailable := snap.resolveModalities(c, mdl)
 
-		card := r.assembleConfigCard(c, vt, mdl, fam, build, modelPath, mmprojPath, benches, usageByMode, logo, logoDark, modalities, modalitiesUnavailable, ctx)
+		capabilityTierName := snap.capabilityTierByID[c.CapabilityTierID].Name
+		card := r.assembleConfigCard(c, vt, mdl, fam, build, modelPath, mmprojPath, benches, usageByMode, logo, logoDark, modalities, modalitiesUnavailable, capabilityTierName, ctx)
 		cards = append(cards, card)
 	}
 
@@ -645,7 +681,7 @@ func (r *catalogRegistry) assembleConfigCard(
 	c store.Config, vt store.Variant, mdl store.Model, fam store.Family, build store.Build,
 	modelPath, mmprojPath string, benches []store.Benchmark,
 	usageByMode map[string]Reliability, logo, logoDark string,
-	modalities []string, modalitiesUnavailable []ModalityGap, ctx context.Context,
+	modalities []string, modalitiesUnavailable []ModalityGap, capabilityTierName string, ctx context.Context,
 ) ConfigCard {
 	cfg := r.safeConfig()
 	modelPath = resolveArtifactPath(modelPath, cfg)
@@ -693,6 +729,11 @@ func (r *catalogRegistry) assembleConfigCard(
 		isAbliterated = &b
 	}
 
+	var capsProbedAt float64
+	if !c.ChatTemplateCapsProbedAt.IsZero() {
+		capsProbedAt = unixSeconds(c.ChatTemplateCapsProbedAt)
+	}
+
 	return ConfigCard{
 		ID:         c.ID,
 		Name:       c.Name,
@@ -728,6 +769,16 @@ func (r *catalogRegistry) assembleConfigCard(
 		},
 
 		Performance: perf,
+
+		CapabilityTierID:   c.CapabilityTierID,
+		CapabilityTierName: capabilityTierName,
+		CapabilityRank:     c.CapabilityRank,
+
+		// EffectiveChatTemplateCaps always returns a non-nil map (Contract 1
+		// §3), so no orEmpty wrapper is needed here.
+		ChatTemplateCaps:         c.EffectiveChatTemplateCaps(),
+		ChatTemplateCapsProbedAt: capsProbedAt,
+		ReasoningEffortDefault:   c.ReasoningEffortDefault,
 
 		Derived: Derived{
 			Arch:           archPtr,

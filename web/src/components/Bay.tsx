@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatGB, formatIdle } from "../lib/format";
-import { useUnloadSlot } from "../lib/queries";
+import { useCatalogModelAliases, useUnloadSlot } from "../lib/queries";
 import { creatorIconSlug } from "../lib/creatorIcon";
 import { useSession } from "../lib/session";
 import type { ConfigCard, Reservation, SchedulerStatus, Status } from "../lib/types";
@@ -70,6 +70,14 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
   const unloading = status.slot_unloading[slotKey];
   const modeInfo = mode ? status.modes_available[mode] : undefined;
   const card = mode ? configCards?.find((c) => c.name === mode) : undefined;
+  // T3 follow-up (2026-09-14, operator feedback): the slot's loaded name is
+  // always the real config (see routing.go's catalogChain — an alias
+  // resolves to its target before scheduling), so a caller requesting this
+  // model by an alias would otherwise never see that reflected here. Show
+  // it explicitly rather than leave the loaded name looking like the only
+  // way to reach this slot.
+  const { data: modelAliases } = useCatalogModelAliases();
+  const aliasedAs = card ? (modelAliases ?? []).filter((a) => a.config_id === card.id) : [];
   const idleS = schedulerStatus?.idle_seconds[slotKey];
   const res = activeOrNextReservation(reservations, slotKey);
   const nowS = useNowSeconds((unloading?.in_progress ?? false) || idleS != null);
@@ -204,6 +212,15 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
         </span>
         <CopyButton text={mode ?? ""} title="Copy config name" sm />
       </div>
+      {/* Operator feedback (2026-09-14): an "aka" chip requiring a hover to
+          learn anything failed "clear and easy to understand" — this says
+          the real name in plain text, always visible, no interaction
+          required. */}
+      {aliasedAs.length > 0 && (
+        <div style={{ fontSize: 10, color: "var(--text)", marginTop: -2 }}>
+          Alias: {aliasedAs.map((a) => a.name).join(", ")}
+        </div>
+      )}
       <div className="state" style={{ color: "var(--ok)", display: "flex", alignItems: "center", gap: 8 }}>
         {active && consumer && consumer === "SMITH" ? (
           <span style={{ fontWeight: 700, letterSpacing: ".08em" }}>SMITH</span>

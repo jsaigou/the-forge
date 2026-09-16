@@ -51,6 +51,37 @@ type routingPreviewResponse struct {
 	ProviderFailover bool                      `json:"provider_failover"`
 	Candidates       []routingPreviewCandidate `json:"candidates"`
 	Note             string                    `json:"note,omitempty"`
+	// CapabilitySubstitution (capability-tier substitution, Sprint P4, 2026-09-13) is
+	// present only for a "local" config that belongs to a CapabilityTier — a
+	// report of the ingredients a substitution decision would use, never a
+	// prediction of the decision itself. Reproducing that decision here
+	// would mean a second, independently-drifting copy of
+	// router.decideSubstitute's logic (the exact anti-pattern
+	// sched.CouldLoad's own doc comment warns against); this endpoint
+	// intentionally stops at "what's true right now" and leaves "what
+	// would happen" to the real request path. In particular this omits
+	// the tools-capability live-probe (SlotProbe.SupportsTools) — that
+	// signal lives in the router process's own ttlCatalog, unavailable
+	// here — so a tools-bearing request may behave more conservatively
+	// live than this preview's member list alone would suggest.
+	CapabilitySubstitution *routingPreviewCapabilitySubstitution `json:"capability_substitution,omitempty"`
+}
+
+type routingPreviewCapabilitySubstitution struct {
+	// Policy is the effective policy this config's class would use right
+	// now: the class's own Mode override if set, else the global
+	// router.capability_substitution setting.
+	Policy         string                     `json:"policy"`
+	CapabilityTier string                     `json:"capability_tier"`
+	Rank           int                        `json:"rank"`
+	Members        []routingPreviewPerfMember `json:"members"`
+}
+
+type routingPreviewPerfMember struct {
+	Name   string `json:"name"`
+	Rank   int    `json:"rank"`
+	Loaded bool   `json:"loaded"`
+	Slot   string `json:"slot,omitempty"`
 }
 
 func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +97,8 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	failover := s.resolvedRouterSettings(ctx).ProviderFailover
+	settings := s.resolvedRouterSettings(ctx)
+	failover := settings.ProviderFailover
 
 	// Local path (mirrors catalogChain's existence+visibility check only —
 	// never EnsureLoaded).
@@ -83,7 +115,8 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, routingPreviewResponse{
 			Model: model, Kind: "local", HealthConsulted: false,
 			ProviderFailover: failover, Candidates: []routingPreviewCandidate{},
-			Note: "local catalog config — served on-demand by the scheduler on any free slot, not through a provider offering chain",
+			Note:                   "local catalog config — served on-demand by the scheduler on any free slot, not through a provider offering chain",
+			CapabilitySubstitution: s.capability_substitutionReport(ctx, cfg, settings.CapabilitySubstitution),
 		})
 		return
 	}
@@ -207,6 +240,45 @@ func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 		Model: model, Kind: "remote", HealthConsulted: false,
 		ProviderFailover: failover, Candidates: candidates,
 	})
+}
+
+// capability_substitutionReport builds the ingredients-only report described on
+// routingPreviewResponse.CapabilitySubstitution's doc comment — nil when cfg isn't
+// in a CapabilityTier at all, so the field cleanly omits from the response
+// (omitempty) for the common case.
+func (s *Server) capability_substitutionReport(ctx context.Context, cfg store.Config, globalPolicy string) *routingPreviewCapabilitySubstitution {
+	if cfg.CapabilityTierID == 0 || s.deps.Catalog == nil {
+		return nil
+	}
+	pc, err := s.deps.Catalog.GetCapabilityTier(ctx, cfg.CapabilityTierID)
+	if err != nil {
+		return nil
+	}
+	policy := globalPolicy
+	if pc.Mode != "" {
+		policy = pc.Mode
+	}
+	peers, err := s.deps.Catalog.ListConfigsForCapabilityTier(ctx, cfg.CapabilityTierID)
+	if err != nil {
+		peers = nil
+	}
+	loadedSlot := map[string]string{}
+	if s.deps.Sched != nil {
+		for slot, mode := range s.deps.Sched.Status().Slots {
+			if mode != "" {
+				loadedSlot[mode] = slot
+			}
+		}
+	}
+	members := make([]routingPreviewPerfMember, 0, len(peers))
+	for _, p := range peers {
+		if p.ID == cfg.ID {
+			continue
+		}
+		slot, loaded := loadedSlot[p.Name]
+		members = append(members, routingPreviewPerfMember{Name: p.Name, Rank: p.CapabilityRank, Loaded: loaded, Slot: slot})
+	}
+	return &routingPreviewCapabilitySubstitution{Policy: policy, CapabilityTier: pc.Name, Rank: cfg.CapabilityRank, Members: members}
 }
 
 func splitCSV(v string) []string {

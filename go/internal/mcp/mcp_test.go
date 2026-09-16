@@ -106,6 +106,10 @@ func (f *fakeSched) LoadStatus(model string) sched.LoadState {
 	return sched.LoadState{Model: model, State: "idle"}
 }
 
+func (f *fakeSched) CouldLoad(context.Context, string, time.Duration) (sched.Placement, error) {
+	return sched.Placement{Slot: "fake"}, nil
+}
+
 // fakeEngine is a controllable CanFitter.
 type fakeEngine struct {
 	fit engine.CanFit

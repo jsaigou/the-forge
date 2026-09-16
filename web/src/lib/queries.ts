@@ -1,18 +1,21 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api, setCsrfToken } from "./api";
+import type { ConfigWritePayload } from "./configPayload";
 import type {
   APIKeyCreateRequest,
   AuthConfigPutRequest,
   AuthPolicyPutRequest,
   BillingSettings,
   CatalogBenchmark,
-  CatalogConfig,
   CatalogFamily,
   CatalogGenealogy,
   CatalogModel,
+  CatalogModelAlias,
+  CatalogVirtualModel,
   CatalogNote,
   CatalogOffering,
+  CatalogCapabilityTier,
   CatalogService,
   CatalogVariant,
   CostSettingsUpdate,
@@ -129,6 +132,9 @@ export const qk = {
   catalogBuilds: ["catalog", "builds"] as const,
   catalogQuantizations: ["catalog", "quantizations"] as const,
   catalogFormats: ["catalog", "formats"] as const,
+  catalogCapabilityTiers: ["catalog", "capability-tiers"] as const,
+  catalogModelAliases: ["catalog", "model-aliases"] as const,
+  catalogVirtualModels: ["catalog", "virtual-models"] as const,
   modelFiles: ["models", "files"] as const,
   favorites: (subjectType = "config") => ["favorites", subjectType] as const,
   // ── Smith (Wave 2 — docs/v5-smith-wave2.md §3) ──
@@ -1220,6 +1226,15 @@ export function useCatalogQuantizations() {
 export function useCatalogFormats() {
   return useQuery({ queryKey: qk.catalogFormats, queryFn: api.catalogFormats, staleTime: SETTINGS_STALE_MS });
 }
+export function useCatalogCapabilityTiers() {
+  return useQuery({ queryKey: qk.catalogCapabilityTiers, queryFn: api.catalogCapabilityTiers, staleTime: SETTINGS_STALE_MS });
+}
+export function useCatalogModelAliases() {
+  return useQuery({ queryKey: qk.catalogModelAliases, queryFn: api.catalogModelAliases, staleTime: SETTINGS_STALE_MS });
+}
+export function useCatalogVirtualModels() {
+  return useQuery({ queryKey: qk.catalogVirtualModels, queryFn: api.catalogVirtualModels, staleTime: SETTINGS_STALE_MS });
+}
 export function useModelFiles() {
   return useQuery({ queryKey: qk.modelFiles, queryFn: api.modelFiles });
 }
@@ -1270,6 +1285,82 @@ export function useUploadGenealogyIcon() {
   const { invalidateAll } = useCatalogMutations();
   return useMutation({
     mutationFn: ({ id, file, dark }: { id: number; file: File; dark?: boolean }) => api.uploadGenealogyIcon(id, file, dark),
+    onSuccess: invalidateAll,
+  });
+}
+
+// CapabilityTier CRUD (capability-tier substitution, Sprint P1, 2026-09-13) —
+// mirrors useCreateCatalogGenealogy/Update/Delete exactly (no icon upload:
+// capability tiers are an operator-only routing label, not a browsable entity).
+export function useCreateCatalogCapabilityTier() {
+  const { invalidateAll } = useCatalogMutations();
+  return useMutation({
+    mutationFn: (p: Partial<CatalogCapabilityTier>) => api.createCatalogCapabilityTier(p),
+    onSuccess: invalidateAll,
+  });
+}
+export function useUpdateCatalogCapabilityTier() {
+  const { invalidateAll } = useCatalogMutations();
+  return useMutation({
+    mutationFn: ({ id, p }: { id: number; p: Partial<CatalogCapabilityTier> }) => api.updateCatalogCapabilityTier(id, p),
+    onSuccess: invalidateAll,
+  });
+}
+export function useDeleteCatalogCapabilityTier() {
+  const { invalidateAll } = useCatalogMutations();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteCatalogCapabilityTier(id),
+    onSuccess: invalidateAll,
+  });
+}
+
+// ModelAlias CRUD (per-request thinking control, Sprint T3, 2026-09-14) —
+// mirrors the CapabilityTier CRUD hooks above exactly. invalidateAll already
+// covers ["catalog"] (qk.catalogModelAliases is nested under it) and
+// qk.modes, since a0's own /v1/models listing (not cached client-side)
+// picks up alias changes on its own next fetch.
+export function useCreateCatalogModelAlias() {
+  const { invalidateAll } = useCatalogMutations();
+  return useMutation({
+    mutationFn: (a: Partial<CatalogModelAlias>) => api.createCatalogModelAlias(a),
+    onSuccess: invalidateAll,
+  });
+}
+export function useUpdateCatalogModelAlias() {
+  const { invalidateAll } = useCatalogMutations();
+  return useMutation({
+    mutationFn: ({ id, a }: { id: number; a: Partial<CatalogModelAlias> }) => api.updateCatalogModelAlias(id, a),
+    onSuccess: invalidateAll,
+  });
+}
+export function useDeleteCatalogModelAlias() {
+  const { invalidateAll } = useCatalogMutations();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteCatalogModelAlias(id),
+    onSuccess: invalidateAll,
+  });
+}
+
+// VirtualModel CRUD (2026-09-15) — mirrors the ModelAlias CRUD hooks above
+// exactly.
+export function useCreateCatalogVirtualModel() {
+  const { invalidateAll } = useCatalogMutations();
+  return useMutation({
+    mutationFn: (m: Partial<CatalogVirtualModel>) => api.createCatalogVirtualModel(m),
+    onSuccess: invalidateAll,
+  });
+}
+export function useUpdateCatalogVirtualModel() {
+  const { invalidateAll } = useCatalogMutations();
+  return useMutation({
+    mutationFn: ({ id, m }: { id: number; m: Partial<CatalogVirtualModel> }) => api.updateCatalogVirtualModel(id, m),
+    onSuccess: invalidateAll,
+  });
+}
+export function useDeleteCatalogVirtualModel() {
+  const { invalidateAll } = useCatalogMutations();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteCatalogVirtualModel(id),
     onSuccess: invalidateAll,
   });
 }
@@ -1358,14 +1449,14 @@ export function useDeleteCatalogVariant() {
 export function useCreateCatalogConfig() {
   const { invalidateAll } = useCatalogMutations();
   return useMutation({
-    mutationFn: (c: Partial<CatalogConfig>) => api.createCatalogConfig(c),
+    mutationFn: (c: ConfigWritePayload) => api.createCatalogConfig(c),
     onSuccess: invalidateAll,
   });
 }
 export function useUpdateCatalogConfig() {
   const { invalidateAll } = useCatalogMutations();
   return useMutation({
-    mutationFn: ({ id, c, reason }: { id: number; c: Partial<CatalogConfig>; reason?: string }) =>
+    mutationFn: ({ id, c, reason }: { id: number; c: ConfigWritePayload; reason?: string }) =>
       api.updateCatalogConfig(id, c, reason),
     onSuccess: invalidateAll,
   });

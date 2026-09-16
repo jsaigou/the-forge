@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — The Forge v0.5 install / upgrade script
+# install.sh — The Forge v0.6 install / upgrade script
 # Run as root: sudo ./install.sh [options]
 #
 # Usage:
@@ -13,8 +13,7 @@
 #
 # Targets:
 #   dev    — current behaviour, oriented at the reference host (ForgeHost):
-#            fixed /opt/forge paths, SELinux relabel notes, Fedora-only gates,
-#            PairNode/ComfyUI reachability probe.
+#            fixed /opt/forge paths, SELinux relabel notes, Fedora-only gates.
 #   public — generic-host path: identical unit installation, but
 #            reference-host assumptions are skipped/guarded, the hardware
 #            pre-flight (installer/preflight.sh) MUST pass unless --force,
@@ -160,7 +159,7 @@ fi
 export FORGE_DATA_DIR="${FORGE_DATA_DIR:-$(dirname "${MODELS_DIR}")}"
 
 echo -e "\n${BOLD}${C}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${C}║  The Forge v0.5 — Installation Script        ║${NC}"
+echo -e "${BOLD}${C}║  The Forge v0.6 — Installation Script        ║${NC}"
 echo -e "${BOLD}${C}║  target: ${TARGET^^}${NC}"
 echo -e "${BOLD}${C}╚══════════════════════════════════════════════╝${NC}\n"
 [[ $DRY_RUN -eq 1 ]] && echo -e "${Y}DRY RUN — no changes will be made${NC}\n"
@@ -546,16 +545,6 @@ for item in m.get("models", []):
 PYEOF
 )
     fi
-
-    # ComfyUI reachability (PairNode) — reference-host topology only
-    if [[ "$TARGET" == "dev" && ${TS_OK:-0} -eq 1 && -n "${TAILNET:-}" ]]; then
-        COMFY_URL="https://comfy-pairnode.${TAILNET}"
-        if curl -sf --max-time 5 "${COMFY_URL}/system_stats" &>/dev/null; then
-            ok "PairNode ComfyUI reachable at ${COMFY_URL}"
-        else
-            warn "PairNode ComfyUI unreachable (${COMFY_URL}) — creative mode and Notes gallery will not function (may just be offline)"
-        fi
-    fi
 }
 
 # ── Step 9: Package age + OSV check (strict mode) ────────────────────────────
@@ -564,9 +553,9 @@ verify_packages() {
     # This used to check uv.lock (PyPI age + OSV) for V4's Python supply
     # chain. There is no uv.lock, pyproject.toml, or Python package supply
     # chain left in this repo since the 2026-07-28 TOML-decommission cutover
-    # — the v0.5 daemon is a single self-contained Go binary — so this step
+    # — the v0.6 daemon is a single self-contained Go binary — so this step
     # is a permanent no-op on every target now, not just "public".
-    step "Package verification (none required — v0.5 is a single Go binary)"
+    step "Package verification (none required — v0.6 is a single Go binary)"
 }
 
 # ── Step 10: Install Python environment ───────────────────────────────────────
@@ -575,13 +564,13 @@ setup_python_env() {
     # V4's Flask/gunicorn+gevent app (the only thing that ever needed this
     # venv) was deleted from the repo in the 2026-07-28 TOML-decommission
     # cutover — there is no rollback path and no pyproject.toml/uv.lock left
-    # in this repo to sync from. The v0.5 daemon is a single Go binary; this
+    # in this repo to sync from. The v0.6 daemon is a single Go binary; this
     # step is a no-op on every target now, not just "public". (It used to
     # fall back to `uv pip install`-ing V4's Python stack — flask, gunicorn,
     # gevent, tomlkit, etc — whenever uv.lock was absent, which is always
     # true today; that branch is deleted, not patched, since nothing in this
     # repo can use its output anymore.)
-    step "Python environment (none required — v0.5 is a single Go binary)"
+    step "Python environment (none required — v0.6 is a single Go binary)"
 }
 
 # ── Step 11: System directories + user ────────────────────────────────────────
@@ -619,7 +608,7 @@ create_dirs() {
 }
 
 # ── Step 12: Build & deploy the forge binary ──────────────────────────────────
-# v0.5 is a single Go binary serving the dashboard, a0 router, and MCP — the
+# v0.6 is a single Go binary serving the dashboard, a0 router, and MCP — the
 # React PWA is embedded into it via go:embed (go/internal/httpapi/pwa.go),
 # not read from disk. This step used to sync forge/templates + forge/static
 # instead of ever building/installing the actual binary: those directories
@@ -672,13 +661,13 @@ deploy_app_files() {
 }
 
 # ── Step 13: Config ────────────────────────────────────────────────────────────
-# v0.5 (forge binary): configuration is store-backed (catalog DB + infra.* settings +
+# v0.6 (forge binary): configuration is store-backed (catalog DB + infra.* settings +
 # auth store). No /etc/forge/config.toml / secrets.toml are written or read.
 
 apply_config() {
     step "Configuration"
 
-    info "v0.5 store-backed config — nothing to bootstrap"
+    info "v0.6 store-backed config — nothing to bootstrap"
 }
 
 # ── Step 14: Systemd units (+ public-target KGC marker & provisioning prompt) ─
@@ -697,7 +686,7 @@ install_systemd_units() {
     # gunicorn+V4 Flask app deleted from the repo in the 2026-07-28
     # TOML-decommission cutover — installing and enabling it, as this
     # script used to, would crash-loop on first boot. forge-daemon.service
-    # is the real v0.5 binary (dashboard + a0 router + MCP, one process).
+    # is the real v0.6 binary (dashboard + a0 router + MCP, one process).
     UNITS=(
         forge-daemon.service
         forge-a1.service

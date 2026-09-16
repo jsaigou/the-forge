@@ -1,7 +1,8 @@
-import { formatGB, formatCurrency } from "../../lib/format";
+import { capLabel, dedupedCapEntries } from "../../lib/chatTemplateCaps";
+import { formatGB, formatCurrency, formatRelativeTime } from "../../lib/format";
 import { hazardsFor, parseLoadOptions, VLLM_FLAGS } from "../../lib/llamaFlags";
 import { findProfileForConfig } from "../../lib/profileJoin";
-import { useProfiles } from "../../lib/queries";
+import { useCatalogConfigs, useCatalogModelAliases, useProfiles } from "../../lib/queries";
 import { useSession } from "../../lib/session";
 import { useLoadConfig } from "../../lib/useLoadConfig";
 import type { ConfigCard, SchedulerStatus, Status } from "../../lib/types";
@@ -62,6 +63,18 @@ export function ConfigDetailView({
   const loadOptions = parseLoadOptions(card.extra_args, card.backend === "vllm" ? VLLM_FLAGS : undefined);
   const hazards = hazardsFor(card);
   const hazardByFlag = new Map(hazards.map((h) => [h.flag, h.message]));
+  const capEntries = dedupedCapEntries(card.chat_template_caps);
+  const { data: modelAliases } = useCatalogModelAliases();
+  const aliasedAs = (modelAliases ?? []).filter((a) => a.config_id === card.id);
+  // ConfigCard.chat_template_caps is already the *effective* (probe merged
+  // with override) value — chat_template_caps_override itself only lives on
+  // the raw CatalogConfig record, so an active override is looked up there
+  // to mark which capEntries rows are a correction rather than a live probe
+  // result (2026-09-14 — the override previously had no visibility anywhere
+  // in the UI at all, see ChatTemplateCapsOverrideEditor's doc comment).
+  const { data: rawConfigs } = useCatalogConfigs();
+  const rawConfig = rawConfigs?.find((c) => c.id === card.id);
+  const overriddenLabels = new Set(Object.keys(rawConfig?.chat_template_caps_override ?? {}).map(capLabel));
 
   return (
     <div className="detail-view">
@@ -79,6 +92,17 @@ export function ConfigDetailView({
               </span>
             )}
           </h3>
+          {/* Operator feedback (2026-09-14): "Also known as" was a spec-row
+              buried in the middle of the table — moved directly under the
+              config name (same position as ConfigCardView/Bay/ConfigRow)
+              and to full-brightness text instead of a spec-row's muted "k"
+              label. */}
+          {aliasedAs.length > 0 && (
+            <div style={{ fontSize: 12, color: "var(--text)", marginBottom: 2 }}>
+              Alias: {aliasedAs.map((a) => a.name).join(", ")}
+              <InfoTip text="Other model names that route to this same config, each forcing its own settings regardless of what the caller sends — see Settings → Routing & Compressor → Model aliases." />
+            </div>
+          )}
           <div className="mmaker">{[card.creator, card.license_name, card.family].filter(Boolean).join(" · ")}</div>
         </div>
         <button
@@ -150,6 +174,12 @@ export function ConfigDetailView({
           <span className="k">Status</span>
           <span className="v">{card.status} · {card.visibility}{card.is_default ? " · default" : ""}</span>
         </div>
+        {card.reasoning_effort_default && (
+          <div className="spec-row">
+            <span className="k">Default reasoning</span>
+            <span className="v">{card.reasoning_effort_default}</span>
+          </div>
+        )}
         {card.derived.history && (
           <div className="spec-row">
             <span className="k">Last load</span>
@@ -194,6 +224,32 @@ export function ConfigDetailView({
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {capEntries.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div className="eyebrow" style={{ fontSize: 11 }}>
+            Chat template capabilities
+            <InfoTip
+              text={
+                card.chat_template_caps_probed_at > 0
+                  ? `Probed from this config's own build at its last successful load, ${formatRelativeTime(card.chat_template_caps_probed_at)}. These vary by llama.cpp build — not every build supports every field.`
+                  : "Not yet probed — load this config once to capture its real chat-template capabilities from /props."
+              }
+            />
+          </div>
+          <div className="load-opts">
+            {capEntries.map((entry) => (
+              <div className="load-opt" key={entry.key}>
+                <span className="flag">{entry.label}</span>
+                <span className="val">{entry.value ? "✓" : "✗"}</span>
+                {overriddenLabels.has(entry.label) && (
+                  <InfoTip text="Operator-curated override, not the live probe result — edit or clear it from this config's Edit form." className="hazard-tip" />
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}

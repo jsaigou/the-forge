@@ -30,6 +30,22 @@
 // data (measured memory, prefill/decode T/s) that belongs next to the
 // curated benchmarks it should be compared against. A bookmarked
 // #settings/profiling link redirects to benchmarks.
+//
+// 2026-09-14 update: Capability tiers and Model aliases moved out of
+// Catalog → Taxonomy (which was never really about either; its own
+// explainer is genealogy/lineage), joined by a per-config editor for the
+// same day's chat_template_caps_override/reasoning_effort_default, which
+// had no settings surface anywhere before this. All three answer one
+// question — which config actually serves a request, and how it thinks —
+// so they got one home instead of three: briefly its own top-level
+// "behavior" section, then folded into "routing" the same day at the
+// operator's call (routing.capability_substitution, the global capability-tier-
+// routing toggle, already lives on that page — everything here is
+// downstream of the same decision). See settings/panels/Behavior.tsx's
+// header comment. A bookmarked #settings/catalog/taxonomy link still lands
+// on Taxonomy (genealogies/families only now); #settings/behavior redirects
+// to routing (Settings.tsx's RETIRED_SECTION_SLUGS, same pattern as the
+// 2026-08-13 compressor→routing merge above).
 
 export type SectionKey =
   | "general"

@@ -94,6 +94,27 @@ type Backend struct {
 	PriceOutPer1MPeak      *float64
 	PriceCachedInPer1MPeak *float64
 	PeakWindows            pricing.Windows
+
+	// CapabilitySubstitution (capability-tier substitution, Sprint P3, 2026-09-13) — set
+	// only by catalogChain when this backend is a substitute, never by
+	// offeringChain or the static route fallback. "" on both fields means
+	// this backend is serving exactly the model that was requested. Name
+	// above already carries the substitute's own config name — these two
+	// fields exist only to disclose WHY a substitution happened, for the
+	// response headers and audit trail.
+	CapabilitySubstitutionMode   string
+	CapabilitySubstitutionReason string
+
+	// ReasoningEffortDefault and ChatTemplateCaps (per-request thinking
+	// control, Sprint T2, 2026-09-14) are copied from the resolved
+	// store.Config at catalogChain-build time — both the normal path and
+	// loadSubstitute's capability_substitution path — so tryBackends' reasoning_effort
+	// translation (applyReasoningEffort) needs no second catalog read per
+	// request and can never drift from what routing actually resolved.
+	// Empty/nil for a remote backend (translation is local-only) and for
+	// the dead static route fallback.
+	ReasoningEffortDefault string
+	ChatTemplateCaps       map[string]bool
 }
 
 // Route is one [[router.routes]] entry: a logical model name maps to an
