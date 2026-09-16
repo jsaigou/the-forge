@@ -20,6 +20,35 @@ one pool of RAM.
   <img src="docs/assets/console-light-dark.png" alt="The Forge console, light and dark theme" width="100%">
 </p>
 
+## See it in action
+
+<table>
+<tr>
+<td width="33%" align="center">
+<img src="docs/assets/routing-dark.png" alt="Live routing diagram: local slots and remote providers, colored by real link health" width="100%"><br>
+<sub><b>Multi-provider routing</b> — real, live link state</sub>
+</td>
+<td width="33%" align="center">
+<img src="docs/assets/smith-chat-dark.png" alt="Asking Smith a live question about GPU health" width="100%"><br>
+<sub><b>Smith</b> — grounded in live checks, not a chatbot wrapper</sub>
+</td>
+<td width="33%" align="center">
+<img src="docs/assets/actioncard-dark.png" alt="Smith proposing a build-refresh procedure with per-step verification" width="100%"><br>
+<sub><b>Autonomous remediation</b> — coded procedures, not free-form plans</sub>
+</td>
+</tr>
+<tr>
+<td width="33%" align="center">
+<img src="docs/assets/smith-ask-demo.gif" alt="Live demo: asking Smith a question and getting a grounded answer back in real time" width="100%"><br>
+<sub><b>Ask Smith anything</b> — a grounded answer, live, with evidence</sub>
+</td>
+<td width="67%" align="center" colspan="2">
+<img src="docs/assets/add-model-demo.gif" alt="Live demo: searching Hugging Face for a model, picking a quant, and passing pre-flight checks" width="100%"><br>
+<sub><b>Add a model from Hugging Face</b> — search, rank by memory fit, pre-flight, download</sub>
+</td>
+</tr>
+</table>
+
 ---
 
 ## Why unified memory changes things
@@ -46,10 +75,6 @@ OS, through GTT allocation most llama.cpp tooling isn't tuned for.
 | Catalog | Models, quantizations, pricing, and benchmarks live in SQLite, editable through the UI or a CRUD API. |
 | One binary | Dashboard, router, MCP server, and scheduler run as one Go process — no separate services to keep in sync. |
 
-<p align="center">
-  <img src="docs/assets/routing-dark.png" alt="Routing view: local slots and remote providers, colored by link health" width="100%">
-</p>
-
 ## How it works
 
 <img src="docs/assets/architecture.svg" width="100%" alt="Architecture: OpenAI SDKs, agents and MCP clients call the forge daemon's router, dashboard and MCP surfaces, which share one scheduler over a SQLite catalog store and load models onto llama.cpp slots a1 through a4." />
@@ -60,23 +85,10 @@ work the same way.
 
 ### Smith
 
-<p align="center">
-  <img src="docs/assets/smith-chat-dark.png" alt="Asking Smith a question about GPU health, grounded in live checks" width="100%">
-</p>
-
 Smith answers from the same deterministic checks, scheduler state, and system journals an
-operator would otherwise read by hand.
-
-<p align="center">
-  <img src="docs/assets/smith-ask-demo.gif" alt="Live demo: asking Smith a question and getting a grounded answer back in real time" width="80%">
-</p>
-
-Smith can also propose a concrete, coded remediation — not a free-form LLM plan — with a verify
-command after every step and a checkpoint before anything risky:
-
-<p align="center">
-  <img src="docs/assets/actioncard-dark.png" alt="Smith proposing a build-refresh procedure with per-step verification" width="100%">
-</p>
+operator would otherwise read by hand — see the demos above. When it finds something worth
+fixing, it can propose a concrete, coded remediation (not a free-form LLM plan) with a verify
+command after every step and a checkpoint before anything risky.
 
 ## Repository layout
 
