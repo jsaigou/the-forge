@@ -67,6 +67,17 @@ work the same way.
 Smith answers from the same deterministic checks, scheduler state, and system journals an
 operator would otherwise read by hand.
 
+<p align="center">
+  <img src="docs/assets/smith-ask-demo.gif" alt="Live demo: asking Smith a question and getting a grounded answer back in real time" width="80%">
+</p>
+
+Smith can also propose a concrete, coded remediation — not a free-form LLM plan — with a verify
+command after every step and a checkpoint before anything risky:
+
+<p align="center">
+  <img src="docs/assets/actioncard-dark.png" alt="Smith proposing a build-refresh procedure with per-step verification" width="100%">
+</p>
+
 ## Repository layout
 
 ```
@@ -107,6 +118,10 @@ before you commit. Downloads are resumable and a sharded repo downloads as one j
 verified, the model registers itself into the catalog (Model, Variant, Artifact, Config); the
 new Config lands `unverified`/`hidden` until you promote it. Gated repos need a token first
 (Settings → Security → Hugging Face access token).
+
+<p align="center">
+  <img src="docs/assets/add-model-demo.gif" alt="Live demo: searching Hugging Face for a model, picking a quant, and passing pre-flight checks" width="80%">
+</p>
 
 The same flow is exposed as smith tools (`hf_search`, `hf_preflight`, `download_status`, and a
 `download_start` that only proposes a job — nothing downloads until you approve it). See
