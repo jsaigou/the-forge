@@ -43,16 +43,43 @@ type configJSON struct {
 	// emitting a literal `"modalities":null` on every card-adjacent config
 	// read.
 	Modalities *[]string `json:"modalities,omitzero"`
+	// CapabilityTierID groups this config with others that may substitute for
+	// each other under capability-tier substitution (Sprint P1, 2026-09-13);
+	// 0 = no class, never substitutes or is substituted for. CapabilityRank is
+	// meaningless when CapabilityTierID is 0. See store.CapabilityTier's doc comment.
+	CapabilityTierID int64 `json:"capability_tier_id"`
+	CapabilityRank   int   `json:"capability_rank"`
+	// ChatTemplateCaps is the last live /props probe result (T1,
+	// per-request thinking control), read-only here — write
+	// ChatTemplateCapsOverride instead. ChatTemplateCapsProbedAt is unix
+	// seconds, 0 = never probed.
+	ChatTemplateCaps         map[string]bool `json:"chat_template_caps"`
+	ChatTemplateCapsProbedAt int64           `json:"chat_template_caps_probed_at"`
+	// ChatTemplateCapsOverride is an operator-curated correction merged
+	// over ChatTemplateCaps per key (store.Config.EffectiveChatTemplateCaps)
+	// — for the cases the live probe gets wrong. nil = no override.
+	ChatTemplateCapsOverride map[string]bool `json:"chat_template_caps_override,omitzero"`
+	// ReasoningEffortDefault is the per-config default reasoning_effort
+	// level (T2, per-request thinking control) — "" | none | low | medium |
+	// high. Applied by the router whenever a request sends none of its own.
+	ReasoningEffortDefault string `json:"reasoning_effort_default"`
 }
 
 func configToJSON(c store.Config) configJSON {
+	var probedAt int64
+	if !c.ChatTemplateCapsProbedAt.IsZero() {
+		probedAt = c.ChatTemplateCapsProbedAt.Unix()
+	}
 	return configJSON{
 		ID: c.ID, Name: c.Name, VariantID: c.VariantID,
 		WeightArtifactID: c.WeightArtifactID, EngineID: c.EngineID, BuildID: c.BuildID,
 		MMProjArtifactID: c.MMProjArtifactID, NCtx: c.NCtx, Parallel: c.Parallel,
 		ExtraArgs: c.ExtraArgs, Status: c.Status, Visibility: c.Visibility,
 		IsDefault: c.IsDefault, Fingerprint: c.Fingerprint, Logo: c.Logo, LogoDark: c.LogoDark,
-		Modalities: c.Modalities,
+		Modalities: c.Modalities, CapabilityTierID: c.CapabilityTierID, CapabilityRank: c.CapabilityRank,
+		ChatTemplateCaps: c.ChatTemplateCaps, ChatTemplateCapsProbedAt: probedAt,
+		ChatTemplateCapsOverride: c.ChatTemplateCapsOverride,
+		ReasoningEffortDefault:   c.ReasoningEffortDefault,
 	}
 }
 
@@ -139,6 +166,9 @@ func (s *Server) handleCatalogConfigCreate(w http.ResponseWriter, r *http.Reques
 		NCtx: b.NCtx, Parallel: b.Parallel, ExtraArgs: b.ExtraArgs,
 		Status: b.Status, Visibility: b.Visibility, IsDefault: b.IsDefault,
 		Fingerprint: b.Fingerprint, Logo: b.Logo, LogoDark: b.LogoDark, Modalities: b.Modalities,
+		CapabilityTierID: b.CapabilityTierID, CapabilityRank: b.CapabilityRank,
+		ChatTemplateCapsOverride: b.ChatTemplateCapsOverride,
+		ReasoningEffortDefault:   b.ReasoningEffortDefault,
 	})
 	if err != nil {
 		writeInternalError(w, err)
@@ -178,6 +208,9 @@ func (s *Server) handleCatalogConfigUpdate(w http.ResponseWriter, r *http.Reques
 		NCtx: b.NCtx, Parallel: b.Parallel, ExtraArgs: b.ExtraArgs,
 		Status: b.Status, Visibility: b.Visibility, IsDefault: b.IsDefault,
 		Fingerprint: b.Fingerprint, Logo: b.Logo, LogoDark: b.LogoDark, Modalities: b.Modalities,
+		CapabilityTierID: b.CapabilityTierID, CapabilityRank: b.CapabilityRank,
+		ChatTemplateCapsOverride: b.ChatTemplateCapsOverride,
+		ReasoningEffortDefault:   b.ReasoningEffortDefault,
 	})
 	if err != nil {
 		if isNotFound(err) {
@@ -294,6 +327,15 @@ type configBody struct {
 	// Modalities overrides the model default; nil = derive. See
 	// configJSON.Modalities.
 	Modalities *[]string `json:"modalities,omitzero"`
+	// CapabilityTierID/CapabilityRank — see configJSON's doc comment.
+	CapabilityTierID int64 `json:"capability_tier_id"`
+	CapabilityRank   int   `json:"capability_rank"`
+	// ChatTemplateCapsOverride — see configJSON's doc comment. The probed
+	// fields are deliberately absent from configBody: they are read-only,
+	// written only by the engine's post-load probe.
+	ChatTemplateCapsOverride map[string]bool `json:"chat_template_caps_override,omitzero"`
+	// ReasoningEffortDefault — see configJSON's doc comment.
+	ReasoningEffortDefault string `json:"reasoning_effort_default"`
 	// Reason is an optional operator note on WHY this change was made —
 	// Sprint C. See modelBody.Reason's doc comment; same treatment here.
 	Reason string `json:"reason"`
@@ -375,6 +417,12 @@ func (s *Server) validateConfig(ctx context.Context, b configBody, excludeID int
 				fields["mmproj_artifact_id"] = "must be an mmproj artifact"
 			}
 		}
+		// CapabilityTier existence (optional — 0 means no class).
+		if b.CapabilityTierID != 0 {
+			if _, err := cat.GetCapabilityTier(ctx, b.CapabilityTierID); err != nil {
+				fields["capability_tier_id"] = "does not exist"
+			}
+		}
 	}
 	if b.NCtx < 0 {
 		fields["n_ctx"] = "must be ≥ 0"
@@ -391,6 +439,11 @@ func (s *Server) validateConfig(ctx context.Context, b configBody, excludeID int
 	case "", "visible", "hidden":
 	default:
 		fields["visibility"] = "must be visible or hidden"
+	}
+	switch b.ReasoningEffortDefault {
+	case "", "none", "low", "medium", "high":
+	default:
+		fields["reasoning_effort_default"] = "must be none, low, medium, or high"
 	}
 	return fields
 }

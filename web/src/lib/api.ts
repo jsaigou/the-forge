@@ -22,9 +22,12 @@ import type {
   CatalogFamily,
   CatalogGenealogy,
   CatalogModel,
+  CatalogModelAlias,
   CatalogModelFile,
   CatalogNote,
   CatalogOffering,
+  CatalogCapabilityTier,
+  CatalogVirtualModel,
   CatalogService,
   CatalogVariant,
   ConfigCard,
@@ -126,6 +129,7 @@ import type {
   WebAuthnBeginAssertResponse,
   WebAuthnBeginRegisterResponse,
 } from "./types";
+import type { ConfigWritePayload } from "./configPayload";
 
 let csrfToken: string | null = null;
 
@@ -579,6 +583,30 @@ export const api = {
   catalogFormats: () => get<{ id: number; name: string }[]>("/api/v1/catalog/formats"),
   catalogEngines: () => get<CatalogEngine[]>("/api/v1/catalog/engines"),
   catalogBuilds: () => get<CatalogBuild[]>("/api/v1/catalog/builds"),
+
+  // CapabilityTier CRUD (capability-tier substitution, Sprint P1, 2026-09-13 — see
+  // CatalogCapabilityTier's doc comment).
+  catalogCapabilityTiers: () => get<CatalogCapabilityTier[]>("/api/v1/catalog/capability-tiers"),
+  createCatalogCapabilityTier: (p: Partial<CatalogCapabilityTier>) => post<CatalogCapabilityTier>("/api/v1/catalog/capability-tiers", p),
+  updateCatalogCapabilityTier: (id: number, p: Partial<CatalogCapabilityTier>) =>
+    put<CatalogCapabilityTier>(`/api/v1/catalog/capability-tiers/${id}`, p),
+  deleteCatalogCapabilityTier: (id: number) => del<{ ok: boolean }>(`/api/v1/catalog/capability-tiers/${id}`),
+
+  // ModelAlias CRUD (per-request thinking control, Sprint T3, 2026-09-14 —
+  // see CatalogModelAlias's doc comment).
+  catalogModelAliases: () => get<CatalogModelAlias[]>("/api/v1/catalog/model-aliases"),
+  createCatalogModelAlias: (a: Partial<CatalogModelAlias>) => post<CatalogModelAlias>("/api/v1/catalog/model-aliases", a),
+  updateCatalogModelAlias: (id: number, a: Partial<CatalogModelAlias>) =>
+    put<CatalogModelAlias>(`/api/v1/catalog/model-aliases/${id}`, a),
+  deleteCatalogModelAlias: (id: number) => del<{ ok: boolean }>(`/api/v1/catalog/model-aliases/${id}`),
+
+  // VirtualModel CRUD (2026-09-15 — see CatalogVirtualModel's doc comment).
+  catalogVirtualModels: () => get<CatalogVirtualModel[]>("/api/v1/catalog/virtual-models"),
+  createCatalogVirtualModel: (m: Partial<CatalogVirtualModel>) => post<CatalogVirtualModel>("/api/v1/catalog/virtual-models", m),
+  updateCatalogVirtualModel: (id: number, m: Partial<CatalogVirtualModel>) =>
+    put<CatalogVirtualModel>(`/api/v1/catalog/virtual-models/${id}`, m),
+  deleteCatalogVirtualModel: (id: number) => del<{ ok: boolean }>(`/api/v1/catalog/virtual-models/${id}`),
+
   catalogArtifacts: (variantId?: number) =>
     get<CatalogArtifact[]>(`/api/v1/catalog/artifacts${variantId ? `?variant_id=${variantId}` : ""}`),
   modelFiles: () => get<CatalogModelFile[]>("/api/v1/models/files"),
@@ -606,8 +634,8 @@ export const api = {
 
   catalogConfigs: (variantId?: number) =>
     get<CatalogConfig[]>(`/api/v1/catalog/configs${variantId ? `?variant_id=${variantId}` : ""}`),
-  createCatalogConfig: (c: Partial<CatalogConfig>) => post<CatalogConfig>("/api/v1/catalog/configs", c),
-  updateCatalogConfig: (id: number, c: Partial<CatalogConfig>, reason?: string) =>
+  createCatalogConfig: (c: ConfigWritePayload) => post<CatalogConfig>("/api/v1/catalog/configs", c),
+  updateCatalogConfig: (id: number, c: ConfigWritePayload, reason?: string) =>
     put<CatalogConfig>(`/api/v1/catalog/configs/${id}`, { ...c, reason }),
   uploadConfigIcon: (id: number, file: File, dark = false) => {
     const form = new FormData();

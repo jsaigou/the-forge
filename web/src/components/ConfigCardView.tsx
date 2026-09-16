@@ -2,7 +2,7 @@ import { lazy, Suspense, useState, type KeyboardEvent } from "react";
 import { apiErrorMessage } from "../lib/api";
 import { formatGB, formatCurrency } from "../lib/format";
 import { hazardsFor } from "../lib/llamaFlags";
-import { useAddFavorite, useFavorites, useProfiles, useRemoveFavorite } from "../lib/queries";
+import { useAddFavorite, useCatalogModelAliases, useFavorites, useProfiles, useRemoveFavorite } from "../lib/queries";
 import { useSession } from "../lib/session";
 import { useLoadConfig } from "../lib/useLoadConfig";
 import type { ConfigCard, SchedulerStatus, Status } from "../lib/types";
@@ -101,6 +101,15 @@ export function ConfigCardView({
   // the gallery should be able to see it without opening anything.
   const hazards = hazardsFor(card);
 
+  // T3 follow-up (2026-09-14, operator feedback): a config's aliases must
+  // be visible on the compact card, not just its expanded detail view — an
+  // alias is a real model name pointed at this config's weights with
+  // different forced behavior, and an operator scanning the gallery should
+  // know one exists without opening anything (same "don't bury it" rule
+  // the hazard badge above already follows).
+  const { data: modelAliases } = useCatalogModelAliases();
+  const aliasedAs = (modelAliases ?? []).filter((a) => a.config_id === card.id);
+
   // Usability pass #3 (2026-07-30): the card body opens the expanded detail
   // view — this is the ⓘ button's old destination, promoted to the whole
   // card now that ⓘ is gone. Every interactive child (star, edit,
@@ -144,6 +153,17 @@ export function ConfigCardView({
               </span>
             )}
           </div>
+          {/* Operator feedback (2026-09-14): an "aka" chip requiring a hover
+              to learn anything failed "clear and easy to understand" — this
+              says the real name in plain text, always visible, no
+              interaction required. Directly below the config name (not
+              below .mmaker) and full-brightness text, not muted, per
+              follow-up feedback the same day. */}
+          {aliasedAs.length > 0 && (
+            <div style={{ fontSize: 10.5, color: "var(--text)", marginTop: 2 }}>
+              Alias: {aliasedAs.map((a) => a.name).join(", ")}
+            </div>
+          )}
           <div className="mmaker">
             {[card.creator, card.license_name, card.family].filter(Boolean).join(" · ")}
           </div>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { apiErrorMessage } from "../../lib/api";
+import type { ConfigWritePayload } from "../../lib/configPayload";
 import { formatGB } from "../../lib/format";
 import { modelInheritedIcon } from "../../lib/iconInheritance";
 import {
@@ -10,12 +11,15 @@ import {
   useCatalogFamilies,
   useCatalogGenealogies,
   useCatalogModels,
+  useCatalogCapabilityTiers,
   useCatalogVariants,
   useModelFiles,
   useUpdateCatalogConfig,
   useUploadConfigIcon,
 } from "../../lib/queries";
-import type { CatalogArtifact, CatalogBuild, CatalogConfig, CatalogEngine, CatalogFamily, CatalogGenealogy, CatalogModel, CatalogModelFile, CatalogVariant } from "../../lib/types";
+import type { CatalogArtifact, CatalogBuild, CatalogConfig, CatalogEngine, CatalogFamily, CatalogGenealogy, CatalogModel, CatalogModelFile, CatalogCapabilityTier, CatalogVariant } from "../../lib/types";
+import type { CapsOverride } from "../ChatTemplateCapsOverrideEditor";
+import { ChatTemplateCapsOverrideEditor } from "../ChatTemplateCapsOverrideEditor";
 import { IconPicker } from "../IconPicker";
 import { LoadOptionsEditor } from "../LoadOptionsEditor";
 import { SaveButton } from "../SaveButton";
@@ -45,6 +49,7 @@ export function ConfigEditView({ configId, onDone, onCancel }: { configId: numbe
   const models = useCatalogModels();
   const families = useCatalogFamilies();
   const genealogies = useCatalogGenealogies();
+  const capabilityTiers = useCatalogCapabilityTiers();
   const modelFiles = useModelFiles();
   const update = useUpdateCatalogConfig();
   const uploadIcon = useUploadConfigIcon();
@@ -57,6 +62,16 @@ export function ConfigEditView({ configId, onDone, onCancel }: { configId: numbe
     return <div className="empty-note">Loading config…</div>;
   }
 
+  // id/chat_template_caps/chat_template_caps_probed_at are excluded from
+  // every icon-select/clear body below: id travels in the URL
+  // (update.mutate's own `id: configId`), and configBody's decode rejects
+  // unknown fields (DisallowUnknownFields) — a body carrying any of the
+  // three 400s as "unknown field" (found live 2026-09-14; see
+  // lib/configPayload.ts's doc comment for why ConfigWritePayload's type
+  // alone can't catch this at a spread site like this one — Routing.tsx's
+  // submitPatch documents the same id trap for offerings).
+  const { id: _id, chat_template_caps: _caps, chat_template_caps_probed_at: _probedAt, ...existingBody } = existing;
+
   return (
     <ConfigEditForm
       existing={existing}
@@ -67,6 +82,7 @@ export function ConfigEditView({ configId, onDone, onCancel }: { configId: numbe
       models={models.data ?? []}
       families={families.data ?? []}
       genealogies={genealogies.data ?? []}
+      capabilityTiers={capabilityTiers.data ?? []}
       modelFiles={modelFiles.data ?? []}
       showFiles={showFiles}
       onToggleFiles={() => setShowFiles(!showFiles)}
@@ -74,8 +90,8 @@ export function ConfigEditView({ configId, onDone, onCancel }: { configId: numbe
       error={error}
       onCancel={onCancel}
       onUploadIcon={(file, dark) => uploadIcon.mutate({ id: configId, file, dark }, { onError: (e) => setError(apiErrorMessage(e)) })}
-      onSelectIcon={(slug, dark) => update.mutate({ id: configId, c: dark ? { ...existing, logo_dark: slug } : { ...existing, logo: slug } }, { onError: (e) => setError(apiErrorMessage(e)) })}
-      onClearIcon={(dark) => update.mutate({ id: configId, c: dark ? { ...existing, logo_dark: "" } : { ...existing, logo: "" } }, { onError: (e) => setError(apiErrorMessage(e)) })}
+      onSelectIcon={(slug, dark) => update.mutate({ id: configId, c: dark ? { ...existingBody, logo_dark: slug } : { ...existingBody, logo: slug } }, { onError: (e) => setError(apiErrorMessage(e)) })}
+      onClearIcon={(dark) => update.mutate({ id: configId, c: dark ? { ...existingBody, logo_dark: "" } : { ...existingBody, logo: "" } }, { onError: (e) => setError(apiErrorMessage(e)) })}
       onSubmit={(draft, reason) => {
         setError(null);
         update.mutate(
@@ -102,6 +118,7 @@ function ConfigEditForm({
   models,
   families,
   genealogies,
+  capabilityTiers,
   modelFiles,
   showFiles,
   onToggleFiles,
@@ -121,10 +138,11 @@ function ConfigEditForm({
   models: CatalogModel[];
   families: CatalogFamily[];
   genealogies: CatalogGenealogy[];
+  capabilityTiers: CatalogCapabilityTier[];
   modelFiles: CatalogModelFile[];
   showFiles: boolean;
   onToggleFiles: () => void;
-  onSubmit: (draft: Partial<CatalogConfig>, reason: string) => void;
+  onSubmit: (draft: ConfigWritePayload, reason: string) => void;
   onCancel: () => void;
   onUploadIcon: (file: File, dark?: boolean) => void;
   onSelectIcon: (slug: string, dark?: boolean) => void;
@@ -144,6 +162,10 @@ function ConfigEditForm({
   const [status, setStatus] = useState(existing.status);
   const [visibility, setVisibility] = useState(existing.visibility);
   const [isDefault, setIsDefault] = useState(existing.is_default);
+  const [reasoningEffortDefault, setReasoningEffortDefault] = useState(existing.reasoning_effort_default);
+  const [capabilityTierId, setCapabilityTierId] = useState(existing.capability_tier_id);
+  const [capabilityRank, setCapabilityRank] = useState(existing.capability_rank);
+  const [capsOverride, setCapsOverride] = useState<CapsOverride>(existing.chat_template_caps_override);
 
   const variant = variants.find((v) => v.id === variantId);
   const weightArtifacts = artifacts.filter((a) => a.variant_id === variantId && a.artifact_type === "weight");
@@ -160,31 +182,41 @@ function ConfigEditForm({
   const backend = existing.name === "carbon-8b" || existing.name === "hy-mt2" ? "vllm" : "llama.cpp";
 
   function submit() {
-    onSubmit(
-      {
-        name,
-        variant_id: variantId,
-        weight_artifact_id: weightArtifactId,
-        engine_id: engineId,
-        build_id: buildId,
-        mmproj_artifact_id: mmprojArtifactId,
-        n_ctx: nCtx,
-        // Carried through unchanged, not user-editable here — see this
-        // file's doc comment on why Parallel has no input.
-        parallel: existing.parallel,
-        extra_args: extraArgs,
-        status,
-        visibility,
-        is_default: isDefault,
-        fingerprint: existing.fingerprint,
-        // Carried through unchanged, same as parallel/fingerprint above —
-        // the icon override lives on IconPicker's own save path (Sprint I),
-        // not this form, and UpdateConfig is full-replace.
-        logo: existing.logo,
-        logo_dark: existing.logo_dark,
-      },
-      reason,
-    );
+    const payload: ConfigWritePayload = {
+      name,
+      variant_id: variantId,
+      weight_artifact_id: weightArtifactId,
+      engine_id: engineId,
+      build_id: buildId,
+      mmproj_artifact_id: mmprojArtifactId,
+      n_ctx: nCtx,
+      // Carried through unchanged, not user-editable here — see this
+      // file's doc comment on why Parallel has no input.
+      parallel: existing.parallel,
+      extra_args: extraArgs,
+      status,
+      visibility,
+      is_default: isDefault,
+      fingerprint: existing.fingerprint,
+      // Carried through unchanged, same as parallel/fingerprint above —
+      // the icon override lives on IconPicker's own save path (Sprint I),
+      // not this form, and UpdateConfig is full-replace.
+      logo: existing.logo,
+      logo_dark: existing.logo_dark,
+      // Carried through unchanged — this form has no modalities control
+      // (only CatalogPanel's ConfigForm does); omitting it entirely, as
+      // this form did before, sends a nil override and silently resets an
+      // existing modalities override back to "derive" on every save
+      // (store.UpdateConfig writes the modalities column unconditionally —
+      // found while fixing the same class of bug for capability_tier_id/
+      // chat_template_caps_override below).
+      modalities: existing.modalities,
+      capability_tier_id: capabilityTierId,
+      capability_rank: capabilityRank,
+      chat_template_caps_override: capsOverride,
+      reasoning_effort_default: reasoningEffortDefault,
+    };
+    onSubmit(payload, reason);
   }
 
   return (
@@ -276,6 +308,42 @@ function ConfigEditForm({
         <label className="form-row">Context (n_ctx)
           <input type="number" min={0} value={nCtx} onChange={(e) => setNCtx(Number(e.target.value))} />
         </label>
+        <label className="form-row">Capability tier
+          <select value={capabilityTierId} onChange={(e) => setCapabilityTierId(Number(e.target.value))}>
+            <option value={0}>— none (never substitutes) —</option>
+            {capabilityTiers.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>
+            Lets an already-loaded config stand in for this one — see Settings → Routing & Compressor → Model Behavior.
+          </span>
+        </label>
+        {capabilityTierId !== 0 && (
+          <label className="form-row">Rank within class
+            <input type="number" value={capabilityRank} onChange={(e) => setCapabilityRank(Number(e.target.value))} />
+            <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>Lower = more capable. Equal ranks are freely interchangeable.</span>
+          </label>
+        )}
+        <label className="form-row">Default reasoning effort
+          <select value={reasoningEffortDefault} onChange={(e) => setReasoningEffortDefault(e.target.value as typeof reasoningEffortDefault)}>
+            <option value="">— none (build default) —</option>
+            <option value="none">none (thinking off)</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+          <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>
+            Applied when a request doesn't send its own reasoning_effort. Translated per this
+            config's own build — see the chat template overrides below — and replaces the old
+            launch-time thinking flags.
+          </span>
+        </label>
+        <ChatTemplateCapsOverrideEditor
+          probed={existing.chat_template_caps}
+          override={capsOverride}
+          onChange={setCapsOverride}
+        />
       </div>
       <LoadOptionsEditor value={extraArgs} onChange={setExtraArgs} backend={backend} nCtx={nCtx} />
 

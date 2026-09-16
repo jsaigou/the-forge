@@ -445,6 +445,17 @@ export interface ConfigCard {
       kfd_evictions: number;
     } | null;
   };
+
+  // T1 (per-request thinking control, 2026-09-14) — effective (probe merged
+  // with any curated override) /props chat_template_caps, keyed by
+  // llama.cpp's own field names. Empty when never loaded and no override.
+  chat_template_caps: Record<string, boolean>;
+  // Unix seconds of the last live probe; 0 = never probed (only a curated
+  // override, or nothing at all).
+  chat_template_caps_probed_at: number;
+  // T2 (per-request thinking control, 2026-09-14) — this config's curated
+  // default reasoning_effort level; "" = unset.
+  reasoning_effort_default: "" | "none" | "low" | "medium" | "high";
 }
 
 export interface Reservation {
@@ -580,6 +591,9 @@ export interface RouterSettings {
   inject_stream_usage: boolean;
   compressor_local_enabled: boolean;
   provider_failover: boolean;
+  // Capability-tier substitution (Sprint P3, 2026-09-13) global default — see
+  // CatalogCapabilityTier's doc comment. "off" | "fallback_only" | "prefer_smarter".
+  capability_substitution: string;
 }
 
 export type RouterSettingsUpdate = Partial<RouterSettings>;
@@ -1476,6 +1490,80 @@ export interface CatalogConfig {
   // (field omitted by the server, via `omitzero`) = derive; an explicit
   // array (even []) = use verbatim.
   modalities?: string[];
+  // Capability-tier substitution (Sprint P1, 2026-09-13) — see
+  // CatalogCapabilityTier's doc comment. 0 = no class, never substitutes or is
+  // substituted for. capability_rank is meaningless when capability_tier_id is 0.
+  capability_tier_id: number;
+  capability_rank: number;
+  // T1 (per-request thinking control, 2026-09-14) — last live /props probe,
+  // read-only (write chat_template_caps_override instead). Keyed by
+  // llama.cpp's own field names (e.g. "supports_reasoning_effort"); the
+  // field set is build-dependent, not fixed. chat_template_caps_probed_at
+  // is unix seconds, 0 = never probed.
+  chat_template_caps: Record<string, boolean>;
+  chat_template_caps_probed_at: number;
+  // Operator-curated correction merged over chat_template_caps per key
+  // (server: Config.EffectiveChatTemplateCaps) — for the cases the live
+  // probe gets wrong. undefined (field omitted, via `omitzero`) = no
+  // override for any key.
+  chat_template_caps_override?: Record<string, boolean>;
+  // T2 (per-request thinking control, 2026-09-14) — per-config default
+  // reasoning_effort level applied when a request sends none of its own.
+  // "" = no default (unset).
+  reasoning_effort_default: "" | "none" | "low" | "medium" | "high";
+}
+
+// CatalogCapabilityTier is an operator-curated group of configs considered
+// equivalent-or-rankable for capability-tier substitution (Sprint P1,
+// 2026-09-13) — a0 substituting an already-loaded model for a requested one
+// to avoid a load wait, or to prefer a smarter resident model. Deliberately
+// curated rather than derived from benchmark scores (too sparse and
+// cross-benchmark-incomparable to rank on safely) — same pattern as the
+// existing smith.brain_chain setting, generalized into a real table.
+export interface CatalogCapabilityTier {
+  id: number;
+  name: string;
+  // Overrides the global router.capability_substitution setting for every config in
+  // this class; "" inherits the global setting. One of "", "off",
+  // "fallback_only", "prefer_smarter".
+  mode: string;
+  notes: string;
+}
+
+// CatalogModelAlias is a wire-visible model name that resolves to a real
+// Config plus request fields FORCED onto every request through that name —
+// even overwriting a value the caller sent — for a consumer that
+// structurally cannot customize its own request (T3, per-request thinking
+// control, 2026-09-14). See CatalogConfig.reasoning_effort_default's doc
+// comment for the contrast: that only applies when the caller sends
+// nothing; an alias's request_defaults always win.
+export interface CatalogModelAlias {
+  id: number;
+  name: string;
+  config_id: number;
+  // Forced onto every request through this alias. Only reasoning_effort is
+  // surfaced in the UI today (the one real use case); any other key present
+  // (set via the API) round-trips but has no dedicated form control yet.
+  request_defaults: Record<string, unknown>;
+  visibility: "visible" | "hidden";
+}
+
+// CatalogVirtualModel is a wire-visible model name that resolves to a real
+// Config dynamically, chosen fresh on every request — "give me whatever's
+// smart" or "give me whatever's fast" — rather than a fixed config_id the
+// way a CatalogModelAlias works (2026-09-15). kind "capability_tier" ranks
+// capability_tier_id's members (curated capability, ADR-0014); kind
+// "throughput" ignores capability tiers entirely and ranks by real measured
+// decode tok/s across every visible config instead — capability_tier_id is
+// 0 for a throughput virtual model. Either way, whichever candidate is
+// already loaded wins; otherwise the best-ranked one is loaded fresh.
+export interface CatalogVirtualModel {
+  id: number;
+  name: string;
+  kind: "capability_tier" | "throughput";
+  capability_tier_id: number;
+  visibility: "visible" | "hidden";
+  notes: string;
 }
 
 export interface CatalogOffering {

@@ -226,6 +226,10 @@ var registry = []Check{
 		Run: runSlotModelIdentity,
 	},
 	{
+		ID: "capability_tier_coverage", Name: "Performance-class coverage", Category: CategoryConfig, Fast: true,
+		Run: runCapabilityTierCoverage,
+	},
+	{
 		ID: "n_ctx_actual", Name: "Configured vs actual n_ctx", Category: CategoryConfig, Fast: true,
 		Run: runNCtxActual,
 	},
@@ -760,6 +764,52 @@ func runSlotAgreement(_ context.Context, env *CheckEnv) Finding {
 	return Finding{CheckID: id, Severity: SeverityOK,
 		Summary:  fmt.Sprintf("all %d slot(s) agree between unit state and scheduler", len(sorted)),
 		Evidence: ev}
+}
+
+// runCapabilityTierCoverage is the maintenance-trigger half of capability-tier
+// curation (capability_tiers.go): a purely deterministic, catalog-only read —
+// it never calls the reasoning tier itself, keeping this check fast and
+// side-effect-free like every other one in this registry. It only detects
+// the gap (a visible config with no capability_tier_id) and reports it; turning
+// the gap into a proposal is a separate, explicitly-triggered call
+// (Smith.ProposeCapabilityTiers, POST /api/v1/smith/capability-tiers/propose) since
+// that call makes a real, potentially slow reasoning-tier round trip —
+// not something a background sweep should block on. Severity stays Info
+// even with candidates outstanding: capability-tier substitution defaults off
+// (router.capability_substitution), so an unclassed config is the normal, expected
+// state until an operator opts in — this is a nudge, not a problem.
+func runCapabilityTierCoverage(ctx context.Context, env *CheckEnv) Finding {
+	const id = "capability_tier_coverage"
+	if env.Catalog == nil {
+		return skipFinding(id, "no catalog source")
+	}
+	cfgs, err := env.Catalog.ListConfigs(ctx)
+	if err != nil {
+		return skipFinding(id, fmt.Sprintf("catalog read failed: %v", err))
+	}
+	type unclassed struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	var gaps []unclassed
+	for _, c := range cfgs {
+		if c.Visibility == "hidden" || c.CapabilityTierID != 0 {
+			continue
+		}
+		gaps = append(gaps, unclassed{ID: c.ID, Name: c.Name})
+	}
+	sort.Slice(gaps, func(i, j int) bool { return gaps[i].Name < gaps[j].Name })
+	ev := map[string]any{"unclassed": gaps}
+	if len(gaps) == 0 {
+		return Finding{CheckID: id, Severity: SeverityOK,
+			Summary: "every visible config carries a capability tier", Evidence: ev}
+	}
+	names := make([]string, 0, len(gaps))
+	for _, g := range gaps {
+		names = append(names, g.Name)
+	}
+	summary := fmt.Sprintf("%d visible config(s) have no capability tier: %s", len(gaps), strings.Join(names, ", "))
+	return Finding{CheckID: id, Severity: SeverityInfo, Summary: summary, Evidence: ev}
 }
 
 // runNCtxActual — the silent-GTT-reduction pitfall: llama.cpp may initialize

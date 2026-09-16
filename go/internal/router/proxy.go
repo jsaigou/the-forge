@@ -155,10 +155,15 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// fallback today.
 	requestedBy := requestedByHeader(r)
 	var chain []*Backend
-	catChain, handled, errMsg, loadReason := s.catalogChain(ctx, model, requestedBy)
+	catChain, handled, errMsg, loadReason, resolvedBody := s.catalogChain(ctx, model, requestedBy, body)
 	switch {
 	case handled && catChain != nil:
 		chain = catChain
+		// catalogChain may have resolved model via a ModelAlias (T3),
+		// whose request_defaults are merged into resolvedBody — a NEW map,
+		// never a mutation of the original (see catalogChain's own doc
+		// comment on why the caller must switch to it explicitly here).
+		body = resolvedBody
 	case handled:
 		body := map[string]string{
 			"error":   "catalog_load_failed",
@@ -292,12 +297,18 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 	// backends only, gated by the operator's usage.inject_stream_usage
 	// setting — inject stream_options.include_usage so a streamed response
 	// carries a trailing usage chunk (see internal/router/usage.go; without
-	// this, streamed remote spend is structurally unmeasurable). Every other
-	// field passes through untouched (re-serialized, matching V4's
-	// dict(body) → json=upstream_body behavior).
+	// this, streamed remote spend is structurally unmeasurable). For local
+	// (foundry_slot) backends only, translate reasoning_effort into whatever
+	// knob this config's build actually honors (T2, per-request thinking
+	// control — internal/router/reasoning.go). Every other field passes
+	// through untouched (re-serialized, matching V4's dict(body) →
+	// json=upstream_body behavior).
 	requestBody := body
-	if b.Kind == "remote" {
+	switch b.Kind {
+	case "remote":
 		requestBody = applyStreamUsageOptions(body, s.injectStreamUsageEnabled(ctx))
+	case "foundry_slot":
+		requestBody = applyReasoningEffort(b, body)
 	}
 	mutatedBody, err := mutateBody(requestBody, resolved.WireModel)
 	if err != nil {
@@ -380,6 +391,19 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 				pr.Out.ContentLength = int64(len(mutatedBody))
 			},
 			ModifyResponse: func(resp *http.Response) error {
+				// Disclosure (capability-tier substitution, Sprint P3): a
+				// substitute never rewrites the response body (usage.go's
+				// no-buffering rule) — instead it discloses via headers,
+				// set here regardless of status so a 4xx from the
+				// substitute is still attributable. A 5xx triggers
+				// ErrorHandler/failover below and these bytes are never
+				// sent, so setting them unconditionally is harmless.
+				if b.CapabilitySubstitutionMode != "" {
+					resp.Header.Set("X-Forge-Model-Requested", model)
+					resp.Header.Set("X-Forge-Model-Served", b.Name)
+					resp.Header.Set("X-Forge-Capability-Substitution", b.CapabilitySubstitutionMode)
+					resp.Header.Set("X-Forge-Capability-Substitution-Reason", b.CapabilitySubstitutionReason)
+				}
 				if resp.StatusCode >= 500 {
 					// Returning an error here triggers ErrorHandler, which
 					// fails over to the next backend. No bytes have been
@@ -440,7 +464,11 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 						}}
 					}
 				}
-				s.auditOutcome(ctx, model, "ok", cl.String())
+				detail := cl.String()
+				if b.CapabilitySubstitutionMode != "" {
+					detail += ",capability_substituted(" + model + "->" + b.Name + "," + b.CapabilitySubstitutionMode + ")"
+				}
+				s.auditOutcome(ctx, model, "ok", detail)
 				return nil
 			},
 			ErrorHandler: func(rw http.ResponseWriter, req *http.Request, err error) {

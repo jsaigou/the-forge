@@ -239,6 +239,37 @@ func TestSchedulerStatusShape(t *testing.T) {
 	}
 }
 
+// TestSchedulerCouldLoad covers the performance-level-routing feasibility
+// endpoint (Sprint P2, 2026-09-13): required model param, sched.Stub's
+// canned Placement round-tripping through the wire shape, and horizon_s
+// validation.
+func TestSchedulerCouldLoad(t *testing.T) {
+	s := newTestServer(t)
+
+	w := do(t, s, authedRequest("GET", "/api/v1/scheduler/could-load", nil))
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("missing model: got %d, want 422", w.Code)
+	}
+
+	w = do(t, s, authedRequest("GET", "/api/v1/scheduler/could-load?model=qwen3", nil))
+	if w.Code != 200 {
+		t.Fatalf("could-load = %d: %s", w.Code, w.Body.String())
+	}
+	var resp couldLoadResponse
+	decodeJSON(t, w.Body, &resp)
+	if resp.Slot != "stub" {
+		t.Errorf("slot = %q, want %q (sched.Stub's canned Placement)", resp.Slot, "stub")
+	}
+	if resp.Evict == nil {
+		t.Error("evict must not be nil — empty array required, not null")
+	}
+
+	w = do(t, s, authedRequest("GET", "/api/v1/scheduler/could-load?model=qwen3&horizon_s=notanumber", nil))
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("bad horizon_s: got %d, want 422", w.Code)
+	}
+}
+
 // ── 422 validation ───────────────────────────────────────────────────────────
 
 func TestReservationCreateValidation(t *testing.T) {

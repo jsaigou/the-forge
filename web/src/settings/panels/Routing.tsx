@@ -55,6 +55,7 @@ import type { CatalogOffering } from "../../lib/types";
 import { Field } from "../Field";
 import { ROUTING_FIELDS } from "../fields";
 import { useSettingsGroup } from "../useSettingsGroup";
+import { ModelBehaviorSection } from "./Behavior";
 import { CompressorModeCard, CompressorProxiesCard } from "./Compression";
 
 const F = Object.fromEntries(ROUTING_FIELDS.map((f) => [f.id, f]));
@@ -95,6 +96,8 @@ function Behavior({ canAdmin }: { canAdmin: boolean }) {
             onChange={(v) => g.setField("compressor_local_enabled", Boolean(v))} />
           <Field rec={F["routing.provider_failover"]} value={g.active.provider_failover} disabled={!canAdmin}
             onChange={(v) => g.setField("provider_failover", Boolean(v))} />
+          <Field rec={F["routing.capability_substitution"]} value={g.active.capability_substitution} disabled={!canAdmin}
+            onChange={(v) => g.setField("capability_substitution", String(v))} />
         </div>
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
@@ -377,6 +380,7 @@ export function Routing({ canAdmin, canOperate }: { canAdmin: boolean; canOperat
     <>
       <ModelRoutingSection canAdmin={canAdmin} />
       <Behavior canAdmin={canAdmin} />
+      <ModelBehaviorSection canAdmin={canAdmin} />
       <ConfigCard canAdmin={canAdmin} />
       <CompressorModeCard canOperate={canOperate} />
       <CompressorProxiesCard canOperate={canOperate} canAdmin={canAdmin} />

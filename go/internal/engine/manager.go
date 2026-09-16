@@ -90,6 +90,13 @@ type Deps struct {
 	// preserved in virtual seconds.
 	PollInterval time.Duration
 
+	// UpdateChatTemplateCaps persists a config's freshly-probed /props
+	// chat_template_caps (T1, per-request thinking control) — see
+	// store.Catalog.UpdateConfigChatTemplateCaps. Nil = the feature is off
+	// (skeleton mode, or the catalog store isn't wired) and the probe is
+	// skipped entirely rather than probing a slot for data nobody persists.
+	UpdateChatTemplateCaps func(ctx context.Context, configID int64, caps map[string]bool) error
+
 	Now  func() time.Time
 	Logf func(format string, args ...any)
 }

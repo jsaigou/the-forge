@@ -316,14 +316,14 @@ type schedulerConfigResponse struct {
 // live FX fetch/cache, the handler treats display currency as USD 1:1
 // (fx_as_of null, fx_stale false).
 type usageResponse struct {
-	Window          string               `json:"window"`
-	DisplayCurrency string               `json:"display_currency"`
-	FxAsOf          *float64             `json:"fx_as_of"` // epoch of FX used; null if 1:1
-	FxStale         bool                 `json:"fx_stale"`
-	Models          []usageModelRow      `json:"models"`
-	External        []usageExternalRow   `json:"external"`
+	Window          string                 `json:"window"`
+	DisplayCurrency string                 `json:"display_currency"`
+	FxAsOf          *float64               `json:"fx_as_of"` // epoch of FX used; null if 1:1
+	FxStale         bool                   `json:"fx_stale"`
+	Models          []usageModelRow        `json:"models"`
+	External        []usageExternalRow     `json:"external"`
 	Compressor      []compressorSavingsRow `json:"compressor"`
-	Totals          usageTotals          `json:"totals"`
+	Totals          usageTotals            `json:"totals"`
 }
 
 type usageModelRow struct {
@@ -363,10 +363,10 @@ type compressorSavingsRow struct {
 }
 
 type usageTotals struct {
-	LocalCostDisplay    float64 `json:"local_cost_display"`
-	ExternalCostDisplay float64 `json:"external_cost_display"`
-	TotalCostDisplay    float64 `json:"total_cost_display"`
-	CompressorSavedTokens int64 `json:"compressor_saved_tokens"`
+	LocalCostDisplay      float64 `json:"local_cost_display"`
+	ExternalCostDisplay   float64 `json:"external_cost_display"`
+	TotalCostDisplay      float64 `json:"total_cost_display"`
+	CompressorSavedTokens int64   `json:"compressor_saved_tokens"`
 }
 
 // usageEventResponse mirrors web/src/lib/types.ts UsageEvent.
@@ -408,14 +408,14 @@ type infraServicesResponse struct {
 // stay on the wire (FE may hide them). BE-4 fills the new fields and fixes
 // the A0 active-state wiring; frozen here.
 type infraService struct {
-	Name                string  `json:"name"`
-	Unit                *string `json:"unit"`
-	Port                *int    `json:"port"`
-	Active              bool    `json:"active"`
-	Kind                string  `json:"kind"`
-	ModeKey             *string `json:"mode_key"`
-	Detail              *string `json:"detail"`
-	CompressorPassthrough *bool `json:"compressor_passthrough"`
+	Name                  string  `json:"name"`
+	Unit                  *string `json:"unit"`
+	Port                  *int    `json:"port"`
+	Active                bool    `json:"active"`
+	Kind                  string  `json:"kind"`
+	ModeKey               *string `json:"mode_key"`
+	Detail                *string `json:"detail"`
+	CompressorPassthrough *bool   `json:"compressor_passthrough"`
 	// Logo is an Icon manifest slug (web/src/assets/icons/manifest.ts) for
 	// the model actually backing this service, nil when none is known.
 	// Console-polish pass, 2026-07-31.
@@ -447,9 +447,9 @@ type infraService struct {
 
 // compressorConfigResponse mirrors web/src/lib/types.ts CompressorConfig.
 type compressorConfigResponse struct {
-	Proxies        []compressorProxyJSON  `json:"proxies"`
-	Providers      []routerProviderJSON `json:"providers"`
-	PassthroughAll bool                 `json:"passthrough_all"`
+	Proxies        []compressorProxyJSON `json:"proxies"`
+	Providers      []routerProviderJSON  `json:"providers"`
+	PassthroughAll bool                  `json:"passthrough_all"`
 	// ExternalEnabled reports whether the shared "external" proxy fronts
 	// remote providers that have no dedicated proxy of their own
 	// (compressor.external_enabled settings-KV — the same key
@@ -473,13 +473,13 @@ type compressorProxyJSON struct {
 }
 
 type routerProviderJSON struct {
-	ID            int64  `json:"id"`
-	Name          string `json:"name"`
-	APIKey        string `json:"api_key"` // masked, prefix+ellipsis — never the full secret
-	TargetURL     string `json:"target_url"`
+	ID              int64  `json:"id"`
+	Name            string `json:"name"`
+	APIKey          string `json:"api_key"` // masked, prefix+ellipsis — never the full secret
+	TargetURL       string `json:"target_url"`
 	CompressorProxy string `json:"compressor_proxy"`
-	Model         string `json:"model"`
-	Model2        string `json:"model2"`
+	Model           string `json:"model"`
+	Model2          string `json:"model2"`
 }
 
 // routerSettingsResponse mirrors web/src/lib/types.ts RouterSettings. Sprint
@@ -488,13 +488,20 @@ type routerProviderJSON struct {
 // (usage.go's injectStreamUsageEnabled, routing.go's localCompressorEnabled)
 // with no HTTP surface at all before this.
 type routerSettingsResponse struct {
-	BusyMode             string `json:"busy_mode"`
-	InjectStreamUsage    bool   `json:"inject_stream_usage"`
+	BusyMode               string `json:"busy_mode"`
+	InjectStreamUsage      bool   `json:"inject_stream_usage"`
 	CompressorLocalEnabled bool   `json:"compressor_local_enabled"`
 	// ProviderFailover (multi-provider routing sprint, 2026-08-06): when
 	// true, a remote request whose provider errors (transport failure/5xx)
 	// fails over to the next offering of the same model in priority order.
 	ProviderFailover bool `json:"provider_failover"`
+	// CapabilitySubstitution (capability-tier substitution, Sprint P3, 2026-09-13) is
+	// the global default for substituting an already-loaded performance-
+	// class peer for a requested config — "off" | "fallback_only" |
+	// "prefer_smarter". A CapabilityTier's own Mode overrides this per class
+	// (see store.CapabilityTier's doc comment); this is only what an unset
+	// class inherits.
+	CapabilitySubstitution string `json:"capability_substitution"`
 }
 
 // routerSettingsBody is the PUT request shape — pointer fields so a partial
@@ -502,10 +509,11 @@ type routerSettingsResponse struct {
 // be the sole (required) field; a body containing only {"busy_mode":"..."}
 // still works exactly as before.
 type routerSettingsBody struct {
-	BusyMode             *string `json:"busy_mode"`
-	InjectStreamUsage    *bool   `json:"inject_stream_usage"`
+	BusyMode               *string `json:"busy_mode"`
+	InjectStreamUsage      *bool   `json:"inject_stream_usage"`
 	CompressorLocalEnabled *bool   `json:"compressor_local_enabled"`
-	ProviderFailover     *bool   `json:"provider_failover"`
+	ProviderFailover       *bool   `json:"provider_failover"`
+	CapabilitySubstitution *string `json:"capability_substitution"`
 }
 
 // modesListResponse is the GET /api/v1/modes shape (V4 returns a dict; the
@@ -528,17 +536,17 @@ type modesListResponse struct {
 // used to read (dropped, migration 0043). CatalogModelID lets the FE
 // deep-link into Catalog → Offerings for the full record.
 type providerModelJSON struct {
-	ModelID        string  `json:"model_id"` // the offering's wire_model
-	CatalogModelID int64   `json:"catalog_model_id"`
-	DisplayName    string  `json:"display_name"`
-	Logo           string  `json:"logo"` // icon slug (§0.8)
-	PriceInPer1M   float64 `json:"price_in_per_1m"`
-	PriceOutPer1M  float64 `json:"price_out_per_1m"`
-	Currency       string  `json:"currency"` // the offering's own currency
-	Priority       int     `json:"priority"`
-	Enabled        bool    `json:"enabled"`
-	CompressorProxy  *string `json:"compressor_proxy"` // the PROVIDER's linked proxy, if any
-	Passthrough    *bool   `json:"passthrough"`    // proxy bypass state, if linked
+	ModelID         string  `json:"model_id"` // the offering's wire_model
+	CatalogModelID  int64   `json:"catalog_model_id"`
+	DisplayName     string  `json:"display_name"`
+	Logo            string  `json:"logo"` // icon slug (§0.8)
+	PriceInPer1M    float64 `json:"price_in_per_1m"`
+	PriceOutPer1M   float64 `json:"price_out_per_1m"`
+	Currency        string  `json:"currency"` // the offering's own currency
+	Priority        int     `json:"priority"`
+	Enabled         bool    `json:"enabled"`
+	CompressorProxy *string `json:"compressor_proxy"` // the PROVIDER's linked proxy, if any
+	Passthrough     *bool   `json:"passthrough"`      // proxy bypass state, if linked
 }
 
 type providerHealthJSON struct {
@@ -828,12 +836,12 @@ type identityLinkCreateRequest struct {
 // apiKeyResponse mirrors web/src/lib/types.ts APIKey. The secret token is never
 // returned on this shape (only once on create).
 type apiKeyResponse struct {
-	KeyID      string   `json:"keyid"`
-	Kind       string   `json:"kind"`
-	Name       string   `json:"name"`
-	Role       string   `json:"role,omitempty"`
+	KeyID string `json:"keyid"`
+	Kind  string `json:"kind"`
+	Name  string `json:"name"`
+	Role  string `json:"role,omitempty"`
 	// Operator's preferred consumer label ("" = derive at request time).
-	DisplayName string   `json:"display_name,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
 	// BoundIP is the exact client IP this key verifies from; "" = unbound
 	// (security sprint 3, #34).
 	BoundIP    string   `json:"bound_ip,omitempty"`

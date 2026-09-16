@@ -5,6 +5,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -417,6 +418,41 @@ func TestRouterSettingsExtendedFields(t *testing.T) {
 	raw, err := set.Get(context.Background(), "usage.inject_stream_usage")
 	if err != nil || string(raw) != "false" {
 		t.Errorf("usage.inject_stream_usage stored = %q err=%v, want \"false\"", raw, err)
+	}
+}
+
+// TestRouterSettingsCapabilitySubstitution covers the performance-level-routing
+// global default (Sprint P3, 2026-09-13): defaults to "off", round-trips
+// through PUT, and rejects a bad value.
+func TestRouterSettingsCapabilitySubstitution(t *testing.T) {
+	set := newFakeSettings()
+	s := serverWithSettings(t, set)
+
+	w := do(t, s, authedRequest("GET", "/api/v1/router/settings", nil))
+	var resp routerSettingsResponse
+	decodeJSON(t, w.Body, &resp)
+	if resp.CapabilitySubstitution != "off" {
+		t.Errorf("default capability_substitution = %q, want \"off\"", resp.CapabilitySubstitution)
+	}
+
+	w = do(t, s, authedRequest("PUT", "/api/v1/router/settings",
+		strings.NewReader(`{"capability_substitution":"prefer_smarter"}`)))
+	if w.Code != 200 {
+		t.Fatalf("PUT router/settings (capability_substitution) = %d, body=%s", w.Code, w.Body)
+	}
+	decodeJSON(t, w.Body, &resp)
+	if resp.CapabilitySubstitution != "prefer_smarter" {
+		t.Errorf("CapabilitySubstitution = %q, want \"prefer_smarter\" after PUT", resp.CapabilitySubstitution)
+	}
+	raw, err := set.Get(context.Background(), "router.capability_substitution")
+	if err != nil || string(raw) != `"prefer_smarter"` {
+		t.Errorf("router.capability_substitution stored = %q err=%v, want %q", raw, err, `"prefer_smarter"`)
+	}
+
+	w = do(t, s, authedRequest("PUT", "/api/v1/router/settings",
+		strings.NewReader(`{"capability_substitution":"nonsense"}`)))
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("PUT bad capability_substitution = %d, want 422", w.Code)
 	}
 }
 
