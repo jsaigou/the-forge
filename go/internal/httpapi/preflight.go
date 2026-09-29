@@ -366,7 +366,7 @@ func checkTrustedCIDRLockout(remoteAddr, cidrsRaw string) *preflightCheck {
 // the daemon process itself cycles.
 func (s *Server) handleSystemRestart(w http.ResponseWriter, r *http.Request) {
 	if s.deps.SystemRestart == nil {
-		writeError(w, http.StatusServiceUnavailable, "restart not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "restart"}, "restart not available")
 		return
 	}
 	s.audit(r, identity(r).Name, "system_restart", "forge-daemon", "")

@@ -251,12 +251,12 @@ func (s *Server) handleCompressorSummary(w http.ResponseWriter, r *http.Request)
 	since := time.Now().Add(-window)
 	summary, err := s.deps.Routing.SavingsSummary(ctx, since)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "compressor summary read failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "compressor summary read failed")
 		return
 	}
 	proxyRows, err := s.deps.Routing.Proxies(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "compressor proxies read failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "compressor proxies read failed")
 		return
 	}
 	kindByService := map[string]string{}

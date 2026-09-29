@@ -102,7 +102,7 @@ func (s *Server) handleCostSettingsGet(w http.ResponseWriter, _ *http.Request) {
 // (cmd/forge/main.go's reloadConfigFromStore).
 func (s *Server) handleCostSettingsPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings store"}, "settings store not wired")
 		return
 	}
 	var b costSettingsBody
@@ -373,7 +373,7 @@ func (s *Server) handleCostSummary(w http.ResponseWriter, r *http.Request) {
 	from := to.Add(-window)
 	samples, err := s.deps.Metrics.Range(ctx, from, to)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "cost summary read failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "cost summary read failed")
 		return
 	}
 
@@ -450,7 +450,7 @@ func (s *Server) handleCostEnergyHistory(w http.ResponseWriter, r *http.Request)
 	if raw := q.Get("res"); raw != "" && raw != "auto" {
 		n, err := parsePositiveInt(raw)
 		if err != nil || n <= 0 {
-			writeValidationError(w, map[string]string{"res": "must be a positive integer number of seconds, or \"auto\""})
+			writeValidationErrorCodes(w, map[string]string{"res": "must be a positive integer number of seconds, or \"auto\""}, map[string]string{"res": "must_be_positive_integer_or_auto"})
 			return
 		}
 		resolutionS = n
@@ -468,7 +468,7 @@ func (s *Server) handleCostEnergyHistory(w http.ResponseWriter, r *http.Request)
 	from := to.Add(-window)
 	samples, err := s.deps.Metrics.Range(ctx, from, to)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "cost energy history read failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "cost energy history read failed")
 		return
 	}
 

@@ -76,7 +76,7 @@ func (s *Server) handleCatalogQuantizationsList(w http.ResponseWriter, r *http.R
 	defer cancel()
 	list, err := cat.ListQuantizations(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "quantizations query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "quantizations query failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -92,7 +92,7 @@ func (s *Server) handleCatalogFormatsList(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	list, err := cat.ListFormats(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "formats query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "formats query failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -108,7 +108,7 @@ func (s *Server) handleCatalogEnginesList(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	list, err := cat.ListEngines(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "engines query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "engines query failed")
 		return
 	}
 	out := make([]engineJSON, 0, len(list))
@@ -128,7 +128,7 @@ func (s *Server) handleCatalogBuildsList(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	list, err := cat.ListBuilds(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "builds query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "builds query failed")
 		return
 	}
 	out := make([]buildJSON, 0, len(list))
@@ -150,19 +150,19 @@ func (s *Server) handleCatalogArtifactsList(w http.ResponseWriter, r *http.Reque
 	if vid := r.URL.Query().Get("variant_id"); vid != "" {
 		id, err := strconv.ParseInt(vid, 10, 64)
 		if err != nil {
-			writeValidationError(w, map[string]string{"variant_id": "must be an integer"})
+			writeValidationErrorCodes(w, map[string]string{"variant_id": "must be an integer"}, map[string]string{"variant_id": "must_be_integer"})
 			return
 		}
 		list, err = cat.ListArtifactsForVariant(ctx, id)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "artifacts query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "artifacts query failed")
 			return
 		}
 	} else {
 		var err error
 		list, err = cat.ListArtifacts(ctx)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "artifacts query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "artifacts query failed")
 			return
 		}
 	}

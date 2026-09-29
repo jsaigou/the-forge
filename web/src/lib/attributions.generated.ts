@@ -67,6 +67,13 @@ export const NPM_DEPS: NpmDep[] = [
     "direct": false
   },
   {
+    "name": "i18next",
+    "version": "26.4.2",
+    "license": "MIT",
+    "projectUrl": "https://www.i18next.com",
+    "direct": true
+  },
+  {
     "name": "oxlint",
     "version": "1.74.0",
     "license": "MIT",
@@ -85,6 +92,13 @@ export const NPM_DEPS: NpmDep[] = [
     "version": "19.2.7",
     "license": "MIT",
     "projectUrl": "https://react.dev/",
+    "direct": true
+  },
+  {
+    "name": "react-i18next",
+    "version": "17.0.15",
+    "license": "MIT",
+    "projectUrl": "https://github.com/i18next/react-i18next",
     "direct": true
   },
   {
@@ -159,6 +173,13 @@ export const GO_DEPS: GoDep[] = [
     "indirect": false,
     "license": "BSD-3-Clause",
     "projectUrl": "https://github.com/go-webauthn/webauthn"
+  },
+  {
+    "path": "github.com/mattn/go-runewidth",
+    "version": "v0.0.19",
+    "indirect": false,
+    "license": "MIT",
+    "projectUrl": "https://github.com/mattn/go-runewidth"
   },
   {
     "path": "github.com/yalue/onnxruntime_go",
@@ -341,13 +362,6 @@ export const GO_DEPS: GoDep[] = [
     "indirect": true,
     "license": "unknown — needs manual verification",
     "projectUrl": "https://github.com/mattn/go-localereader"
-  },
-  {
-    "path": "github.com/mattn/go-runewidth",
-    "version": "v0.0.19",
-    "indirect": true,
-    "license": "MIT",
-    "projectUrl": "https://github.com/mattn/go-runewidth"
   },
   {
     "path": "github.com/muesli/ansi",

@@ -1,0 +1,1283 @@
+{
+  "shell": {
+    "sections_aria": "Settings sections"
+  },
+  "sections": {
+    "general": "General",
+    "providers": "Providers",
+    "billing": "Billing",
+    "routing": "Routing & Compressor",
+    "scheduling": "Scheduling",
+    "monitoring": "Monitoring",
+    "smith": "smith",
+    "voice": "Voice & Speech",
+    "catalog": "Catalog",
+    "benchmarks": "Benchmarks & Profiling",
+    "security": "Security",
+    "danger": "Danger Zone"
+  },
+  "groups": {
+    "general": "General",
+    "money": "Money",
+    "traffic": "Traffic",
+    "workload": "Workload",
+    "catalog": "Catalog",
+    "access": "Access",
+    "danger": "Danger"
+  },
+  "search": {
+    "placeholder": "Search settings…  ( / )",
+    "aria_label": "Search settings",
+    "more_results": "{{count}} more — refine the query",
+    "no_matches": "No setting matches “{{query}}”"
+  },
+  "shared": {
+    "role_required": "Operator role required to view {{resource}} settings.",
+    "loading": "Loading {{resource}} settings…",
+    "reset": "Reset"
+  },
+  "general": {
+    "restart_banner": {
+      "title": "Restart required",
+      "body_one": "{{count}} restart-mode setting changed since the daemon last booted (by <b>{{by}}</b>, {{when}}): {{keys}}.",
+      "body_other": "{{count}} restart-mode settings changed since the daemon last booted (by <b>{{by}}</b>, {{when}}): {{keys}}.",
+      "apply_prefix": "Apply it from Settings → Danger Zone once that section ships (Phase 7), or manually via"
+    },
+    "daemon": {
+      "title": "Daemon",
+      "version": "Version",
+      "hostname": "Hostname",
+      "dashboard_listen": "Dashboard listen",
+      "a0_listen": "a0 router listen",
+      "mcp_listen": "MCP listen",
+      "readonly_note": "Read-only here for transparency — the same fields are editable in the Danger Zone, behind arm+step-up+preflight."
+    },
+    "service_links": {
+      "title": "Service links",
+      "description_before": "Each Console service chip's ↗ link is guessed as",
+      "description_after": "by default. Set an override here for any service reachable only through its own hostname (e.g. one served over its own Tailscale Serve endpoint) — leave a field blank to keep the default guess.",
+      "role_required": "Operator role required to view service links.",
+      "loading": "Loading…",
+      "no_services": "No services reported yet.",
+      "placeholder": "https://…"
+    }
+  },
+  "monitoring": {
+    "monitor_title": "Monitor",
+    "monitor_resource": "monitor",
+    "metrics_title": "Metrics",
+    "metrics_resource": "metrics"
+  },
+  "billing": {
+    "currency_title": "Currency",
+    "resource_billing": "billing",
+    "display_currency_label": "Display currency (ISO 4217)",
+    "fx_source_label": "FX source URL (optional)",
+    "fx_refresh_label": "FX refresh (minutes, optional)",
+    "cost_title": "Cost & power",
+    "resource_cost": "cost",
+    "electricity_rate_label": "Electricity rate (per kWh)",
+    "rate_currency_label": "Rate currency (ISO 4217)",
+    "use_locale_title": "Set from your browser's locale",
+    "use_locale_button": "use {{code}}",
+    "overhead_label": "Rest-of-system overhead (W)",
+    "overhead_title": "Added to measured package watts, then divided by PSU efficiency to get wall watts.",
+    "psu_label": "PSU efficiency (0–1]",
+    "psu_title": "Wall watts = (package watts + overhead) ÷ PSU efficiency. Uncalibrated estimate until checked against a plug meter.",
+    "ceiling_label": "Overview power-chart ceiling (W, package max draw)",
+    "ceiling_title": "Scales the Overview power chart/tile against a real hardware limit only — never feeds cost math.",
+    "power_kw_label": "Per-model card constant (kW, counterfactual)",
+    "power_kw_title": "Flat 'if this model ran alone, flat-out' hypothetical rate used only for model/config card power estimates — does not feed measured-energy figures."
+  },
+  "voice": {
+    "speech_services_title": "Speech services",
+    "loading_status": "Loading service status…",
+    "service_stt": "STT",
+    "service_embedding": "Embedding",
+    "service_aligner": "Aligner",
+    "status_active": "Active",
+    "status_stopped": "Stopped",
+    "status_not_configured": "Not configured",
+    "stop": "Stop",
+    "start": "Start",
+    "hide_details": "Hide details ▴",
+    "show_details": "Details ▾",
+    "engines_title": "Voice engines",
+    "list_all_voices": "List all voices",
+    "engine_kokoro": "Kokoro (fast tier)",
+    "engine_customvoice": "Custom voice",
+    "engine_voicedesign": "Voice design",
+    "engine_base": "Base / clone",
+    "resource_voice_engine": "voice engine"
+  },
+  "voice_list_modal": {
+    "title": "Voices by engine",
+    "loading": "Loading voices…",
+    "error": "Could not reach forge-tts's voice registry.",
+    "no_voices": "No voices registered for this engine.",
+    "builtin": "Built-in",
+    "close": "Close"
+  },
+  "scheduling": {
+    "live_tunables_title": "Live tunables",
+    "seed_title": "Boot seed",
+    "seed_role_required": "Operator role required to view the scheduler boot seed.",
+    "seed_description": "These are the defaults the scheduler falls back to only if <b>scheduler.config</b> (the tunables above) has never been set on a fresh boot. Changing this has no effect on the running daemon."
+  },
+  "danger": {
+    "ports_editor": {
+      "name_col": "Aux port name",
+      "port_col": "Port",
+      "remove": "Remove",
+      "add": "Add",
+      "name_placeholder": "name",
+      "port_placeholder": "port",
+      "no_ports": "No auxiliary ports configured."
+    },
+    "system_title": "System",
+    "system_blurb": "Boot-critical: listen addresses, paths, ports, and the Tailscale hostname. Every field here needs a daemon restart to take effect. Every check runs as the daemon's own user, not yours — a \"permission denied\" on a path you can <code>ls</code> yourself usually means the daemon's uid can't reach it, not a UI bug.",
+    "restart_overlay_title": "Restarting forge-daemon…",
+    "restart_overlay_body": "Waiting for the daemon to come back. This does <b0>not</b0> unload any loaded model — A1–A4 are separate systemd units. It <b1>does</b1> drop every in-flight a0 request and SSE subscriber.",
+    "give_up": "Give up waiting",
+    "restart_title": "Restart",
+    "restart_zone_title": "Restart forge-daemon",
+    "restart_blurb": "Applies every restart-mode change above immediately, without waiting for a natural restart. Does not unload models (A1–A4 are separate units); drops in-flight a0 requests and every SSE subscriber. The literal equivalent, if you'd rather run it yourself:",
+    "requesting": "Requesting…",
+    "restart_button": "Restart daemon",
+    "restart_timeout_error": "Restart did not come back within 60s — check the daemon manually (systemctl status forge-daemon)."
+  },
+  "danger_zone": {
+    "role_required": "Admin role required to view this section.",
+    "loading": "Loading…",
+    "unlocked": "Unlocked — editing enabled",
+    "locked": "Locked",
+    "lock": "Lock",
+    "unlock": "Unlock",
+    "unlock_confirm": "Confirm?",
+    "unlock_warning": "This is boot-critical infrastructure config — a bad save can take the daemon down.",
+    "check": "Check",
+    "checking": "Checking…",
+    "apply": "Apply",
+    "applying": "Applying…",
+    "applied": "✓ Applied",
+    "check_failed_note": "Nothing was written. Fix the failing field(s) above and re-check, or use <code>forge config set</code> directly if you need to bypass validation entirely."
+  },
+  "routing": {
+    "behavior_title": "Router behavior",
+    "resource_router": "router",
+    "discard_title": "Discard unsaved changes",
+    "discard": "Discard",
+    "config_title": "Router config",
+    "config_role_required": "Operator role required to view router config.",
+    "config_loading": "Loading router config…",
+    "config_note": "Changes don't take effect until the service is restarted.",
+    "saving": "Saving…",
+    "save_and_restart": "Save and Restart",
+    "restart_button": "Restart",
+    "model_routing_title": "Model → provider routing",
+    "catalog_unavailable": "Catalog not available (store may not be wired).",
+    "routing_description_before": "Which provider a0 presents for each model, and the priority order a failover walks. Enabled/priority only — pricing, wire model, context length, and variant stay in",
+    "catalog_offerings_link": "Catalog → Offerings",
+    "no_offerings": "No offerings configured — nothing routes to a remote provider yet.",
+    "preferred_chip": "preferred",
+    "preferred_title": "The offering a0 currently presents for this model",
+    "provider_off_chip": "provider off",
+    "priority_label": "priority",
+    "disable_route_title": "Stop routing to this offering",
+    "enable_route_title": "Resume routing to this offering",
+    "disable_button": "Disable",
+    "enable_button": "Enable",
+    "status_enabled": "enabled",
+    "status_disabled": "disabled",
+    "priority_status": "priority {{priority}} · {{status}}"
+  },
+  "compression": {
+    "mode_title": "Compressor · routing mode",
+    "role_required": "Operator role required to view Compressor configuration.",
+    "bypass_title_operator": "Bypass Compressor compression for every proxy — flips live, no teardown",
+    "bypass_title_no_role": "Operator role required",
+    "global_passthrough_label": "Global passthrough",
+    "on": "on",
+    "off": "off",
+    "global_note": "When on, every consumer routes straight to upstream and Compressor compression is bypassed for all proxies live — no teardown. Use to A/B compression quality or when debugging a provider.",
+    "proxies_title": "Compressor · compression proxies",
+    "loading_proxies": "Loading proxies…",
+    "mode_label": "Mode",
+    "mode_link_provider": "Link to provider",
+    "mode_standalone": "Standalone (no provider)",
+    "provider_label": "Provider",
+    "all_providers_linked": "All providers already have a proxy linked. Create a standalone proxy instead, or add a new provider first.",
+    "select_provider_ellipsis": "Select a provider…",
+    "label_label": "Label",
+    "service_name_label": "Service name",
+    "service_taken": "A proxy with this service name already exists.",
+    "service_becomes_unit": "Becomes the systemd unit forge-compress@{{service}}.service",
+    "service_invalid": "Must match ^[a-z][a-z0-9_-]+$ — lowercase, starts with a letter.",
+    "target_url_label": "Target URL",
+    "cancel": "Cancel",
+    "creating": "Creating…",
+    "create_proxy": "Create proxy",
+    "add_proxy_button": "+ Add proxy",
+    "overridden_by_global": "Overridden by global passthrough",
+    "compression_on_title": "Compression on — click to bypass this proxy",
+    "bypassed_title": "Bypassed — click to re-enable compression",
+    "orphaned_suffix": " · orphaned ({{days}}d left)",
+    "bypassed_word": "bypassed",
+    "compressed_word": "compressed",
+    "saved_label": "{{state}} · tokens saved 7d",
+    "restarting": "Restarting…",
+    "removing": "Removing…",
+    "remove_button": "Remove",
+    "remove_warning": "Remove proxy \"{{label}}\"? This tears down the systemd unit and orphans the proxy row.",
+    "footer_note": "Tokens-saved figures are Compressor's own durable lifetime counters, scraped from each proxy's <code>/metrics</code> — Compressor-reported, not independently verified."
+  },
+  "provider_keys": {
+    "title": "Providers",
+    "intro": "External providers routed via A0. Keys are stored server-side in <code>router_providers</code>; the masked form below is the only shape the API ever returns — new keys are write-only.",
+    "role_required": "Operator role required to view providers.",
+    "loading": "Loading providers…",
+    "no_providers": "No providers configured.",
+    "disabled_chip": "disabled — not routing",
+    "models_count_one": "{{count}} model",
+    "models_count_other": "{{count}} models",
+    "show_models_title": "Show the models routed through this provider",
+    "no_key_set": "no key set",
+    "balance_value": " · balance {{balance}}{{currency}}",
+    "balance_unavailable": " · balance unavailable",
+    "no_balance_api": " · no balance API",
+    "disable_provider_title": "Stop routing this provider's models (keys and offerings are kept)",
+    "enable_provider_title": "Resume routing this provider's models",
+    "edit_button": "Edit",
+    "set_key_button": "Set key",
+    "discover_billing_button": "Discover billing",
+    "discover_billing_title": "Probe candidate billing-API URLs for this provider",
+    "discovering": "Discovering…",
+    "delete_warning": "Delete provider \"{{name}}\"? Its offerings go with it. Use Disable instead to keep everything and just stop routing.",
+    "discover_found_saved": "Found and saved: {{url}}",
+    "discover_found_not_saved": "Found {{url}} but credits_url was already set — not overwritten",
+    "discover_not_found": "No billing endpoint found among the candidates tried",
+    "no_offerings_for_provider": "No offerings route through this provider.",
+    "model_disabled_chip": "disabled",
+    "edit_routing_link": "Edit routing / pricing in Settings → Routing →",
+    "name_label": "Name",
+    "name_hint": "The icon above previews live — renaming off a recognized vendor slug (e.g. \"deepseek\", \"qwen\") drops the vendor mark.",
+    "name_invalid_chars": "Names must start with a letter or number and contain only letters, numbers, spaces, &, and .-_ — other characters will be rejected by the server.",
+    "bill_currency_label": "Bill currency",
+    "status_url_label": "Status URL",
+    "status_url_hint_edit": "Wants a machine-readable Statuspage /api/v2/summary.json feed, not a human status page.",
+    "status_url_hint_create": "Wants a machine-readable Statuspage /api/v2/summary.json feed, not a human status page — an unrecognized shape falls back to a live probe of the target URL.",
+    "credits_url_label": "Credits URL",
+    "org_id_label": "Org ID",
+    "billing_console_url_label": "Billing console URL",
+    "billing_api_enabled": "Billing API enabled",
+    "cancel": "Cancel",
+    "save": "Save",
+    "new_api_key_label": "New API key (write-only — never echoed back)",
+    "save_key": "Save key",
+    "preset_label": "Preset",
+    "preset_custom": "Custom…",
+    "no_balance_api_note": "No balance API for this provider — billing polling stays off (Billing console URL is still a human link).",
+    "name_required_label": "Name *",
+    "target_url_template_hint": "Replace <resource> with your own — {{preset}} has no single fixed endpoint.",
+    "org_id_required_suffix": " *",
+    "create_proxy_checkbox": "Create a Compressor proxy for this provider (recommended)",
+    "create_button": "Create",
+    "add_provider_button": "+ Add provider",
+    "peak_windows": {
+      "timezone_label": "Timezone",
+      "custom_ellipsis": "Custom…",
+      "timezone_hint": "What zone the hours below are in — the server converts to real UTC per request (DST-correct) automatically. Leave as UTC if you already have UTC hours.",
+      "timezone_placeholder": "e.g. America/Los_Angeles — full IANA name, not an abbreviation like PST",
+      "windows_label": "Peak pricing windows (JSON, local to the timezone above)",
+      "windows_hint": "Empty = no peak/off-peak concept for this provider. Format: {{format}}",
+      "parse_error": "Not valid JSON — the server will reject this until it parses.",
+      "peak_now_chip": "peak now",
+      "weekday_sun": "Sun",
+      "weekday_mon": "Mon",
+      "weekday_tue": "Tue",
+      "weekday_wed": "Wed",
+      "weekday_thu": "Thu",
+      "weekday_fri": "Fri",
+      "weekday_sat": "Sat",
+      "no_windows": "(no windows)"
+    }
+  },
+  "smith": {
+    "eyebrow": {
+      "reasoning": "smith → Reasoning",
+      "schedule": "smith → Schedule",
+      "thresholds": "smith → Thresholds",
+      "watchlist": "smith → Build-refresh watchlist",
+      "web_research": "smith → Web research",
+      "tools": "smith → Tools",
+      "retention": "smith → Retention",
+      "self_review": "smith → Self-review",
+      "brain_residency": "smith → Brain residency",
+      "autonomy": "smith → Standing autonomy policy",
+      "sourcing": "smith → Model sourcing"
+    },
+    "reasoning": {
+      "none_model": "— none (answers without a model) —",
+      "local_configs": "Local configs",
+      "remote_offerings": "Remote offerings",
+      "add_label": "Add:",
+      "remove": "remove",
+      "chain_empty": "Empty — smith escalates straight to smith.model above, no chain.",
+      "no_offerings": "No enabled remote offerings to choose from.",
+      "no_configs": "No local configs to choose from."
+    },
+    "watchlist": {
+      "empty": "Empty — no commit-subject matching happens.",
+      "remove_aria": "remove {{keyword}}",
+      "placeholder": "e.g. CVE, breaking, security",
+      "add": "+ Add"
+    },
+    "web": {
+      "direct_note": "(always tried last, regardless of order)",
+      "customsearch_note": "(SearxNG-compatible GET ?q= endpoint)",
+      "customfetch_note": "(GET ?url= text proxy)",
+      "enabled_label": "enabled",
+      "url_placeholder": "https://…",
+      "key_placeholder": "API key (leave as-is to keep unchanged)",
+      "probing": "Probing…",
+      "reprobe": "Re-probe now",
+      "reachable": "reachable",
+      "unreachable": "unreachable",
+      "never_probed": "never probed",
+      "unknown": "unknown",
+      "no_detail": "no detail",
+      "status_detail": "{{state}} — {{detail}}"
+    },
+    "tools": {
+      "readonly_loop": "Read-only tool loop",
+      "description": "Lets the reasoning brain call smith's own checks, findings, knowledge base, catalog, and (when web research is enabled) web search/fetch mid-conversation instead of only answering from the context snapshot. Never mutates anything — every tool is a read.",
+      "mode_label": "Mode",
+      "mode_auto": "auto — detect per brain (recommended)",
+      "mode_native": "native — force OpenAI tool_calls",
+      "mode_fenced": "fenced — force the ```tool_call fallback",
+      "mode_off": "off",
+      "max_rounds_label": "Max rounds"
+    },
+    "retention": {
+      "prune_label": "Prune old findings + web cache automatically",
+      "description": "A finding attached to an open or closed investigation is never pruned, at any age, regardless of these settings — only standalone sweep findings age out. 0 keeps a tier forever.",
+      "last_run": "Last run {{when}} — deleted {{findings}} findings, {{cache}} web cache rows.",
+      "never_run": "No prune has run yet — runs automatically every 6h once smith is started.",
+      "ok_days": "\"ok\" findings, days",
+      "info_hours": "\"info\" findings, hours",
+      "warn_crit_days": "\"warn\"/\"crit\" findings, days",
+      "web_cache_days": "Web cache, days",
+      "web_cache_max_rows": "Web cache, max rows"
+    },
+    "self_review": {
+      "toggle_label": "Periodically re-check open investigations and parked actions",
+      "description": "An investigation whose checks now read clean gets a closure proposal in the pending tray — approve it to actually close the investigation. A stuck \"done, unverified\" action is promoted to \"done\" automatically once its own checks re-verify clean (that's bookkeeping catching up to reality, not a new action); a pending proposal smith made on its own is superseded automatically once the condition it was about no longer applies.",
+      "last_run": "Last run {{when}} — promoted {{promoted}} action(s), superseded {{superseded}}, proposed {{proposed}} investigation closure(s).",
+      "never_run": "No self-review sweep has run yet — runs automatically every 2h once smith is started.",
+      "grace_minutes": "Grace period, minutes"
+    },
+    "brain_residency": {
+      "toggle_label": "Keep smith's brain always loaded",
+      "description": "Off (default): smith's brain is loaded on demand, only when a question actually needs the reasoning tier, and left to unload afterward per normal idle policy — no standing VRAM cost, but each first escalated question after an idle period pays a real load delay. On: smith proactively keeps the brain resident, permanently giving up its VRAM footprint in exchange for no per-question load latency. Either way, the brain is never pinned to a specific slot — the scheduler picks whichever is free.",
+      "last_attempt": "Last load attempt {{when}} — {{result}}.",
+      "succeeded": "succeeded (slot {{slot}})",
+      "failed": "failed ({{error}})",
+      "unknown_error": "unknown error",
+      "never_attempted": "No load attempt yet."
+    },
+    "autonomy": {
+      "intro": "Off by default. When enabled here, smith may carry out a specific, opted-in fix the moment it detects the problem — no click, no approval — instead of only ever proposing it for a human. Every autonomous run still goes through the same procedure engine (checkpoints, post-verify, full audit trail) as a manually-approved one, and is bounded by a cooldown plus a daily cap per procedure. Only procedures assessed as low-risk are ever eligible for this — the list below can't be widened from here.",
+      "global_switch": "Global switch — smith may run opted-in fixes unattended",
+      "global_switch_note": "The kill switch. Off always means nothing is autonomous, regardless of the per-procedure toggles below.",
+      "none_eligible": "No procedures are currently eligible for standing autonomy.",
+      "cooldown_label": "Cooldown (seconds)",
+      "max_per_day_label": "Max runs / day",
+      "save_policy": "Save policy"
+    },
+    "sourcing": {
+      "description": "Evaluate a HuggingFace repo's real GGUF files against a memory budget — ranked by the documented 1.2× VRAM rule and quant-preference heuristics (modelselection.md). Read-only; nothing is downloaded or added to the catalog.",
+      "repo_placeholder": "org/repo (e.g. Qwen/Qwen2.5-Coder-7B-Instruct-GGUF)",
+      "budget_placeholder": "budget GB (auto)",
+      "evaluating": "Evaluating…",
+      "evaluate": "Evaluate",
+      "result_summary": "{{repo}} — budget {{budget}} GB",
+      "cached_suffix": " (cached)",
+      "no_gguf": "No GGUF files found in this repo.",
+      "col_file": "file",
+      "col_quant": "quant",
+      "col_size": "size",
+      "col_vram": "est. VRAM",
+      "col_fits": "fits",
+      "recommended_title": "Recommended",
+      "fits_yes": "yes",
+      "fits_no": "no",
+      "download_heading": "Download the recommended file"
+    }
+  },
+  "catalog": {
+    "title": "Catalog",
+    "intro": "The model database — Configs (local launch recipes), Offerings (remote, per-Provider), Model Family, Notes, and managed Services. Replaces the read-only Modes view. Mutations require admin + Settings assurance.",
+    "tabs": {
+      "configs": "Configs",
+      "offerings": "Offerings",
+      "models": "Models",
+      "taxonomy": "Model Family",
+      "notes": "Notes",
+      "services": "Services"
+    },
+    "catalog_unavailable": "Catalog not available (503 — store may not be wired).",
+    "configs": {
+      "count_one": "{{count}} config",
+      "count_other": "{{count}} configs",
+      "empty": "No configs. Create one to get started.",
+      "new_button": "+ New config",
+      "edit": "Edit",
+      "delete_confirm": "Delete config \"{{name}}\"?"
+    },
+    "config_form": {
+      "name_label": "Name *",
+      "variant_label": "Variant *",
+      "select_ellipsis": "— select —",
+      "weight_artifact_label": "Weight artifact *",
+      "no_weight_artifacts": "No weight artifacts for this variant",
+      "hide_files": "Hide files",
+      "browse_files": "Browse files",
+      "engine_label": "Engine *",
+      "build_label": "Build",
+      "none_option": "— none —",
+      "mmproj_label": "mmproj artifact",
+      "modalities_label": "Modalities",
+      "inherit_from_model": "Inherit from model",
+      "override": "Override",
+      "inherited_prefix": "inherited: {{modalities}}",
+      "no_mmproj_suffix": " (no mmproj linked)",
+      "text_always": "Text (always)",
+      "vision": "Vision",
+      "audio": "Audio",
+      "capability_tier_label": "Capability tier",
+      "none_never_substitutes": "— none (never substitutes) —",
+      "rank_label": "Rank within class",
+      "rank_hint": "Lower = more capable. Equal ranks are freely interchangeable.",
+      "reasoning_effort_label": "Default reasoning effort",
+      "reasoning_effort_none_build_default": "— none (build default) —",
+      "reasoning_effort_hint": "Applied when a request doesn't send its own reasoning_effort. Translated per this config's own build — see Chat template overrides below.",
+      "context_label": "Context (n_ctx)",
+      "parallel_label": "Parallel",
+      "status_label": "Status",
+      "visibility_label": "Visibility",
+      "extra_args_label": "Extra args (one ARGV TOKEN per line — not one flag+value per line)",
+      "extra_args_hint": "The launcher reads this file one argv token per line — a flag and its value must each be on their own line (e.g. \"--parallel\" then \"1\" on the next line), not \"--parallel 1\" together.",
+      "default_checkbox": "Default config for this variant",
+      "icon_label": "Icon (override — inherits from the model/family/genealogy chain when unset)",
+      "model_files_heading": "Model files on disk ({{count}})",
+      "no_gguf_files": "No GGUF files found in models dir.",
+      "create_artifacts_hint": "Create artifacts for these files under the Variants section (select variant #{{id}}).",
+      "cancel": "Cancel",
+      "shard_set_suffix": " (shard set)",
+      "shard_set_chip": "shard set"
+    },
+    "offerings": {
+      "col_provider": "Provider",
+      "col_wire_model": "Wire model",
+      "col_model": "Model",
+      "col_price": "Price in/out",
+      "col_priority": "Priority",
+      "col_currency": "Currency",
+      "col_context": "Context",
+      "col_enabled": "Enabled",
+      "empty": "No offerings. Create one to route to a remote provider.",
+      "preferred_chip": "preferred",
+      "preferred_title": "The provider a0 presents for this model (lowest priority value among enabled offerings of enabled providers)",
+      "provider_off_chip": "off",
+      "cached_suffix": " (cached {{price}})",
+      "peak_suffix": " (peak {{in}}/{{out}})",
+      "peak_now_chip": "peak now",
+      "peak_now_title": "This provider's peak window is active right now",
+      "priority_title": "Lower wins — among this model's enabled offerings, the lowest value is served via a0",
+      "enabled_chip": "enabled",
+      "disabled_chip": "disabled",
+      "edit": "Edit",
+      "delete_confirm": "Delete offering \"{{name}}\"?",
+      "new_button": "+ New offering"
+    },
+    "models": {
+      "col_model": "Model",
+      "col_family": "Family",
+      "col_architecture": "Architecture",
+      "col_params": "Params",
+      "col_variants": "Variants",
+      "col_description": "Description",
+      "empty": "No models. Create one to start the catalog hierarchy.",
+      "hidden_chip": "hidden",
+      "variant_count_one": "{{count}} variant",
+      "variant_count_other": "{{count}} variants",
+      "edit": "Edit",
+      "delete_confirm": "Delete model \"{{name}}\"? Its variants and configs must be deleted first.",
+      "new_button": "+ New model"
+    },
+    "model_form": {
+      "name_label": "Name *",
+      "family_label": "Family",
+      "none_option": "— none —",
+      "architecture_label": "Architecture",
+      "param_count_label": "Parameter count",
+      "description_label": "Description",
+      "creator_label": "Creator",
+      "hf_repo_label": "HF repo",
+      "license_name_label": "License name",
+      "license_url_label": "License URL",
+      "key_features_label": "Key features (one per line)",
+      "modalities_label": "Modalities",
+      "text_always": "Text (always)",
+      "vision": "Vision",
+      "audio": "Audio",
+      "visibility_label": "Visibility",
+      "icon_label": "Icon",
+      "cancel": "Cancel"
+    },
+    "variants": {
+      "empty": "No variants.",
+      "delete_confirm": "Delete variant \"{{name}}\"? Its configs and artifacts must be deleted first.",
+      "abliterated_chip": "abliterated",
+      "missing_label": "missing",
+      "name_label": "Name *",
+      "name_placeholder": "base instruct",
+      "derivation_label": "Derivation",
+      "source_variant_label": "Source variant",
+      "trained_ctx_label": "Trained ctx",
+      "abliterated_checkbox": "Abliterated",
+      "abliteration_quality_label": "Abliteration quality",
+      "abliteration_quality_placeholder": "high",
+      "cancel": "Cancel",
+      "create": "Create",
+      "add_button": "+ Add variant"
+    },
+    "taxonomy": {
+      "genealogies_title": "Genealogies",
+      "genealogies_intro": "A vendor's own release lineage (Qwen, Gemma, Nemotron, …). The icon set here is the top of the inheritance chain — every family/model/config under it inherits unless it sets its own.",
+      "families_title": "Families",
+      "families_intro": "One generation within a genealogy (Gemma 4, Qwen 3.6, …). Optionally re-parented onto a genealogy above."
+    },
+    "genealogies": {
+      "duplicate_name": "A genealogy named \"{{name}}\" already exists — edit it instead of creating a duplicate.",
+      "empty": "No genealogies yet.",
+      "family_count_one": "{{count}} family",
+      "family_count_other": "{{count}} families",
+      "delete_confirm_simple": "Delete genealogy \"{{name}}\"?",
+      "delete_confirm_dependents_one": "Delete genealogy \"{{name}}\"? {{count}} family will lose this genealogy (and any icon inherited from it) — they are not deleted, just unparented.",
+      "delete_confirm_dependents_other": "Delete genealogy \"{{name}}\"? {{count}} families will lose this genealogy (and any icon inherited from it) — they are not deleted, just unparented.",
+      "edit": "Edit",
+      "new_button": "+ New genealogy",
+      "name_label": "Name *",
+      "name_placeholder": "Qwen",
+      "icon_label": "Icon",
+      "cancel": "Cancel"
+    },
+    "families": {
+      "duplicate_name": "A family named \"{{name}}\" already exists — edit it instead of creating a duplicate.",
+      "empty": "No families yet.",
+      "no_genealogy": "—",
+      "model_count_one": "{{count}} model",
+      "model_count_other": "{{count}} models",
+      "delete_confirm_simple": "Delete family \"{{name}}\"?",
+      "delete_confirm_dependents_one": "Delete family \"{{name}}\"? {{count}} model will lose this family (and any icon inherited from it) — they are not deleted, just unparented.",
+      "delete_confirm_dependents_other": "Delete family \"{{name}}\"? {{count}} models will lose this family (and any icon inherited from it) — they are not deleted, just unparented.",
+      "edit": "Edit",
+      "new_button": "+ New family",
+      "name_label": "Name *",
+      "name_placeholder": "Gemma 4",
+      "genealogy_label": "Genealogy",
+      "none_option": "— none —",
+      "icon_label": "Icon",
+      "cancel": "Cancel"
+    },
+    "notes": {
+      "col_subject": "Subject",
+      "col_author": "Author",
+      "col_body": "Body",
+      "empty": "No notes recorded.",
+      "subject_prefix": "{{type}}: {{subject}}",
+      "delete_confirm": "Delete this note?",
+      "add_button": "+ Add note",
+      "subject_type_label": "Subject type *",
+      "subject_label": "Subject *",
+      "author_label": "Author *",
+      "author_placeholder": "operator",
+      "body_label": "Body *",
+      "cancel": "Cancel",
+      "create": "Create"
+    },
+    "services": {
+      "col_name": "Name",
+      "col_label": "Label",
+      "col_unit": "Unit",
+      "col_description": "Description",
+      "empty": "No services defined.",
+      "edit": "Edit",
+      "delete_confirm": "Delete service \"{{name}}\"?",
+      "new_button": "+ New service",
+      "name_label": "Name *",
+      "label_label": "Label *",
+      "description_label": "Description",
+      "description_placeholder": "Standalone image generation service",
+      "icon_label": "Icon (slug or emoji)",
+      "color_label": "Color",
+      "unit_label": "Unit",
+      "unit_placeholder": "port",
+      "health_check_label": "Health check (JSON)",
+      "cancel": "Cancel"
+    }
+  },
+  "behavior": {
+    "heading": "Model Behavior",
+    "intro": "A request's model name may resolve through an <b>alias</b> that forces its own defaults on every call through that name; capability-tier substitution (the toggle above) may then <b>substitute</b> an already-loaded config ranked in the same capability tier instead of waiting on a load; and <code>reasoning_effort</code> is <b>translated</b> per that config's own build — native passthrough where the build honors it directly, an injected <code>enable_thinking</code> kwarg where only that exists, or left alone where neither does. Mutations require admin + Settings assurance.",
+    "configs_heading": "Configs",
+    "configs_note": "One row per config. \"native\" under the thinking column means this build honors <code>reasoning_effort</code> directly and the override is unused; everything else is a build that only understands the <code>enable_thinking</code> chat-template kwarg (or nothing at all) — set Force on there to let <code>reasoning_effort: none</code> actually take effect on it.",
+    "tiers_heading": "Capability tiers",
+    "tiers_note": "Groups of configs that may substitute for each other under capability-tier substitution — an already-loaded model standing in for a requested one, to avoid a load wait or to prefer a smarter resident model. Curated, not derived: assign a config to a class and a rank (lower = more capable) in the table above or the config's own edit form. The global on/off mode is the Capability-tier substitution toggle on the Router behavior card above.",
+    "aliases_heading": "Model aliases",
+    "aliases_note": "A second name for a config that FORCES a setting on every request through that name — even overriding what the caller asks for. For a consumer that can't send custom parameters itself (e.g. a fixed integration that can only be pointed at one model name), an alias guarantees the behavior it needs without a second, duplicate config.",
+    "virtual_models_heading": "Virtual models",
+    "virtual_models_note": "A model name for a caller that doesn't care which real config serves it, only that it has some general characteristic — resolved to a real config fresh on every request, never a fixed target the way an alias is above. <b>Capability-tier</b> kind ranks a capability tier's own curated members; <b>throughput</b> kind ignores tiers entirely and ranks by real measured tokens/sec instead, so it's never a guess. Either way, whichever candidate is already loaded wins — otherwise the best-ranked one loads fresh, same as any other request.",
+    "matrix": {
+      "catalog_unavailable": "Catalog not available (503 — store may not be wired).",
+      "no_configs": "No configs yet — add one in Catalog → Configs first.",
+      "col_config": "Config",
+      "col_tier": "Capability tier",
+      "col_reasoning": "Default reasoning",
+      "col_thinking": "Thinking (enable_thinking)",
+      "col_aliases": "Aliases",
+      "tier_none": "— none —",
+      "tier_rank_suffix": " (rank {{rank}})",
+      "reasoning_build_default": "— build default —",
+      "thinking_native_title": "This build honors reasoning_effort natively — the enable_thinking override below is unused.",
+      "thinking_native": "native",
+      "thinking_auto": "Auto (unsupported)",
+      "thinking_force_on": "Force on",
+      "thinking_force_off": "Force off",
+      "thinking_forced_on": "forced on",
+      "thinking_forced_off": "forced off",
+      "rank_title": "Rank within class — lower = more capable"
+    },
+    "tiers": {
+      "catalog_unavailable": "Catalog not available (503 — store may not be wired).",
+      "none_yet": "No capability tiers yet.",
+      "configs_count_one": "{{count}} config",
+      "configs_count_other": "{{count}} configs",
+      "edit": "Edit",
+      "new_tier": "+ New capability tier",
+      "delete_confirm_simple": "Delete capability tier \"{{name}}\"?",
+      "delete_confirm_dependents_one": "Delete capability tier \"{{name}}\"? {{count}} config will lose this class (never substitutes or is substituted for) — they are not deleted, just unparented.",
+      "delete_confirm_dependents_other": "Delete capability tier \"{{name}}\"? {{count}} configs will lose this class (never substitutes or is substituted for) — they are not deleted, just unparented.",
+      "form": {
+        "name_label": "Name *",
+        "name_placeholder": "flagship-chat",
+        "mode_label": "Mode override",
+        "mode_inherit": "Inherit global setting",
+        "mode_off": "Off",
+        "mode_fallback_only": "Fallback only",
+        "mode_prefer_smarter": "Prefer smarter",
+        "notes_label": "Notes",
+        "cancel": "Cancel"
+      }
+    },
+    "aliases": {
+      "catalog_unavailable": "Catalog not available (503 — store may not be wired).",
+      "none_yet": "No model aliases yet.",
+      "config_fallback": "config #{{id}}",
+      "forces_reasoning": "forces reasoning: {{effort}}",
+      "hidden_chip": "hidden",
+      "edit": "Edit",
+      "new_alias": "+ New model alias",
+      "delete_confirm": "Delete alias \"{{name}}\"? Any caller still requesting this exact model name will get \"model not found\" afterward.",
+      "form": {
+        "name_label": "Alias name *",
+        "name_placeholder": "gemma4-26b-a4b-nothink",
+        "name_hint": "The model name callers send. Must not collide with a real config or offering name.",
+        "routes_to_label": "Routes to config *",
+        "select_placeholder": "— select —",
+        "force_effort_label": "Force reasoning effort",
+        "dont_force": "Don't force anything",
+        "effort_none": "none (thinking off)",
+        "effort_low": "low",
+        "effort_medium": "medium",
+        "effort_high": "high",
+        "force_effort_hint": "Applied to EVERY request through this alias, even one that asks for something else — for a caller that can't send this setting itself. Translated per the target config's own build, same as a config's own default.",
+        "hidden_label": "Hidden (not listed in /v1/models, but still resolvable if requested directly)",
+        "cancel": "Cancel"
+      }
+    },
+    "virtual_models": {
+      "catalog_unavailable": "Catalog not available (503 — store may not be wired).",
+      "none_yet": "No virtual models yet.",
+      "tier_fallback": "tier #{{id}}",
+      "resolves_tier": "→ {{tier}} (best loaded)",
+      "resolves_throughput": "→ fastest measured, any tier",
+      "hidden_chip": "hidden",
+      "edit": "Edit",
+      "new_virtual_model": "+ New virtual model",
+      "delete_confirm": "Delete virtual model \"{{name}}\"? Any caller still requesting this exact model name will get \"model not found\" afterward.",
+      "form": {
+        "name_label": "Virtual model name *",
+        "name_placeholder": "local-smart",
+        "name_hint": "The model name callers send. Must not collide with a real config, alias, or offering name.",
+        "resolves_by_label": "Resolves by",
+        "kind_tier": "Capability tier (curated)",
+        "kind_throughput": "Real measured throughput (any tier)",
+        "tier_label": "Capability tier *",
+        "select_placeholder": "— select —",
+        "notes_label": "Notes",
+        "hidden_label": "Hidden (not listed in /v1/models, but still resolvable if requested directly)",
+        "cancel": "Cancel"
+      }
+    }
+  },
+  "benchmarks": {
+    "page": {
+      "title": "Benchmarks & Profiling",
+      "intro": "Curated performance/capability scores per config, grouped with the config's own measured profile. <b>Profiling is destructive</b> — if the target model isn't already loaded, other running models will be evicted to make room. Mutations require admin + Settings assurance.",
+      "catalog_unavailable": "Catalog not available (503 — store may not be wired).",
+      "summary": "{{profiled}} of {{total}} configs profiled · {{stale}} stale · {{curated}} curated benchmarks",
+      "filter_all": "All",
+      "filter_profiled": "Profiled",
+      "filter_has_benchmarks": "Has benchmarks",
+      "filter_stale": "Stale",
+      "no_configs": "No configs in the catalog — add one in Catalog → Configs.",
+      "no_match_filter": "No configs match this filter.",
+      "remote_only_title": "Remote-only models",
+      "remote_only_hint": "No local config — nothing to profile. Benchmarks here are model-scoped only.",
+      "served_by": "served by {{providers}}",
+      "no_benchmarks_recorded": "No benchmarks recorded.",
+      "edit": "Edit",
+      "delete_confirm": "Delete \"{{metric}}\"?",
+      "legacy_offering_title": "Offering-scoped (legacy)",
+      "legacy_offering_hint": "These predate the config-scoped card fix and never surfaced on any card — re-scope to model, variant, or config via Edit to make one visible, or leave as historical record.",
+      "edit_rescope": "Edit / re-scope",
+      "other_title": "Other",
+      "other_hint": "Points at a subject that no longer exists in the catalog.",
+      "edit_heading": "Edit \"{{metric}}\"",
+      "new_heading": "New benchmark"
+    },
+    "group": {
+      "default_chip": "default",
+      "hidden_chip": "hidden",
+      "no_mode_chip": "no mode",
+      "no_mode_title": "This config didn't convert into a runnable mode (usually a missing build backend) — see the server log.",
+      "stale_chip": "stale",
+      "profiled_chip": "profiled",
+      "unprofiled_chip": "unprofiled",
+      "show_less": "Show less",
+      "show_curve": "Show curve",
+      "add_benchmark": "+ Benchmark",
+      "profiling_ellipsis": "Profiling…",
+      "profile_ellipsis": "Profile…",
+      "someone_else_running": "A profile run is already in progress ({{mode}}) — only one can run at a time.",
+      "variant_fallback": "variant #{{id}}",
+      "typical": "typical",
+      "worst": "worst",
+      "measured": "measured {{date}}",
+      "not_profiled": "Not profiled — no measured memory or throughput.",
+      "depth_col": "Depth",
+      "prefill_col": "Prefill T/s",
+      "decode_col": "Decode T/s",
+      "no_curated": "No curated benchmarks — the model has none either.",
+      "delete_confirm_inherited": "Delete \"{{metric}}\"? It's scoped to {{scope}} {{owner}}, so this removes it everywhere that scope is shown, not just here.",
+      "delete_confirm_own": "Delete \"{{metric}}\" from this config?"
+    },
+    "profile_run": {
+      "in_progress_title": "Profile run in progress",
+      "starting": "Starting profile run…",
+      "failed_banner": "Profile run FAILED",
+      "complete_banner": "Profile complete",
+      "in_progress_banner": "Profile run in progress",
+      "sending_request": "Sending request to evict all slots…",
+      "mode_label": "mode:",
+      "actual_n_ctx_label": "actual n_ctx: {{value}}",
+      "silently_reduced": " (requested {{target}} — silently reduced)",
+      "peak_safe": "peak {{peak}} bytes → safe {{safe}} bytes",
+      "prefill_decode": "prefill {{prefill}} t/s · decode {{decode}} t/s",
+      "dismiss": "Dismiss",
+      "evicting_label": "Evicting: {{list}}",
+      "slots_label": "Slots: {{list}}",
+      "slots_loading": "loading…",
+      "slot_empty": "empty",
+      "confirm_heading": "Profile {{mode}}?",
+      "warning_prefix": "Warning:",
+      "already_loaded_reused": "{{mode}} is already loaded and will be reused, not evicted.",
+      "loads_alone": "This loads <b>{{mode}}</b> alone to measure it.",
+      "will_unload": "Will unload <b>{{count}} of {{total}} slots</b> to make room.",
+      "no_other_slots": "No other slots need to be evicted.",
+      "slots_evicted_note": " The slots evicted will remain unloaded after profiling completes — you or the scheduler will need to reload them.",
+      "will_be_evicted": "Will be evicted:",
+      "slot_suffix": " (slot {{slot}})",
+      "run_duration_note": "The run takes 1–3 minutes: evict → load target (if needed) → fill context → measure memory → benchmark T/s at 4 depths → record → unload. Progress streams live on this panel.",
+      "cancel": "Cancel",
+      "starting_ellipsis": "Starting…",
+      "evict_and_profile": "Evict & Profile",
+      "phase": {
+        "evicting_reusing": "{{mode}} already loaded in {{slot}} — reusing it, evicting the rest…",
+        "evicting_all": "Evicting all slots (A1–A4)…",
+        "loading": "Loading model alone in {{slot}}…",
+        "verifying": "Verifying actual n_ctx…",
+        "filling": "Filling context to {{target}} tokens{{suffix}}…",
+        "filling_heterogeneous": "Filling context with heterogeneous data…",
+        "measuring": "Measuring peak memory…",
+        "benchmarking": "Benchmarking{{depthSuffix}}{{tpsSuffix}}",
+        "benchmarking_default": "Benchmarking prefill/decode T/s…",
+        "done": "Done — profile recorded.",
+        "failed": "Failed.",
+        "target_fallback": "Target",
+        "slot_fallback": "a slot",
+        "at_depth_paren": " ({{depth}})",
+        "at_depth": " at {{depth}}",
+        "at_tokens": " at {{tokens}} tokens",
+        "tps_suffix": " — pp {{pp}} t/s, tg {{tg}} t/s"
+      }
+    },
+    "depth_label": {
+      "empty": "empty",
+      "pct": "~{{pct}}% ctx",
+      "tokens": "{{tokens}} tok"
+    },
+    "stale_explanation": "config changed since measurement (context, backend, or model file differs)"
+  },
+  "fields": {
+    "danger.cookie_secure": {
+      "label": "Secure cookies",
+      "help": "Secure attribute on the session + WebAuthn challenge cookies. Leave on unless this process is reached only over plain HTTP behind its own TLS-terminating reverse proxy on the same host (the tailscale-serve-only deployment model) — with it off, a session cookie can be replayed over any plaintext connection an attacker gets the browser to make. Unlike every other field in this section, this one takes effect immediately on save, no restart needed."
+    },
+    "danger.db_path": {
+      "label": "State database path",
+      "help": "SQLite file the daemon reads/writes all state to. Checked for a writable parent directory and (if a file already exists there) a real SQLite header — never opened directly, to avoid a second writer against a live database."
+    },
+    "danger.hostname": {
+      "label": "Tailscale hostname",
+      "help": "This node's tailnet hostname. Warn-only cosmetic check (doesn't look like a DNS name), not a hard gate."
+    },
+    "danger.icons_dir": {
+      "label": "Icons directory",
+      "help": "Directory for uploaded model/vendor icon assets. Optional — a warn, not an error, when unset."
+    },
+    "danger.listen": {
+      "label": "Dashboard listen address",
+      "help": "host:port the dashboard + API bind to. Checked with a real bind probe when changed (skipped when unchanged, since the daemon is already bound to it)."
+    },
+    "danger.mcp_listen": {
+      "label": "MCP listen address",
+      "help": "host:port the MCP server binds to."
+    },
+    "danger.models_dir": {
+      "label": "Models directory",
+      "help": "Directory containing GGUF model weight files."
+    },
+    "danger.rocm_bin": {
+      "label": "ROCm llama-server binary",
+      "help": "Path to the ROCm-backend llama-server executable (used for unified-memory models > ~63 GB)."
+    },
+    "danger.router_listen": {
+      "label": "a0 router listen address",
+      "help": "host:port the a0 router binds to."
+    },
+    "danger.state_dir": {
+      "label": "State directory",
+      "help": "Directory the daemon writes runtime state to. Gets a real self-cleaning write probe (create-then-remove) on check, not just an existence check — the only honest way to answer \"is this writable by the daemon.\""
+    },
+    "danger.sysconfig_dir": {
+      "label": "Sysconfig directory",
+      "help": "Directory holding the per-slot systemd env/args files (e.g. forge-a1-env)."
+    },
+    "danger.tts_unit": {
+      "label": "TTS systemd unit name",
+      "help": "Base name (no .service suffix) of the TTS systemd unit forge starts/stops."
+    },
+    "danger.vulkan_bin": {
+      "label": "Vulkan llama-server binary",
+      "help": "Path to the Vulkan-backend llama-server executable."
+    },
+    "landmark.behavior.aliases": {
+      "label": "Model Behavior · Model aliases",
+      "help": "A second model name that forces its own request defaults on every call through it."
+    },
+    "landmark.behavior.capability-tiers": {
+      "label": "Model Behavior · Capability tiers",
+      "help": "Groups of configs that may substitute for each other under capability-tier substitution."
+    },
+    "landmark.behavior.configs": {
+      "label": "Model Behavior · Configs",
+      "help": "Per-config overview: capability tier + rank, default reasoning effort, the enable_thinking override, and aliases — in one table."
+    },
+    "landmark.behavior.virtual-models": {
+      "label": "Model Behavior · Virtual models",
+      "help": "A model name resolved to a real config dynamically per-request, by capability tier or real measured throughput — for a caller that doesn't care which specific model answers."
+    },
+    "landmark.benchmarks.index": {
+      "label": "Benchmarks & Profiling",
+      "help": "Curated performance/capability scores grouped by config — SWE-bench, GPQA, HLE, AIME, decode/prefill TPS — alongside each config's own measured profile."
+    },
+    "landmark.billing.cost": {
+      "label": "Cost & power",
+      "help": "Electricity rate, overhead, PSU efficiency, power-chart ceiling — feeds the Dashboard's cost figures."
+    },
+    "landmark.billing.currency": {
+      "label": "Currency",
+      "help": "Display currency for every money figure in the PWA, plus the server-side FX source."
+    },
+    "landmark.catalog.configs": {
+      "label": "Catalog · Configs",
+      "help": "Local launch recipes — model + variant + llama.cpp flags (extra_args, ctx, parallel…)."
+    },
+    "landmark.catalog.models": {
+      "label": "Catalog · Models",
+      "help": "Parent models — weights, capabilities, modalities, logos."
+    },
+    "landmark.catalog.notes": {
+      "label": "Catalog · Notes",
+      "help": "Freeform operator notes attached to catalog entries."
+    },
+    "landmark.catalog.offerings": {
+      "label": "Catalog · Offerings",
+      "help": "Remote model offerings, per-provider."
+    },
+    "landmark.catalog.services": {
+      "label": "Catalog · Services",
+      "help": "Managed always-on services (embeddings, STT, TTS) and their unit state."
+    },
+    "landmark.catalog.taxonomy": {
+      "label": "Catalog · Model Family",
+      "help": "Genealogy/family taxonomy — names and icon inheritance hierarchy."
+    },
+    "landmark.compressor.mode": {
+      "label": "Compressor routing mode",
+      "help": "Global passthrough toggle — bypass Compressor compression for every proxy, live, no teardown."
+    },
+    "landmark.compressor.proxies": {
+      "label": "Compressor compression proxies",
+      "help": "Per-proxy compression on/off, restart/teardown, tokens saved."
+    },
+    "landmark.danger.restart": {
+      "label": "Restart daemon",
+      "help": "Applies every restart-mode change immediately via D-Bus — does not unload models, drops in-flight a0 requests and SSE subscribers."
+    },
+    "landmark.general.daemon_strip": {
+      "label": "Daemon status strip (read-only)",
+      "help": "Version, listen addresses, and the restart-required banner — informational, not editable."
+    },
+    "landmark.profiling.index": {
+      "label": "Profiling",
+      "help": "Destructive live profiling runs — depth sweep over context sizes on a real slot, evicting whatever is loaded."
+    },
+    "landmark.providers.index": {
+      "label": "Providers & API keys",
+      "help": "External providers routed via a0 — endpoint, write-only key, preset, health."
+    },
+    "landmark.routing.models": {
+      "label": "Model → provider routing",
+      "help": "Which provider a0 presents for each model, and the priority order a failover walks."
+    },
+    "landmark.routing.preview": {
+      "label": "Routing map",
+      "help": "Read-only provider→model dendrogram — link thickness encodes priority, color encodes active vs disabled."
+    },
+    "landmark.scheduling.live": {
+      "label": "Scheduler tunables (live)",
+      "help": "The running scheduler.config — idle unload, small-job threshold, priority jump cap, reservation window. Mirrored on the Scheduling page."
+    },
+    "landmark.security.api_keys": {
+      "label": "API keys",
+      "help": "Mint/revoke dashboard bearer tokens (sk-forge-*)."
+    },
+    "landmark.security.auth_config": {
+      "label": "Auth configuration",
+      "help": "Network provider selection (tailscale / forward-auth header) and the embedded forward-auth Danger Zone."
+    },
+    "landmark.security.identity_links": {
+      "label": "Identity links",
+      "help": "Network identity → dashboard account links."
+    },
+    "landmark.security.policy": {
+      "label": "Access policy",
+      "help": "The resource → minimum-factor matrix — which actions need password, TOTP, or passkey assurance."
+    },
+    "landmark.security.recovery": {
+      "label": "Recovery codes",
+      "help": "One-time recovery codes for lockout — view/regenerate."
+    },
+    "landmark.security.totp": {
+      "label": "TOTP enrollment",
+      "help": "Authenticator-app (time-based one-time password) enrollment."
+    },
+    "landmark.security.webauthn": {
+      "label": "Passkeys (WebAuthn)",
+      "help": "Passkey / hardware-key enrollment — the L2 assurance factor."
+    },
+    "monitoring.gtt_warn_pct": {
+      "label": "GTT warn threshold",
+      "help": "GTT pool usage percentage at which a memory-pressure warning fires."
+    },
+    "monitoring.hang_sustain_s": {
+      "label": "Hang sustain window",
+      "help": "How long the TPS threshold must stay breached before a hang alert fires."
+    },
+    "monitoring.hang_tps_thousandth": {
+      "label": "Hang TPS threshold",
+      "help": "Tokens/sec ×1000 below which a processing request is considered hung (default 100 = 0.1 TPS)."
+    },
+    "monitoring.poll_interval_s": {
+      "label": "Collector poll interval",
+      "help": "How often the collector scrapes each loaded slot's /metrics."
+    },
+    "monitoring.retention_days": {
+      "label": "Metrics retention",
+      "help": "How long metric samples are kept before store.RunRetention prunes them. Live — takes effect on the next prune tick."
+    },
+    "monitoring.sample_interval_s": {
+      "label": "Metrics sample interval",
+      "help": "How often a metric sample is recorded. Restart-required — baked into a ticker once at daemon start, unlike its neighbor above."
+    },
+    "monitoring.switch_cooldown_s": {
+      "label": "Switch cooldown",
+      "help": "Minimum time between consecutive mode switches on the same slot."
+    },
+    "routing.busy_mode": {
+      "label": "Busy mode",
+      "help": "What a0 does when the target slot is busy loading/switching: wait for it, or fail fast.",
+      "options": {
+        "wait": "Wait",
+        "fail_fast": "Fail fast"
+      }
+    },
+    "routing.capability_substitution": {
+      "label": "Capability-tier substitution",
+      "help": "Let an already-loaded, operator-ranked config stand in for a requested one — \"Fallback only\" substitutes just when the requested config is genuinely infeasible to load right now; \"Prefer smarter\" also substitutes whenever a loaded config outranks the requested one, even if loading it would have been feasible. A capability tier's own override (the Capability tiers card below, under Model Behavior) takes precedence over this default. Off by default — a request with no eligible substitute behaves identically either way.",
+      "options": {
+        "off": "Off",
+        "fallback_only": "Fallback only",
+        "prefer_smarter": "Prefer smarter"
+      }
+    },
+    "routing.compressor_local_enabled": {
+      "label": "Compressor for local slots",
+      "help": "route local A1–A4 traffic through the shared forge-compress@local compression proxy. Remote-provider Compressor proxies are controlled separately, on the Compressor section."
+    },
+    "routing.connect_timeout_s": {
+      "label": "Connect timeout",
+      "help": "How long a0 waits to establish a TCP connection to a backend before giving up."
+    },
+    "routing.embedding_url": {
+      "label": "Embedding URL",
+      "help": "Absolute http(s) URL for the embeddings backend a0 proxies to."
+    },
+    "routing.ensure_loaded_timeout_s": {
+      "label": "Ensure-loaded timeout",
+      "help": "How long a0 waits for an on-demand model load to finish before failing the request that triggered it."
+    },
+    "routing.health_ttl_s": {
+      "label": "Health cache TTL",
+      "help": "How long a backend's health probe result is cached before a0 re-checks it."
+    },
+    "routing.inject_stream_usage": {
+      "label": "Inject stream_options.include_usage",
+      "help": "Ask remote providers for a trailing usage chunk on streaming requests, so real API spend can be recorded (BE-4 Phase 4). Local backends are unaffected."
+    },
+    "routing.max_retries_per_backend": {
+      "label": "Max retries per backend",
+      "help": "How many times a0 retries a single backend before failing over or giving up."
+    },
+    "routing.provider_failover": {
+      "label": "Provider failover",
+      "help": "When the preferred provider for a model errors (transport failure or 5xx), retry the next provider offering the same model, in priority order. Off = the error surfaces instead of silently spending on the next provider. 4xx responses never fail over."
+    },
+    "routing.request_timeout_s": {
+      "label": "Request timeout",
+      "help": "0 means unbounded — the deliberate default since the laguna-s-21 fix (2026-07-30): a flat non-zero timeout was severing long-running speculative-decode responses mid-generation. A hung client/upstream is still caught by context cancellation on disconnect."
+    },
+    "routing.tts_url": {
+      "label": "TTS URL",
+      "help": "Absolute http(s) URL for the forge-tts backend a0 proxies /v1/audio/speech and /v1/voices to (Tier 1 Sprint 3)."
+    },
+    "scheduling.seed.idle_unload_s": {
+      "label": "Idle unload (boot default)",
+      "help": "Seed value sched.Config falls back to if scheduler.config has never been set. Writing this changes nothing on the running daemon — only what the next fresh boot starts from."
+    },
+    "scheduling.seed.priority_jump_cap": {
+      "label": "Priority jump cap (boot default)",
+      "help": "Seed value for the priority jump cap — see idle unload above for what \"boot default\" means."
+    },
+    "scheduling.seed.reservation_soon_min": {
+      "label": "Reservation-soon window (boot default)",
+      "help": "Seed value for the reservation-soon window — see idle unload above for what \"boot default\" means."
+    },
+    "scheduling.seed.small_job_token_threshold": {
+      "label": "Small-job token threshold (boot default)",
+      "help": "Seed value for the small-job token threshold — see idle unload above for what \"boot default\" means."
+    },
+    "security.forward_auth.header_name": {
+      "label": "Forward-auth header name",
+      "help": "HTTP header the reverse proxy sets with the authenticated username, when network_provider is forward_auth_header."
+    },
+    "security.forward_auth.trusted_cidrs": {
+      "label": "Trusted CIDRs",
+      "help": "Comma-separated CIDR ranges allowed to set the forward-auth header. The highest-value check in this app: a save that would exclude YOUR OWN address is refused outright, not just warned about — total lockout is not recoverable without direct database access."
+    },
+    "smith.brain_chain": {
+      "label": "smith brain fallback chain",
+      "help": "Ordered local configs smith tries when it needs to escalate to a brain — a loaded, idle member answers with zero load wait, otherwise smith falls down the chain toward smith.model."
+    },
+    "smith.build_refresh_watchlist": {
+      "label": "build-refresh watchlist",
+      "help": "Keywords smith matches against fetched upstream commit subjects when a tracked build has drifted — a hit is surfaced regardless of the drift threshold."
+    },
+    "smith.handoff_offerings": {
+      "label": "smith handoff offering order",
+      "help": "Ordered remote Offerings smith's self-eviction handoff probes when its brain's slot needs to be freed."
+    },
+    "smith.model": {
+      "label": "smith brain model",
+      "help": "The Config or Offering smith calls via a0 when it needs to think. Empty or unresolvable means smith answers without a model."
+    },
+    "smith.schedule.deep": {
+      "label": "Deep sweep interval",
+      "help": "How often smith runs its full check catalog, including slower network probes."
+    },
+    "smith.schedule.quick": {
+      "label": "Quick sweep interval",
+      "help": "How often smith runs its quick checks (a Go duration string, e.g. 60m)."
+    },
+    "smith.thresholds.build_refresh_behind_n": {
+      "label": "Build-refresh drift threshold",
+      "help": "How many commits a tracked build must drift behind upstream before smith proposes a rebuild. Below-threshold drift still shows as an info finding, it just doesn't propose a rebuild."
+    },
+    "smith.thresholds.compressor_failopen_warn_pct": {
+      "label": "Compressor fail-open warn %",
+      "help": "Fail-open rate threshold (%) — smith proposes raising the compressor fail-open budget when the 1-hour rolling rate exceeds this."
+    },
+    "smith.thresholds.device_lost_window_minutes": {
+      "label": "Device-lost detection window",
+      "help": "How far back smith looks for a GPU device-lost event before treating it as resolved."
+    },
+    "smith.thresholds.disk_crit_pct": {
+      "label": "Disk crit threshold",
+      "help": "Disk usage percentage at which smith's disk_space check reports crit."
+    },
+    "smith.thresholds.disk_warn_pct": {
+      "label": "Disk warn threshold",
+      "help": "Disk usage percentage at which smith's disk_space check reports warn."
+    },
+    "smith.thresholds.gtt_crit_pct": {
+      "label": "GTT crit threshold",
+      "help": "GTT pool usage percentage at which smith's gtt_ceiling check reports crit."
+    },
+    "smith.thresholds.gtt_warn_pct": {
+      "label": "GTT warn threshold",
+      "help": "GTT pool usage percentage at which smith's gtt_ceiling check reports warn."
+    },
+    "smith.web.api_keys": {
+      "label": "Web provider URLs and API keys",
+      "help": "Base URLs and (optional) API keys for searxng and firecrawl."
+    },
+    "smith.web.cache_ttl": {
+      "label": "Web cache TTL",
+      "help": "How long a search or fetch result is reused before smith fetches it again (a Go duration string, e.g. 6h)."
+    },
+    "smith.web.enabled": {
+      "label": "Web research enabled",
+      "help": "Master switch for web research (search + fetch). On by default — turn off to keep smith to local evidence only."
+    },
+    "smith.web.provider_order": {
+      "label": "Web provider order",
+      "help": "Preference order among the fetch-capable adapters (searxng only searches; direct is always tried last regardless of this order)."
+    },
+    "voice.base.enabled": {
+      "label": "Base / clone: enabled",
+      "help": "Whether the Base / clone engine participates at all. Disabled refuses every request for it outright instead of silently falling back."
+    },
+    "voice.base.mode": {
+      "label": "Base / clone: mode",
+      "help": "Resident keeps the engine's systemd unit running continuously (fast, standing GPU memory). Available serves requests without a standing process (the existing CLI-reload-per-call fallback — kokoro has no such fallback tier, so available behaves the same as resident for it). Disabled refuses the engine outright.",
+      "options": {
+        "resident": "Resident",
+        "available": "Available",
+        "disabled": "Disabled"
+      }
+    },
+    "voice.base.unit": {
+      "label": "Base / clone: systemd unit",
+      "help": "The systemd unit this engine's resident process runs as (e.g. forge-tts-custom, kokoro). Empty means the daemon doesn't manage a process for it — resident mode then has nothing to start, same effect as available.",
+      "placeholder": "no dedicated service"
+    },
+    "voice.base.url": {
+      "label": "Base / clone: backend URL",
+      "help": "Where forge-tts reaches this engine's resident backend (e.g. http://127.0.0.1:8091). Empty means not configured — falls back to the CLI path for the three Qwen sub-variants, or is simply unreachable for kokoro.",
+      "placeholder": "not configured"
+    },
+    "voice.customvoice.enabled": {
+      "label": "Custom voice: enabled",
+      "help": "Whether the Custom voice engine participates at all. Disabled refuses every request for it outright instead of silently falling back."
+    },
+    "voice.customvoice.mode": {
+      "label": "Custom voice: mode",
+      "help": "Resident keeps the engine's systemd unit running continuously (fast, standing GPU memory). Available serves requests without a standing process (the existing CLI-reload-per-call fallback — kokoro has no such fallback tier, so available behaves the same as resident for it). Disabled refuses the engine outright.",
+      "options": {
+        "resident": "Resident",
+        "available": "Available",
+        "disabled": "Disabled"
+      }
+    },
+    "voice.customvoice.unit": {
+      "label": "Custom voice: systemd unit",
+      "help": "The systemd unit this engine's resident process runs as (e.g. forge-tts-custom, kokoro). Empty means the daemon doesn't manage a process for it — resident mode then has nothing to start, same effect as available.",
+      "placeholder": "no dedicated service"
+    },
+    "voice.customvoice.url": {
+      "label": "Custom voice: backend URL",
+      "help": "Where forge-tts reaches this engine's resident backend (e.g. http://127.0.0.1:8091). Empty means not configured — falls back to the CLI path for the three Qwen sub-variants, or is simply unreachable for kokoro.",
+      "placeholder": "not configured"
+    },
+    "voice.kokoro.enabled": {
+      "label": "Kokoro (fast tier): enabled",
+      "help": "Whether the Kokoro (fast tier) engine participates at all. Disabled refuses every request for it outright instead of silently falling back."
+    },
+    "voice.kokoro.mode": {
+      "label": "Kokoro (fast tier): mode",
+      "help": "Resident keeps the engine's systemd unit running continuously (fast, standing GPU memory). Available serves requests without a standing process (the existing CLI-reload-per-call fallback — kokoro has no such fallback tier, so available behaves the same as resident for it). Disabled refuses the engine outright.",
+      "options": {
+        "resident": "Resident",
+        "available": "Available",
+        "disabled": "Disabled"
+      }
+    },
+    "voice.kokoro.unit": {
+      "label": "Kokoro (fast tier): systemd unit",
+      "help": "The systemd unit this engine's resident process runs as (e.g. forge-tts-custom, kokoro). Empty means the daemon doesn't manage a process for it — resident mode then has nothing to start, same effect as available.",
+      "placeholder": "no dedicated service"
+    },
+    "voice.kokoro.url": {
+      "label": "Kokoro (fast tier): backend URL",
+      "help": "Where forge-tts reaches this engine's resident backend (e.g. http://127.0.0.1:8091). Empty means not configured — falls back to the CLI path for the three Qwen sub-variants, or is simply unreachable for kokoro.",
+      "placeholder": "not configured"
+    },
+    "voice.voicedesign.enabled": {
+      "label": "Voice design: enabled",
+      "help": "Whether the Voice design engine participates at all. Disabled refuses every request for it outright instead of silently falling back."
+    },
+    "voice.voicedesign.mode": {
+      "label": "Voice design: mode",
+      "help": "Resident keeps the engine's systemd unit running continuously (fast, standing GPU memory). Available serves requests without a standing process (the existing CLI-reload-per-call fallback — kokoro has no such fallback tier, so available behaves the same as resident for it). Disabled refuses the engine outright.",
+      "options": {
+        "resident": "Resident",
+        "available": "Available",
+        "disabled": "Disabled"
+      }
+    },
+    "voice.voicedesign.unit": {
+      "label": "Voice design: systemd unit",
+      "help": "The systemd unit this engine's resident process runs as (e.g. forge-tts-custom, kokoro). Empty means the daemon doesn't manage a process for it — resident mode then has nothing to start, same effect as available.",
+      "placeholder": "no dedicated service"
+    },
+    "voice.voicedesign.url": {
+      "label": "Voice design: backend URL",
+      "help": "Where forge-tts reaches this engine's resident backend (e.g. http://127.0.0.1:8091). Empty means not configured — falls back to the CLI path for the three Qwen sub-variants, or is simply unreachable for kokoro.",
+      "placeholder": "not configured"
+    }
+  }
+}

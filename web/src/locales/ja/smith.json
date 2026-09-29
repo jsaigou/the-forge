@@ -1,0 +1,114 @@
+{
+  "checks": {
+    "gtt_ceiling": {
+      "crit": "GTT使用率: 上限の{{pct}}%(重大しきい値{{threshold}}%以上)",
+      "warn": "GTT使用率: 上限の{{pct}}%(警告しきい値{{threshold}}%以上)",
+      "ok": "GTT使用率: 上限の{{pct}}%"
+    },
+    "disk_space": {
+      "crit": "ディスク使用率{{pct}}%(重大しきい値{{threshold}}%以上)",
+      "warn": "ディスク使用率{{pct}}%(警告しきい値{{threshold}}%以上)",
+      "ok": "ディスク使用率{{pct}}%"
+    },
+    "slot_agreement": {
+      "mismatch": "{{count}}件のスロットでユニット状態とスケジューラーが不一致",
+      "ok": "スロット{{count}}件すべてでユニット状態とスケジューラーが一致"
+    },
+    "capability_tier_coverage": {
+      "ok": "表示中のコンフィグはすべて能力ティア設定済み",
+      "gap": "表示中のコンフィグ{{count}}件に能力ティア未設定: {{names}}"
+    },
+    "n_ctx_actual": {
+      "reduced": "スロット{{slot}}({{mode}}): 実際のn_ctx {{actual}}が設定値{{configured}}を下回っています — カーネルがコンテキストを黙って縮小",
+      "reduced_more": "スロット{{slot}}({{mode}}): 実際のn_ctx {{actual}}が設定値{{configured}}を下回っています — カーネルがコンテキストを黙って縮小(他{{extra}}件)",
+      "ok": "読み込み済みスロット{{count}}件でn_ctx実際値が設定値と一致"
+    },
+    "gpu_hang": {
+      "active": "GPUハングの兆候{{count}}件あり",
+      "ok": "GPUハングの兆候なし"
+    },
+    "gpu_device_lost": {
+      "detected": "ジャーナルにGPUデバイスロストのシグネチャ{{count}}件(直近{{minutes}}分)",
+      "ok": "ジャーナルにGPUデバイスロストのシグネチャなし(直近{{minutes}}分)"
+    },
+    "always_on_ports": {
+      "down": "サービス「{{name}}」がポート{{port}}でリッスンしていません",
+      "down_more": "サービス「{{name}}」がポート{{port}}でリッスンしていません(他{{extra}}件)",
+      "ok": "常時稼働サービスのポート{{count}}件すべてがリッスン中"
+    },
+    "forge_self": {
+      "quick_check_failed": "DB整合性: PRAGMA quick_checkが{{detail}}を報告",
+      "fk_unavailable": "DB整合性は正常(foreign_key_check利用不可)",
+      "fk_violations": "DB整合性は正常; 既知の外部キー違反{{count}}件を検出(自動修正なし)",
+      "ok": "DB整合性は正常(quick_check・foreign_key_checkともにクリーン)"
+    },
+    "a0_reachability": {
+      "bad_status": "a0のhealthzがHTTP {{status}}を返却",
+      "ok": "a0は正常(ポート{{port}}、{{latency_ms}}ms)"
+    },
+    "compressor_reachability": {
+      "none": "登録済みのコンプレッサープロキシなし",
+      "unhealthy": "コンプレッサープロキシ{{total}}件中{{down}}件が異常 — リモートルーティングがブラックホール化する恐れ",
+      "ok": "コンプレッサープロキシ{{count}}件すべて正常"
+    },
+    "compressor_health": {
+      "none": "登録済みのコンプレッサーなし",
+      "growth": "過去{{hours}}時間でコンプレッサー{{total}}件中{{warn}}件にリーク様の増加または再起動の頻発",
+      "ok": "過去{{hours}}時間、コンプレッサー{{count}}件すべてリソース面で正常"
+    },
+    "compressor_failopen": {
+      "exceeded": "過去1時間でコンプレッサー{{total}}件中{{warn}}件がフェイルオープン率{{threshold}}%超過",
+      "no_traffic": "過去1時間にトラフィックのあったコンプレッサープロキシなし",
+      "ok": "過去1時間、コンプレッサー{{count}}件すべてフェイルオープン率{{threshold}}%未満"
+    },
+    "brain_resolvable": {
+      "unset": "smith.model未設定 — ブレインを解決できません",
+      "empty": "smith.modelが空 — ブレインを解決できません",
+      "local": "ブレインはローカルコンフィグ{{model}}に解決",
+      "not_loaded": "設定されたブレイン{{model}}はどのスロットにも未読み込み",
+      "remote": "ブレインは{{provider}}経由のリモートオファリングに解決",
+      "unresolved": "smith.model {{model}}はローカルコンフィグにも有効なオファリングにも未解決"
+    },
+    "kernel_params": {
+      "missing": "カーネルブートパラメータ不足: {{params}}(GPUエビクションの緩和策が未適用)",
+      "ok": "カーネルブートパラメータにamdgpuの緩和策あり"
+    },
+    "binary_versions": {
+      "no_tracked": "追跡対象バイナリ未設定(smith.binaries.trackedが空)",
+      "nightly_unrecorded": "ナイトリー追跡中のフォーク{{count}}件にアップストリームのビルドSHA未記録: {{names}}",
+      "ok": "追跡対象バイナリ{{count}}件確認; すべてソースツリーがインストール済みビルドと一致(または比較不能)"
+    },
+    "blocked_work_recheck": {
+      "none_open": "確認先URLを持つ未解決の外部ブロック項目なし",
+      "possibly_unblocked": "未解決のブロック項目{{open_count}}件中{{unblocked_count}}件がブロック解除の可能性 — 手動で確認してください",
+      "no_change": "未解決のブロック項目{{open_count}}件; {{checked_count}}件を再確認({{fetch_count}}件のネットワーク取得) — 変化なし"
+    },
+    "comfyui_health": {
+      "unreachable": "ComfyUIに接続不可 — {{reason}}(稼働するまでプルーニング/GTTチェック利用不可)",
+      "healthy": "ComfyUIに接続可能"
+    },
+    "comfyui_prune": {
+      "no_roots": "ComfyUIのモデルルート未設定(smith.comfyui.model_rootsが空)",
+      "unbuildable": "依存関係マップ構築不可({{reason}}): {{detail}} — 解消するまで削除提案は不可",
+      "clean": "依存関係マップ構築済み(参照{{referenced_count}}件、棚卸し{{inventory_count}}件); 未参照ファイルなし",
+      "candidates_found": "未参照のComfyUIモデルファイル{{count}}件を検出(回収可能{{gb}} GB) — 承認前に確認(ガイダンス参照)"
+    },
+    "binary_paths": {
+      "missing": "追跡対象バイナリパス{{total_count}}件中{{missing_count}}件が不存在または実行不可: {{names}}",
+      "ok": "バイナリパス{{count}}件確認、すべて存在し実行可能"
+    },
+    "slot_model_identity": {
+      "ok": "読み込み済みスロット{{count}}件でエンジン設定のエイリアスが実行中プロセスと一致"
+    },
+    "tailscale_peers": {
+      "not_configured": "監視対象のtailscaleピア未設定(smith.tailscale.watch_peersが空)",
+      "unreachable": "tailscaledのLocalAPIに接続できずピア状態を確認不可",
+      "offline": "監視対象のtailscaleピア{{watch_count}}件中{{offline_count}}件がオフラインまたは到達不能: {{names}}",
+      "online": "監視対象のtailscaleピア{{count}}件すべてオンライン"
+    }
+  },
+  "status": {
+    "loading_brain": "ブレインモデル{{model}}を読み込み中… — 初回読み込みは通常20〜90秒",
+    "brain_ready": "ブレイン準備完了 — 思考中"
+  }
+}

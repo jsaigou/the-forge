@@ -86,7 +86,7 @@ func (s *Server) handleSmithAutonomyPut(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings"}, "settings store not wired")
 		return
 	}
 	var b smithAutonomyBody
@@ -100,6 +100,7 @@ func (s *Server) handleSmithAutonomyPut(w http.ResponseWriter, r *http.Request) 
 		eligible[p.ID] = true
 	}
 	fieldErrs := map[string]string{}
+	fieldCodes := map[string]string{}
 	for id, pa := range b.Procedures {
 		if !eligible[id] {
 			fieldErrs["procedures."+id] = "not an autonomy-eligible procedure"
@@ -107,13 +108,15 @@ func (s *Server) handleSmithAutonomyPut(w http.ResponseWriter, r *http.Request) 
 		}
 		if pa.CooldownSeconds < 0 {
 			fieldErrs["procedures."+id+".cooldown_seconds"] = "must not be negative"
+			fieldCodes["procedures."+id+".cooldown_seconds"] = "must_be_non_negative_integer"
 		}
 		if pa.MaxPerDay < 0 {
 			fieldErrs["procedures."+id+".max_per_day"] = "must not be negative"
+			fieldCodes["procedures."+id+".max_per_day"] = "must_be_non_negative_integer"
 		}
 	}
 	if len(fieldErrs) > 0 {
-		writeValidationError(w, fieldErrs)
+		writeValidationErrorCodes(w, fieldErrs, fieldCodes)
 		return
 	}
 
@@ -128,7 +131,7 @@ func (s *Server) handleSmithAutonomyPut(w http.ResponseWriter, r *http.Request) 
 	if escalating {
 		ident, ok := r.Context().Value(identityKey).(authz.Identity)
 		if !ok {
-			writeError(w, http.StatusUnauthorized, "Authentication required")
+			writeErrorCode(w, http.StatusUnauthorized, "auth_required", nil, "Authentication required")
 			return
 		}
 		// No bearer bypass here — unlike requireAssurance's blanket one for
@@ -142,7 +145,7 @@ func (s *Server) handleSmithAutonomyPut(w http.ResponseWriter, r *http.Request) 
 		// only a stepped-up browser session can flip this switch on.
 		allowed, decision, err := s.evaluateAssurance(ctx, ident, authz.ResourceActionSmithAutonomy)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "policy load failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "policy load failed")
 			return
 		}
 		if !allowed {

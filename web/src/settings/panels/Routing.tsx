@@ -30,6 +30,7 @@
 // the admin-only long-press enable/disable interaction.
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Icon } from "../../components/Icon";
 import { RoutingTree } from "../../components/RoutingTree";
 import { SaveButton } from "../../components/SaveButton";
@@ -61,6 +62,7 @@ import { CompressorModeCard, CompressorProxiesCard } from "./Compression";
 const F = Object.fromEntries(ROUTING_FIELDS.map((f) => [f.id, f]));
 
 function Behavior({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useRouterSettings();
   const update = useUpdateRouterSettings();
   const g = useSettingsGroup(cfg.data, update);
@@ -68,23 +70,23 @@ function Behavior({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError) {
     return (
       <>
-        <div className="eyebrow">Router behavior</div>
-        <div className="card"><div className="empty-note">Operator role required to view router settings.</div></div>
+        <div className="eyebrow">{t("routing.behavior_title")}</div>
+        <div className="card"><div className="empty-note">{t("shared.role_required", { resource: t("routing.resource_router") })}</div></div>
       </>
     );
   }
   if (!g.active) {
     return (
       <>
-        <div className="eyebrow">Router behavior</div>
-        <div className="card"><div className="empty-note">Loading router settings…</div></div>
+        <div className="eyebrow">{t("routing.behavior_title")}</div>
+        <div className="card"><div className="empty-note">{t("shared.loading", { resource: t("routing.resource_router") })}</div></div>
       </>
     );
   }
 
   return (
     <>
-      <div className="eyebrow">Router behavior</div>
+      <div className="eyebrow">{t("routing.behavior_title")}</div>
       <div className="card">
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
         <div className="form-grid">
@@ -101,7 +103,7 @@ function Behavior({ canAdmin }: { canAdmin: boolean }) {
         </div>
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={g.reset} title="Discard unsaved changes">Discard</button>
+            <button className="btn" onClick={g.reset} title={t("routing.discard_title")}>{t("routing.discard")}</button>
             <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
           </div>
         )}
@@ -112,17 +114,17 @@ function Behavior({ canAdmin }: { canAdmin: boolean }) {
 }
 
 function RestartOverlay({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation("settings");
   return (
     <div className="modal-backdrop">
       <div className="modal">
-        <h3>Restarting forge-daemon…</h3>
+        <h3>{t("danger.restart_overlay_title")}</h3>
         <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.6, marginBottom: 14 }}>
-          Waiting for the daemon to come back. This does <b>not</b> unload any loaded model — A1–A4 are separate
-          systemd units. It <b>does</b> drop every in-flight a0 request and SSE subscriber.
+          <Trans i18nKey="danger.restart_overlay_body" ns="settings" components={{ b0: <b />, b1: <b /> }} />
         </div>
         <div className="dot-busy" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--warn)", boxShadow: "0 0 7px var(--warn)", margin: "0 auto" }} />
         <div className="form-actions" style={{ marginTop: 16 }}>
-          <button className="btn" onClick={onDone}>Give up waiting</button>
+          <button className="btn" onClick={onDone}>{t("danger.give_up")}</button>
         </div>
       </div>
     </div>
@@ -130,6 +132,7 @@ function RestartOverlay({ onDone }: { onDone: () => void }) {
 }
 
 function ConfigCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useRouterConfig();
   const update = useUpdateRouterConfig();
   const restart = useSystemRestart();
@@ -159,7 +162,7 @@ function ConfigCard({ canAdmin }: { canAdmin: boolean }) {
     }
     if (pollToken.current === token) {
       setRestarting(false);
-      setRestartError("Restart did not come back within 60s — check the daemon manually (systemctl status forge-daemon).");
+      setRestartError(t("danger.restart_timeout_error"));
     }
   }
 
@@ -196,26 +199,26 @@ function ConfigCard({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError) {
     return (
       <>
-        <div className="eyebrow">Router config</div>
-        <div className="card"><div className="empty-note">Operator role required to view router config.</div></div>
+        <div className="eyebrow">{t("routing.config_title")}</div>
+        <div className="card"><div className="empty-note">{t("routing.config_role_required")}</div></div>
       </>
     );
   }
   if (!g.active) {
     return (
       <>
-        <div className="eyebrow">Router config</div>
-        <div className="card"><div className="empty-note">Loading router config…</div></div>
+        <div className="eyebrow">{t("routing.config_title")}</div>
+        <div className="card"><div className="empty-note">{t("routing.config_loading")}</div></div>
       </>
     );
   }
 
   return (
     <>
-      <div className="eyebrow">Router config</div>
+      <div className="eyebrow">{t("routing.config_title")}</div>
       <div className="card">
         <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12 }}>
-          Changes don't take effect until the service is restarted.
+          {t("routing.config_note")}
         </div>
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
         {restartError && <div className="error-note" style={{ marginBottom: 12 }}>{restartError}</div>}
@@ -241,15 +244,15 @@ function ConfigCard({ canAdmin }: { canAdmin: boolean }) {
           <div className="form-actions" style={{ marginTop: 12, gap: 8 }}>
             {g.dirty ? (
               <>
-                <button className="btn" onClick={g.reset} title="Discard unsaved changes">Discard</button>
+                <button className="btn" onClick={g.reset} title={t("routing.discard_title")}>{t("routing.discard")}</button>
                 <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
                 <button className="btn primary" disabled={g.pending || restarting} onClick={saveAndRestart}>
-                  {g.pending ? "Saving…" : "Save and Restart"}
+                  {g.pending ? t("routing.saving") : t("routing.save_and_restart")}
                 </button>
               </>
             ) : restartRequired ? (
               <button className="btn primary" disabled={restart.isPending || restarting} onClick={triggerRestart}>
-                {restart.isPending ? "Requesting…" : "Restart"}
+                {restart.isPending ? t("danger.requesting") : t("routing.restart_button")}
               </button>
             ) : null}
           </div>
@@ -266,6 +269,7 @@ function ConfigCard({ canAdmin }: { canAdmin: boolean }) {
 // already existed; this is the first UI outside Catalog → Offerings that
 // surfaces them, scoped to just the routing-relevant subset.
 function ModelRoutingSection({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const models = useCatalogModels();
   const offerings = useCatalogOfferings();
   const providers = useProviders();
@@ -275,8 +279,8 @@ function ModelRoutingSection({ canAdmin }: { canAdmin: boolean }) {
   if (offerings.isError) {
     return (
       <>
-        <div className="eyebrow" id="routing-models">Model → provider routing</div>
-        <div className="card"><div className="empty-note">Catalog not available (store may not be wired).</div></div>
+        <div className="eyebrow" id="routing-models">{t("routing.model_routing_title")}</div>
+        <div className="card"><div className="empty-note">{t("routing.catalog_unavailable")}</div></div>
       </>
     );
   }
@@ -299,23 +303,22 @@ function ModelRoutingSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow" id="routing-models">Model → provider routing</div>
+      <div className="eyebrow" id="routing-models">{t("routing.model_routing_title")}</div>
       <div className="card">
         <RoutingTree />
         <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, lineHeight: 1.55 }}>
-          Which provider a0 presents for each model, and the priority order a failover walks. Enabled/priority only —
-          pricing, wire model, context length, and variant stay in{" "}
-          <a href="#settings/catalog/offerings">Catalog → Offerings</a>.
+          {t("routing.routing_description_before")}{" "}
+          <a href="#settings/catalog/offerings">{t("routing.catalog_offerings_link")}</a>.
         </div>
         {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
-        {offeringList.length === 0 && <div className="empty-note">No offerings configured — nothing routes to a remote provider yet.</div>}
+        {offeringList.length === 0 && <div className="empty-note">{t("routing.no_offerings")}</div>}
         {[...groups.entries()].map(([modelId, group]) => {
           const model = modelList.find((m) => m.id === modelId);
           return (
             <div key={modelId} style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
                 {model?.logo && <Icon slug={model.logo} name={model.name} sm />}
-                {model?.name ?? `Model #${modelId}`}
+                {model?.name ?? t("common:routing_tree.model_fallback_name", { id: modelId })}
               </div>
               <div className="hoom">
                 {group.map((o) => {
@@ -329,18 +332,18 @@ function ModelRoutingSection({ canAdmin }: { canAdmin: boolean }) {
                           {o.provider}
                           {prov?.country && <span style={{ marginLeft: 6, fontSize: 13 }}>{countryFlag(prov.country)}</span>}
                           {preferredIds.has(o.id) && (
-                            <span className="chip" style={{ marginLeft: 6, color: "var(--ok)" }} title="The offering a0 currently presents for this model">
-                              preferred
+                            <span className="chip" style={{ marginLeft: 6, color: "var(--ok)" }} title={t("routing.preferred_title")}>
+                              {t("routing.preferred_chip")}
                             </span>
                           )}
-                          {providerDisabled && <span className="chip" style={{ marginLeft: 4, color: "var(--warn)" }}>provider off</span>}
+                          {providerDisabled && <span className="chip" style={{ marginLeft: 4, color: "var(--warn)" }}>{t("routing.provider_off_chip")}</span>}
                         </div>
                         <div className="pu" style={{ fontFamily: "var(--mono)" }}>{o.wire_model}</div>
                       </div>
                       {canAdmin ? (
                         <div className="actions" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
                           <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
-                            priority
+                            {t("routing.priority_label")}
                             <input
                               type="number"
                               value={o.priority}
@@ -354,14 +357,16 @@ function ModelRoutingSection({ canAdmin }: { canAdmin: boolean }) {
                           </label>
                           <button
                             disabled={update.isPending}
-                            title={o.enabled ? "Stop routing to this offering" : "Resume routing to this offering"}
+                            title={o.enabled ? t("routing.disable_route_title") : t("routing.enable_route_title")}
                             onClick={() => submitPatch(o, { enabled: !o.enabled })}
                           >
-                            {o.enabled ? "Disable" : "Enable"}
+                            {o.enabled ? t("routing.disable_button") : t("routing.enable_button")}
                           </button>
                         </div>
                       ) : (
-                        <div className="pu" style={{ marginLeft: "auto" }}>priority {o.priority} · {o.enabled ? "enabled" : "disabled"}</div>
+                        <div className="pu" style={{ marginLeft: "auto" }}>
+                          {t("routing.priority_status", { priority: o.priority, status: o.enabled ? t("routing.status_enabled") : t("routing.status_disabled") })}
+                        </div>
                       )}
                     </div>
                   );

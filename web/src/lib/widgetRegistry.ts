@@ -17,6 +17,9 @@ export interface ConfigSchemaProp {
   name: string;
   type: "select";
   default: string;
+  // label is a key path into the "dashboard" translation namespace (e.g.
+  // "ranges.24h"), not literal display text — the consumer (
+  // DashboardCustomPage's WidgetConfigForm) resolves it via t().
   options: readonly { key: string; label: string }[];
 }
 
@@ -32,41 +35,44 @@ export type WidgetComponent = ComponentType<any>;
 
 export interface WidgetRegistryEntry {
   slug: string;
+  // Key path into the "dashboard" translation namespace (e.g.
+  // "widgets.activity_heatmap"), not literal display text — resolved by the
+  // consumer (DashboardCustomPage) via t().
   displayName: string;
   component: WidgetComponent;
   configSchema: ConfigSchemaProp[];
 }
 
 const RESOURCE_WINDOWS = [
-  { key: "24h", label: "24h" },
-  { key: "72h", label: "72h" },
-  { key: "7d", label: "1w" },
-  { key: "30d", label: "1m" },
+  { key: "24h", label: "ranges.24h" },
+  { key: "72h", label: "ranges.72h" },
+  { key: "7d", label: "ranges.1w" },
+  { key: "30d", label: "ranges.1m" },
 ] as const;
 
 const COST_WINDOWS = [
-  { key: "30d", label: "1 Month" },
-  { key: "180d", label: "6 Months" },
-  { key: "365d", label: "1 Year" },
-  { key: "3650d", label: "All Time" },
+  { key: "30d", label: "ranges.1mo" },
+  { key: "180d", label: "ranges.6mo" },
+  { key: "365d", label: "ranges.1y" },
+  { key: "3650d", label: "ranges.all" },
 ] as const;
 
 const RIGHT_NOW_WINDOWS = [
-  { key: "24h", label: "24h" },
-  { key: "72h", label: "72h" },
-  { key: "7d", label: "1w" },
+  { key: "24h", label: "ranges.24h" },
+  { key: "72h", label: "ranges.72h" },
+  { key: "7d", label: "ranges.1w" },
 ] as const;
 
 const REGISTRY: WidgetRegistryEntry[] = [
   {
     slug: "activity-heatmap",
-    displayName: "Activity Heatmap",
+    displayName: "widgets.activity_heatmap",
     component: ActivityHeatmapWidget,
     configSchema: [],
   },
   {
     slug: "right-now",
-    displayName: "Right Now",
+    displayName: "widgets.right_now",
     component: RightNowWidget,
     configSchema: [
       { name: "window_", type: "select", default: "24h", options: RIGHT_NOW_WINDOWS },
@@ -74,19 +80,19 @@ const REGISTRY: WidgetRegistryEntry[] = [
   },
   {
     slug: "memory-meter",
-    displayName: "Memory Meter",
+    displayName: "widgets.memory_meter",
     component: MemoryMeterWidget,
     configSchema: [],
   },
   {
     slug: "resource-gauges",
-    displayName: "Resource Gauges",
+    displayName: "widgets.resource_gauges",
     component: ResourceGaugesWidget,
     configSchema: [],
   },
   {
     slug: "resource-trend",
-    displayName: "Resource Trend",
+    displayName: "widgets.resource_trend",
     component: ResourceTrendWidget,
     configSchema: [
       { name: "window_", type: "select", default: "24h", options: RESOURCE_WINDOWS },
@@ -94,7 +100,7 @@ const REGISTRY: WidgetRegistryEntry[] = [
   },
   {
     slug: "electricity-breakdown",
-    displayName: "Electricity Breakdown",
+    displayName: "widgets.electricity_breakdown",
     component: ElectricityBreakdownWidget,
     configSchema: [
       { name: "window_", type: "select", default: "24h", options: RESOURCE_WINDOWS },
@@ -102,7 +108,7 @@ const REGISTRY: WidgetRegistryEntry[] = [
   },
   {
     slug: "per-model-spend",
-    displayName: "Per-Model Spend",
+    displayName: "widgets.per_model_spend",
     component: PerModelSpendTableWidget,
     configSchema: [
       { name: "window_", type: "select", default: "30d", options: COST_WINDOWS },

@@ -75,7 +75,7 @@ func (s *Server) handleSmithActionsList(w http.ResponseWriter, r *http.Request) 
 	if raw := q.Get("investigation_id"); raw != "" {
 		n, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid investigation_id")
+			writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "investigation"}, "invalid investigation_id")
 			return
 		}
 		invID = &n
@@ -87,7 +87,7 @@ func (s *Server) handleSmithActionsList(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list actions failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "list actions failed")
 		return
 	}
 	pending, err := s.deps.Smith.PendingActionCount(r.Context())
@@ -141,15 +141,15 @@ func (s *Server) handleSmithActionCreate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if !validActionKinds[b.Kind] {
-		writeError(w, http.StatusBadRequest, "kind must be one of runbook, load_config, unload_slot, restart_forge_unit, settings_change, catalog_change, delete_files, procedure")
+		writeErrorCode(w, http.StatusBadRequest, "must_be_one_of", nil, "kind must be one of runbook, load_config, unload_slot, restart_forge_unit, settings_change, catalog_change, delete_files, procedure")
 		return
 	}
 	if !validActionRisks[b.Risk] {
-		writeError(w, http.StatusBadRequest, "risk must be one of info, low, high")
+		writeErrorCode(w, http.StatusBadRequest, "must_be_one_of", nil, "risk must be one of info, low, high")
 		return
 	}
 	if b.Title == "" {
-		writeError(w, http.StatusBadRequest, "title is required")
+		writeErrorCode(w, http.StatusBadRequest, "required", nil, "title is required")
 		return
 	}
 
@@ -180,7 +180,7 @@ func (s *Server) handleSmithActionDetail(w http.ResponseWriter, r *http.Request)
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "action"}, "invalid action id")
 		return
 	}
 	a, err := s.deps.Smith.GetAction(r.Context(), id)
@@ -196,10 +196,10 @@ func (s *Server) handleSmithActionDetail(w http.ResponseWriter, r *http.Request)
 // id, so errors.Is sees through the wrap.
 func writeActionFetchError(w http.ResponseWriter, err error) {
 	if errors.Is(err, sql.ErrNoRows) {
-		writeError(w, http.StatusNotFound, "action not found")
+		writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "action"}, "action not found")
 		return
 	}
-	writeError(w, http.StatusInternalServerError, "action lookup failed")
+	writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "action lookup failed")
 }
 
 // handleSmithActionApprove approves a pending action. Gated
@@ -216,7 +216,7 @@ func (s *Server) handleSmithActionApprove(w http.ResponseWriter, r *http.Request
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "action"}, "invalid action id")
 		return
 	}
 	a, err := s.deps.Smith.ApproveAction(r.Context(), id, identity(r).Name)
@@ -260,7 +260,7 @@ func (s *Server) handleSmithActionRecheck(w http.ResponseWriter, r *http.Request
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "action"}, "invalid action id")
 		return
 	}
 	a, err := s.deps.Smith.RecheckRunbook(r.Context(), id, identity(r).Name)
@@ -297,7 +297,7 @@ func (s *Server) handleSmithActionCheckNow(w http.ResponseWriter, r *http.Reques
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "action"}, "invalid action id")
 		return
 	}
 	a, err := s.deps.Smith.CheckPendingRunbook(r.Context(), id, identity(r).Name)
@@ -335,7 +335,7 @@ func (s *Server) handleSmithActionReject(w http.ResponseWriter, r *http.Request)
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "action"}, "invalid action id")
 		return
 	}
 	a, err := s.deps.Smith.RejectAction(r.Context(), id, identity(r).Name)
@@ -371,7 +371,7 @@ func (s *Server) handleSmithActionHandoff(w http.ResponseWriter, r *http.Request
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "action"}, "invalid action id")
 		return
 	}
 	var b smithActionHandoffBody
@@ -380,7 +380,7 @@ func (s *Server) handleSmithActionHandoff(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !validHandoffResolutions[b.Resolution] {
-		writeError(w, http.StatusBadRequest, "resolution must be one of runbook, acknowledge, remote, cancel")
+		writeErrorCode(w, http.StatusBadRequest, "must_be_one_of", nil, "resolution must be one of runbook, acknowledge, remote, cancel")
 		return
 	}
 
@@ -395,7 +395,7 @@ func (s *Server) handleSmithActionHandoff(w http.ResponseWriter, r *http.Request
 			return
 		}
 		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "action not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "action"}, "action not found")
 			return
 		}
 		// Every other ResolveHandoff error is a precondition failure (e.g.
@@ -418,7 +418,7 @@ func (s *Server) handleSmithProcedureRun(w http.ResponseWriter, r *http.Request)
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "action"}, "invalid action id")
 		return
 	}
 	run, err := s.deps.Smith.GetProcedureRun(r.Context(), id)
@@ -438,7 +438,7 @@ func (s *Server) handleSmithProcedureCheckpointApprove(w http.ResponseWriter, r 
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "action"}, "invalid action id")
 		return
 	}
 	a, err := s.deps.Smith.ApproveProcedureCheckpoint(r.Context(), id, identity(r).Name)
@@ -467,7 +467,7 @@ func (s *Server) handleSmithProcedureCheckpointAbort(w http.ResponseWriter, r *h
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "action"}, "invalid action id")
 		return
 	}
 	a, err := s.deps.Smith.AbortProcedureRun(r.Context(), id, identity(r).Name)
@@ -499,7 +499,7 @@ func (s *Server) handleSmithActionProcedurePreview(w http.ResponseWriter, r *htt
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "action"}, "invalid action id")
 		return
 	}
 	preview, err := s.deps.Smith.ProcedurePreview(r.Context(), id)
@@ -526,7 +526,7 @@ func (s *Server) handleSmithActionProcedurize(w http.ResponseWriter, r *http.Req
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "action"}, "invalid action id")
 		return
 	}
 	a, err := s.deps.Smith.Procedurize(r.Context(), id, identity(r).Name)
@@ -567,7 +567,7 @@ func (s *Server) handleSmithProcedureRunsList(w http.ResponseWriter, r *http.Req
 	}
 	runs, err := s.deps.Smith.ListProcedureRuns(r.Context(), limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list procedure runs failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "list procedure runs failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
@@ -583,7 +583,7 @@ func (s *Server) handleSmithProcedureScorecard(w http.ResponseWriter, r *http.Re
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "action"}, "invalid action id")
 		return
 	}
 	sc, err := s.deps.Smith.ProcedureScorecard(r.Context(), id)

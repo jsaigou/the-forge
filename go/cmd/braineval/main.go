@@ -63,6 +63,16 @@ var smithAuditPrompt string
 // same way for the go:embed package boundary) — keep in sync by hand.
 const verifyNudge = "Before answering: re-run the check most relevant to your conclusion (via run_check) to confirm it holds against live state. If it confirms, answer now and cite it. If you cannot verify, say so explicitly."
 
+// languageDirectiveJA mirrors smith's own Phase 3 language directive
+// (internal/smith/reasoning.go's languageDirective("ja")) — duplicated, not
+// imported, same posture as verifyNudge/toolBlock above. This is the
+// multilanguage plan's braineval gate (docs/adr/0016-localization.md):
+// Japanese variants of the tool-call-compliance and grounding scenarios get
+// this appended to whatever system prompt they'd otherwise use, exactly
+// like a real ja-locale turn would see.
+const languageDirectiveJA = "\nAnswer in Japanese. Keep config names, slot IDs, commands, file paths, flags, and kind:ref citations exactly as written, in English. " +
+	"The knowledge base is English-only — when calling kb_search, use English keywords, not Japanese ones.\n"
+
 // toolBlock mirrors smith's toolsInstructionBlock (internal/smith/reasoning.go)
 // for fenced mode — the exact instruction the brain must obey.
 const toolBlock = `
@@ -130,6 +140,14 @@ type scenario struct {
 	MustMention []string
 	// OutOfScope marks a question that must be refused (no fabricated tool).
 	OutOfScope bool
+	// Lang is "" (English, the default — unchanged behavior) or "ja". A ja
+	// scenario's User question is written in Japanese and gets
+	// languageDirectiveJA appended to its system prompt in main()'s
+	// scenario loop, exactly mirroring how a real Lang:"ja" chat turn
+	// builds its prompt (reasoning.go's languageDirective). ExpectTools is
+	// unaffected by language — tool-call compliance is scored the same way
+	// regardless of what language the question was asked in.
+	Lang string
 	// Follow, when set, scripts one additional round: after this turn
 	// calls a tool, ToolResult is fed back in smith's real wire shape
 	// (tool_loop.go:276-280 — native mode gets a "tool"-role message keyed
@@ -232,6 +250,59 @@ var scenarios = []scenario{
 	{
 		Name:        "grounded_answer_from_context",
 		User:        "Is the GPU currently hung according to the recent findings?",
+		MustMention: []string{"device-lost", "gpu_hang"},
+	},
+
+	// Japanese variants (multilanguage plan Phase 3 braineval gate,
+	// docs/adr/0016-localization.md): the same tool-call-compliance and
+	// grounding scenarios above, asked in Japanese, with languageDirectiveJA
+	// applied to the system prompt (main()'s scenario loop). MustMention
+	// strings stay in English deliberately — they're identifiers/technical
+	// terms (check IDs, "GTT") the directive instructs the model to keep
+	// exactly as written even inside an otherwise-Japanese answer, so this
+	// also verifies that instruction is actually followed rather than
+	// everything getting transliterated.
+	{
+		Name:        "gpu_usage_wants_check_ja",
+		Lang:        "ja",
+		User:        "ForgeHostの現在のGTT使用率(上限に対する割合)はどのくらいですか?",
+		ExpectTools: []string{"run_check"},
+	},
+	{
+		Name:        "hang_wants_check_ja",
+		Lang:        "ja",
+		User:        "現在GPUハングの兆候はありますか?",
+		ExpectTools: []string{"run_check"},
+	},
+	{
+		Name:        "findings_wants_list_ja",
+		Lang:        "ja",
+		User:        "直近の警告(warn)は何でしたか?",
+		ExpectTools: []string{"list_findings"},
+	},
+	{
+		Name:        "kb_wants_search_ja",
+		Lang:        "ja",
+		User:        "モデルをアンロードしてもGTTプールが解放されないのはなぜですか?",
+		ExpectTools: []string{"kb_search"},
+	},
+	{
+		Name:        "catalog_wants_lookup_ja",
+		Lang:        "ja",
+		User:        "カタログで利用可能なモデルコンフィグを教えてください",
+		ExpectTools: []string{"catalog_lookup"},
+	},
+	{
+		Name:        "scope_refusal_no_tool_ja",
+		Lang:        "ja",
+		User:        "海についての詩を書いてもらえますか?",
+		OutOfScope:  true,
+		MustMention: []string{"smith"},
+	},
+	{
+		Name:        "grounded_answer_from_context_ja",
+		Lang:        "ja",
+		User:        "最近の検出結果によると、GPUは現在ハングしていますか?",
 		MustMention: []string{"device-lost", "gpu_hang"},
 	},
 
@@ -373,6 +444,10 @@ type evalResult struct {
 	FencedFormatOK bool   `json:"fenced_format_ok"`
 	ArgsValidJSON  bool   `json:"args_valid_json"`
 	AnswerSnippet  string `json:"answer_snippet,omitempty"`
+	// Lang mirrors the scenario's Lang field ("" or "ja") — the multilanguage
+	// plan's braineval gate needs this to compute an English-vs-Japanese
+	// pass-rate comparison, not just one blended total.
+	Lang string `json:"lang,omitempty"`
 }
 
 // scenarioRole returns sc.Role, defaulting to "executor" — the zero value
@@ -462,6 +537,13 @@ func main() {
 		if scenarioRole(sc) == "auditor" {
 			sc.SystemPrompt = auditPrompt
 		}
+		if sc.Lang == "ja" {
+			base := sysPrompt
+			if sc.SystemPrompt != "" {
+				base = sc.SystemPrompt
+			}
+			sc.SystemPrompt = base + languageDirectiveJA
+		}
 		active = append(active, sc)
 	}
 
@@ -470,8 +552,14 @@ func main() {
 	var results []evalResult
 	passCount := 0
 	roleTotals := map[string][2]int{} // role -> [passed, total]
+	langTotals := map[string][2]int{} // lang ("en"/"ja") -> [passed, total]
 	for _, sc := range active {
+		lang := sc.Lang
+		if lang == "" {
+			lang = "en"
+		}
 		for _, r := range runScenario(ctx, client, *model, *baseURL, *apiKey, sysPrompt, sc) {
+			r.Lang = lang
 			if r.Pass {
 				passCount++
 			}
@@ -481,6 +569,12 @@ func main() {
 				t[0]++
 			}
 			roleTotals[r.Role] = t
+			lt := langTotals[lang]
+			lt[1]++
+			if r.Pass {
+				lt[0]++
+			}
+			langTotals[lang] = lt
 			results = append(results, r)
 			printResult(r)
 		}
@@ -492,12 +586,24 @@ func main() {
 			fmt.Printf("  %-9s %d/%d\n", role, t[0], t[1])
 		}
 	}
+	// Multilanguage plan Phase 3 braineval gate: an en-vs-ja pass-rate
+	// comparison, not just one blended total, so a Japanese regression
+	// can't hide inside an otherwise-healthy overall score.
+	for _, lang := range []string{"en", "ja"} {
+		if t, ok := langTotals[lang]; ok {
+			fmt.Printf("  lang=%-3s %d/%d\n", lang, t[0], t[1])
+		}
+	}
 
 	byRole := map[string]map[string]int{}
 	for role, t := range roleTotals {
 		byRole[role] = map[string]int{"passed": t[0], "total": t[1]}
 	}
-	summary := map[string]any{"model": *model, "passed": passCount, "total": len(results), "by_role": byRole, "results": results}
+	byLang := map[string]map[string]int{}
+	for lang, t := range langTotals {
+		byLang[lang] = map[string]int{"passed": t[0], "total": t[1]}
+	}
+	summary := map[string]any{"model": *model, "passed": passCount, "total": len(results), "by_role": byRole, "by_lang": byLang, "results": results}
 	if *jsonOut == "" {
 		enc := json.NewEncoder(os.Stderr)
 		_ = enc.Encode(summary)

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { SmithMessageSource } from "../../lib/types";
 
 // SourcesList — P5 (docs/v5-smith.md §4.8). Renders a chat message's
@@ -14,10 +15,11 @@ function hostOf(url: string): string {
 }
 
 export function SourcesList({ sources }: { sources: SmithMessageSource[] }) {
+  const { t } = useTranslation("common");
   if (sources.length === 0) return null;
   return (
     <details className="smith-sources">
-      <summary>Sources ({sources.length})</summary>
+      <summary>{t("sources_list.summary", { count: sources.length })}</summary>
       <div className="smith-sources-list">
         {sources.map((s, i) => (
           <div className="smith-source-row" key={s.url ?? s.title ?? i}>
@@ -27,8 +29,8 @@ export function SourcesList({ sources }: { sources: SmithMessageSource[] }) {
             </a>
             <span style={{ color: "var(--text-mute)", fontSize: 10.5 }}>{hostOf(s.url)}</span>
             {s.cached && (
-              <span className="chip" style={{ fontSize: 9 }} title="Served from smith's web cache, not a fresh fetch">
-                cached
+              <span className="chip" style={{ fontSize: 9 }} title={t("sources_list.cached_title")}>
+                {t("sources_list.cached_chip")}
               </span>
             )}
           </div>

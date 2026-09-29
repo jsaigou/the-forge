@@ -1,0 +1,11 @@
+{
+  "tabs": {
+    "console": "Console",
+    "dashboard": "Dashboard",
+    "models": "Models",
+    "scheduling": "Scheduling",
+    "settings": "Settings",
+    "help": "Help",
+    "attributions": "Attributions"
+  }
+}

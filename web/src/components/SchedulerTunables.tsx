@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../lib/api";
 import { useSchedulerConfig, useUpdateSchedulerConfig } from "../lib/queries";
 import { useSession } from "../lib/session";
@@ -21,6 +22,7 @@ import { StepUpModal } from "./StepUpModal";
 // missing one). Without this, that backend change would make Save silently
 // 403 on the Scheduling page with no way to recover.
 export function SchedulerTunables() {
+  const { t } = useTranslation("scheduling");
   const { canAdmin } = useSession();
   const cfg = useSchedulerConfig();
   const update = useUpdateSchedulerConfig();
@@ -57,26 +59,26 @@ export function SchedulerTunables() {
   }
 
   if (cfg.isError) {
-    return <div className="card"><div className="empty-note">Operator role required to view scheduler settings.</div></div>;
+    return <div className="card"><div className="empty-note">{t("tunables.role_required")}</div></div>;
   }
   if (!active) {
-    return <div className="card"><div className="empty-note">Loading scheduler settings…</div></div>;
+    return <div className="card"><div className="empty-note">{t("tunables.loading")}</div></div>;
   }
 
   return (
     <>
       <div className="card">
-        <h3><span className="tick" />Scheduler tunables</h3>
+        <h3><span className="tick" />{t("tunables.heading")}</h3>
         {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
         <div className="form-grid">
-          {field("idle_unload_s", "Idle unload (s)")}
-          {field("small_job_token_threshold", "Small-job token threshold")}
-          {field("priority_jump_cap", "Priority jump cap")}
-          {field("reservation_soon_min", "Reservation-soon window (min)")}
+          {field("idle_unload_s", t("tunables.field_idle_unload"))}
+          {field("small_job_token_threshold", t("tunables.field_small_job_threshold"))}
+          {field("priority_jump_cap", t("tunables.field_priority_jump_cap"))}
+          {field("reservation_soon_min", t("tunables.field_reservation_soon"))}
         </div>
         {canAdmin && draft && (
           <div className="form-actions">
-            <button className="btn" onClick={() => { setDraft(null); setError(null); }}>Reset</button>
+            <button className="btn" onClick={() => { setDraft(null); setError(null); }}>{t("tunables.reset")}</button>
             <SaveButton pending={update.isPending} isError={update.isError} onClick={save} />
           </div>
         )}

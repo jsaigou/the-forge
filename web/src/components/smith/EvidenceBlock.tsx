@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 // EvidenceBlock — S2-Web (docs/v5-smith-experience.md §2.2 FAST ANSWER). Renders
 // the expandable evidence detail that follows a fast-path answer. The backend
 // (reasoning.go:871) appends a separate smith_deterministic message with empty
@@ -39,9 +41,10 @@ export function parseEvidence(raw: string | null): AnswerEvidenceRow[] | null {
 }
 
 export function EvidenceBlock({ evidence }: { evidence: AnswerEvidenceRow[] }) {
+  const { t } = useTranslation("common");
   return (
     <details className="smith-evidence">
-      <summary>Evidence ({evidence.length})</summary>
+      <summary>{t("evidence_block.summary", { count: evidence.length })}</summary>
       <div className="smith-evidence-rows">
         {evidence.map((row, i) => (
           <div className="smith-evidence-row" key={`${row.label}-${i}`}>

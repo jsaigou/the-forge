@@ -1,5 +1,8 @@
+import i18next from "i18next";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../../lib/api";
+import { appLocale } from "../../lib/format";
 import {
   useSmithActionApprove,
   useSmithActionCheckNow,
@@ -38,16 +41,15 @@ import { RunbookCard } from "./RunbookCard";
 // new semantic color into an existing palette without a real gap).
 
 // WHY_CANT_RUN_LABELS maps smith.WhyCantRun's typed codes (Tier 1 Sprint 4)
-// to a consistent, human-readable reason — replacing whatever free-text a
+// to a consistent, human-readable reason (looked up via i18next, "common:
+// action_card.why_cant_run.<code>") — replacing whatever free-text a
 // proposer happened to write. An unrecognized or absent code falls back to
-// the pre-existing generic prose in the whyCantRun computation below, so an
-// older un-migrated proposal (or a future code this map hasn't caught up to
-// yet) still renders something sensible.
-const WHY_CANT_RUN_LABELS: Record<string, string> = {
-  requires_reboot: "requires rebooting the host — smith won't trigger that on its own",
-  policy_defers_to_human: "a deliberate guardrail — smith reports this, but leaves the judgment call to you",
-  risks_live_workload: "could disrupt something a live slot or service is actively using",
-};
+// action.detail.why_cant_run itself (the pre-existing raw backend string),
+// so an older un-migrated proposal (or a future code this map hasn't caught
+// up to yet) still renders something sensible.
+const WHY_CANT_RUN_CODES = ["requires_reboot", "policy_defers_to_human", "risks_live_workload"];
+
+type TFn = (key: string, opts?: Record<string, unknown>) => string;
 
 const RISK_COLOR: Record<SmithActionRisk, string> = {
   info: "var(--cool)",
@@ -55,11 +57,11 @@ const RISK_COLOR: Record<SmithActionRisk, string> = {
   high: "var(--crit)",
 };
 
-function riskChip(risk: SmithActionRisk) {
+function riskChip(t: TFn, risk: SmithActionRisk) {
   const c = RISK_COLOR[risk] ?? "var(--text-mute)";
   return (
     <span className="chip" style={{ color: c, borderColor: `color-mix(in srgb, ${c} 40%, var(--border))` }}>
-      {risk} risk
+      {t(`action_card.risk_chip.${risk}`, { defaultValue: `${risk} risk` })}
     </span>
   );
 }
@@ -79,11 +81,11 @@ const STATUS_COLOR: Record<SmithActionStatus, string> = {
   superseded: "var(--text-mute)",
 };
 
-function statusChip(status: SmithActionStatus) {
+function statusChip(t: TFn, status: SmithActionStatus) {
   const c = STATUS_COLOR[status] ?? "var(--text-mute)";
   return (
     <span className="chip" style={{ color: c, borderColor: `color-mix(in srgb, ${c} 40%, var(--border))` }}>
-      {status.replace(/_/g, " ")}
+      {t(`action_card.status_chip.${status}`, { defaultValue: status.replace(/_/g, " ") })}
     </span>
   );
 }
@@ -95,11 +97,11 @@ const SEV_COLOR: Record<string, string> = {
   crit: "var(--crit)",
 };
 
-function sevChip(sev: string) {
+function sevChip(t: TFn, sev: string) {
   const c = SEV_COLOR[sev] ?? "var(--text-mute)";
   return (
     <span className="chip" style={{ color: c, borderColor: `color-mix(in srgb, ${c} 40%, var(--border))` }}>
-      {sev}
+      {t(`action_card.severity.${sev}`, { defaultValue: sev })}
     </span>
   );
 }
@@ -108,7 +110,7 @@ function fmtTime(unix: number | null): string {
   if (!unix) return "";
   const d = new Date(unix * 1000);
   if (isNaN(d.getTime())) return "";
-  return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  return d.toLocaleString(appLocale(), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 function DetailBlock({ detail }: { detail: Record<string, unknown> }) {
@@ -145,15 +147,26 @@ function DetailBlock({ detail }: { detail: Record<string, unknown> }) {
   );
 }
 
-function VerifyList({ verify }: { verify: SmithVerifyResult[] }) {
+// verifyResultSummary renders a translated summary when the underlying
+// check has a Phase 3 SummaryKey/Params (multilanguage plan), falling back
+// to the raw (always-English) summary otherwise — same exists()-gated
+// pattern as Diagnostics.tsx's findingSummaryText.
+function verifyResultSummary(v: SmithVerifyResult): string {
+  if (v.summary_key && i18next.exists(`smith:${v.summary_key}`)) {
+    return i18next.t(`smith:${v.summary_key}`, v.params ?? {});
+  }
+  return v.summary;
+}
+
+function VerifyList({ t, verify }: { t: TFn; verify: SmithVerifyResult[] }) {
   if (verify.length === 0) return null;
   return (
     <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
       {verify.map((v, i) => (
         <div key={v.check_id ?? i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, flexWrap: "wrap" }}>
-          {sevChip(v.severity)}
+          {sevChip(t, v.severity)}
           <span style={{ fontFamily: "var(--mono)", color: "var(--text-dim)" }}>{v.check_id}</span>
-          <span style={{ color: "var(--text-mute)" }}>{v.summary}</span>
+          <span style={{ color: "var(--text-mute)" }}>{verifyResultSummary(v)}</span>
         </div>
       ))}
     </div>
@@ -167,6 +180,7 @@ function VerifyList({ verify }: { verify: SmithVerifyResult[] }) {
 // controls (§13). The action's own status stays "executing" for the whole
 // run — only run.status moves.
 function ProcedureRunPanel({ actionId }: { actionId: number }) {
+  const { t } = useTranslation("common");
   const { data: run } = useSmithProcedureRun(actionId);
   const approve = useSmithProcedureCheckpointApprove(actionId);
   const abort = useSmithProcedureCheckpointAbort(actionId);
@@ -196,7 +210,7 @@ function ProcedureRunPanel({ actionId }: { actionId: number }) {
         {run.status === "running" && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-mute)" }}>
             <span className="action-busy-dot dot-busy" />
-            step {run.current_step + 1}…
+            {t("action_card.step_running", { n: run.current_step + 1 })}
           </div>
         )}
       </div>
@@ -206,21 +220,21 @@ function ProcedureRunPanel({ actionId }: { actionId: number }) {
           className="card"
           style={{ marginTop: 8, padding: 10, borderLeft: "3px solid var(--warn)", background: "color-mix(in srgb, var(--warn) 8%, var(--panel))" }}
         >
-          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--warn)" }}>Paused for review</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--warn)" }}>{t("action_card.paused_for_review")}</div>
           {run.checkpoint_note && (
             <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 4 }}>{run.checkpoint_note}</div>
           )}
           {error && <div className="error-note" style={{ marginTop: 6 }}>{error}</div>}
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button className="btn primary" disabled={approve.isPending} onClick={handleApprove}>
-              {approve.isPending ? "…" : "Continue"}
+              {approve.isPending ? "…" : t("action_card.continue")}
             </button>
             <ConfirmButton
               onConfirm={handleAbort}
               pending={abort.isPending}
-              label="Abort"
-              confirmLabel="Abort this run?"
-              warning="The procedure stops here — whatever already ran stays as it is."
+              label={t("action_card.abort")}
+              confirmLabel={t("action_card.abort_confirm")}
+              warning={t("action_card.abort_warning")}
             />
           </div>
         </div>
@@ -230,6 +244,7 @@ function ProcedureRunPanel({ actionId }: { actionId: number }) {
 }
 
 export function ActionCard({ action }: { action: SmithAction }) {
+  const { t } = useTranslation("common");
   const approve = useSmithActionApprove(action.id);
   const reject = useSmithActionReject(action.id);
   const recheck = useSmithActionRecheck(action.id);
@@ -267,7 +282,7 @@ export function ActionCard({ action }: { action: SmithAction }) {
     checkNow.mutate(undefined, {
       onSuccess: (res) => {
         if (res.still_failing && res.still_failing.length > 0) {
-          setCheckNowNote(`still failing: ${res.still_failing.join(", ")}`);
+          setCheckNowNote(t("action_card.still_failing", { list: res.still_failing.join(", ") }));
         }
       },
       onError: (e) => setError(apiErrorMessage(e)),
@@ -309,10 +324,10 @@ export function ActionCard({ action }: { action: SmithAction }) {
   const recheckCheckId = typeof action.detail?.check_id === "string" ? action.detail.check_id : undefined;
   const canRecheck = doneRunbook && (action.investigation_id != null || recheckCheckId != null);
   const recheckLabel = action.investigation_id != null
-    ? "re-check the checks"
+    ? t("action_card.recheck.with_investigation")
     : recheckCheckId
-      ? `re-check ${recheckCheckId}`
-      : "no check to re-verify";
+      ? t("action_card.recheck.with_check_id", { id: recheckCheckId })
+      : t("action_card.recheck.none");
 
   // S7-followup smith UX sprint: the removed self-attestation "done — I ran
   // it myself" button's replacement — a PENDING runbook's on-demand "check
@@ -332,23 +347,23 @@ export function ActionCard({ action }: { action: SmithAction }) {
   // primary whenever there's no Approve button at all to be primary instead).
   const isSelfReviewClose = action.detail?.self_review_close === true;
   const checkNowLabel = isSelfReviewClose
-    ? "confirm resolved"
+    ? t("action_card.check_now.self_review_close")
     : action.investigation_id != null
-      ? "check now"
+      ? t("action_card.check_now.with_investigation")
       : recheckCheckId
-        ? `check ${recheckCheckId} now`
-        : "nothing to check";
+        ? t("action_card.check_now.with_check_id", { id: recheckCheckId })
+        : t("action_card.check_now.none");
 
   return (
     <div className="card action-card" style={{ padding: "10px 14px", marginBottom: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span className="chip">{action.kind.replace(/_/g, " ")}</span>
         <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{action.title}</span>
-        {riskChip(action.risk)}
-        {statusChip(action.status)}
+        {riskChip(t, action.risk)}
+        {statusChip(t, action.status)}
         {action.self_evicting && (
           <span className="chip" style={{ color: "var(--warn)", borderColor: "color-mix(in srgb, var(--warn) 40%, var(--border))" }}>
-            self-evicting
+            {t("action_card.self_evicting_chip")}
           </span>
         )}
         <span style={{ fontSize: 10, color: "var(--text-mute)", marginLeft: "auto" }}>{fmtTime(action.created_at)}</span>
@@ -356,7 +371,7 @@ export function ActionCard({ action }: { action: SmithAction }) {
 
       {isSuggestion && (
         <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-dim)" }}>
-          nothing is broken — this is a suggestion, not a failing check.
+          {t("action_card.suggestion_notice")}
         </div>
       )}
 
@@ -386,8 +401,10 @@ export function ActionCard({ action }: { action: SmithAction }) {
             storageKey={String(action.id)}
             whyCantRun={
               typeof action.detail.why_cant_run === "string"
-                ? (WHY_CANT_RUN_LABELS[action.detail.why_cant_run] ?? action.detail.why_cant_run)
-                : "these steps need a human to run them"
+                ? (WHY_CANT_RUN_CODES.includes(action.detail.why_cant_run)
+                    ? t(`action_card.why_cant_run.${action.detail.why_cant_run}`)
+                    : action.detail.why_cant_run)
+                : t("action_card.why_cant_run.default")
             }
           />
         </div>
@@ -406,7 +423,7 @@ export function ActionCard({ action }: { action: SmithAction }) {
       {action.status === "executing" && action.kind !== "procedure" && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 11, color: "var(--text-dim)" }}>
           <span className="action-busy-dot dot-busy" />
-          Executing… (updates live via SSE)
+          {t("action_card.executing_notice")}
         </div>
       )}
 
@@ -423,7 +440,7 @@ export function ActionCard({ action }: { action: SmithAction }) {
             // one-click dispatch alongside a second "Let smith fix it"
             // button doing almost the same thing.
             <button className="btn primary" onClick={() => setShowDowntimeModal(true)}>
-              Approve
+              {t("action_card.approve")}
             </button>
           ) : isSuggestion ? (
             // A non-procedurizable runbook has no execution path at all —
@@ -440,14 +457,14 @@ export function ActionCard({ action }: { action: SmithAction }) {
             <ConfirmButton
               onConfirm={handleApprove}
               pending={approve.isPending}
-              label="Approve"
-              confirmLabel="Delete these files?"
+              label={t("action_card.approve")}
+              confirmLabel={t("action_card.delete_confirm")}
               className="btn primary"
-              warning="This will permanently delete every file listed above. This cannot be undone."
+              warning={t("action_card.delete_warning")}
             />
           ) : (
             <button className="btn primary" disabled={approve.isPending} onClick={handleApprove}>
-              {approve.isPending ? "…" : "Approve"}
+              {approve.isPending ? "…" : t("action_card.approve")}
             </button>
           )}
           {canCheckNow && (
@@ -462,9 +479,9 @@ export function ActionCard({ action }: { action: SmithAction }) {
           <ConfirmButton
             onConfirm={handleReject}
             pending={reject.isPending}
-            label={isSuggestion && !canProcedurize ? "Dismiss" : "Reject"}
-            confirmLabel={isSuggestion && !canProcedurize ? "Dismiss?" : "Reject?"}
-            warning={isSuggestion && !canProcedurize ? undefined : "This proposal will be marked rejected."}
+            label={isSuggestion && !canProcedurize ? t("action_card.dismiss") : t("action_card.reject")}
+            confirmLabel={isSuggestion && !canProcedurize ? t("action_card.dismiss_confirm") : t("action_card.reject_confirm")}
+            warning={isSuggestion && !canProcedurize ? undefined : t("action_card.reject_warning")}
           />
         </div>
       )}
@@ -482,7 +499,7 @@ export function ActionCard({ action }: { action: SmithAction }) {
           onClose={() => setShowDowntimeModal(false)}
           extraWarning={
             action.kind === "delete_files"
-              ? "This will permanently delete every file listed above. This cannot be undone."
+              ? t("action_card.delete_warning")
               : undefined
           }
         />
@@ -505,13 +522,13 @@ export function ActionCard({ action }: { action: SmithAction }) {
             fontSize: 12, fontWeight: 600,
             color: action.status === "failed" ? "var(--crit)" : action.status === "done_unverified" ? "var(--warn)" : "var(--ok)",
           }}>
-            {action.status === "failed" ? "Failed" : action.status === "done_unverified" ? "Done — unverified" : "Done"}
+            {action.status === "failed" ? t("action_card.result.failed") : action.status === "done_unverified" ? t("action_card.result.done_unverified") : t("action_card.result.done")}
           </div>
           <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>{action.result.message}</div>
           {action.result.error && (
             <div style={{ fontSize: 11, color: "var(--crit)", marginTop: 4 }}>{action.result.error}</div>
           )}
-          <VerifyList verify={action.result.verify ?? []} />
+          <VerifyList t={t} verify={action.result.verify ?? []} />
         </div>
       )}
 
@@ -522,7 +539,7 @@ export function ActionCard({ action }: { action: SmithAction }) {
               {recheck.isPending ? "…" : recheckLabel}
             </button>
           ) : (
-            <div style={{ fontSize: 11, color: "var(--text-mute)" }}>no check to re-verify — done</div>
+            <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{t("action_card.no_recheck_done")}</div>
           )}
         </div>
       )}

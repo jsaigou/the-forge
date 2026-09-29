@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../lib/api";
+import { appLocale } from "../lib/format";
 import { useMaintenance, useMaintenanceEnter, useMaintenanceExit } from "../lib/queries";
 import { useStepUpGate } from "../lib/useStepUpGate";
 import { ConfirmButton } from "./ConfirmButton";
@@ -16,6 +18,7 @@ import { StepUpModal } from "./StepUpModal";
 // common case shouldn't occupy the top bar (same contract as
 // SuggestionsTray/PendingActionsCard elsewhere in this app).
 export function MaintenanceBanner() {
+  const { t } = useTranslation("common");
   const maint = useMaintenance();
   const [open, setOpen] = useState(false);
   if (maint.isLoading || maint.isError) return null;
@@ -26,7 +29,7 @@ export function MaintenanceBanner() {
       <button
         type="button"
         className="icon-btn"
-        title="Enter maintenance mode"
+        title={t("maintenance.enter_title")}
         onClick={() => setOpen(true)}
         style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 0, marginRight: 6 }}
       >
@@ -40,7 +43,7 @@ export function MaintenanceBanner() {
       <button
         type="button"
         className="icon-btn"
-        title={active ? `Maintenance mode active — ${maint.data?.reason ?? "no reason given"}. Click for detail.` : "Enter maintenance mode"}
+        title={active ? t("maintenance.active_title", { reason: maint.data?.reason || t("maintenance.no_reason") }) : t("maintenance.enter_title")}
         onClick={() => setOpen((o) => !o)}
         style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 0, marginRight: 6 }}
       >
@@ -64,6 +67,7 @@ export function MaintenanceBanner() {
 // approving a smith action (same step-up resource), never more, so it
 // doesn't need to block the rest of the screen.
 function MaintenancePanel({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation("common");
   const maint = useMaintenance();
   const enter = useMaintenanceEnter();
   const exit = useMaintenanceExit();
@@ -105,7 +109,7 @@ function MaintenancePanel({ onClose }: { onClose: () => void }) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-        <strong style={{ fontSize: 12 }}>Maintenance mode</strong>
+        <strong style={{ fontSize: 12 }}>{t("maintenance.panel_title")}</strong>
         <button type="button" className="icon-btn" style={{ marginLeft: "auto" }} onClick={onClose}>×</button>
       </div>
 
@@ -114,41 +118,40 @@ function MaintenancePanel({ onClose }: { onClose: () => void }) {
       {active ? (
         <>
           <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 4 }}>
-            Active — no model may load, unload, switch, or restart until this window ends.
+            {t("maintenance.active_hint")}
           </div>
-          <div style={{ fontSize: 12, marginBottom: 4 }}>{st?.reason || "(no reason given)"}</div>
+          <div style={{ fontSize: 12, marginBottom: 4 }}>{st?.reason || `(${t("maintenance.no_reason")})`}</div>
           {st?.entered_by && (
-            <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 4 }}>Entered by {st.entered_by}</div>
+            <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 4 }}>{t("maintenance.entered_by", { who: st.entered_by })}</div>
           )}
           {st?.expires_at && (
             <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 10 }}>
-              Auto-exits {new Date(st.expires_at * 1000).toLocaleString()}
+              {t("maintenance.auto_exits", { when: new Date(st.expires_at * 1000).toLocaleString(appLocale()) })}
             </div>
           )}
           <ConfirmButton
-            label="End maintenance"
-            confirmLabel="End it now"
+            label={t("maintenance.end_button")}
+            confirmLabel={t("maintenance.end_confirm")}
             onConfirm={handleExit}
             pending={exit.isPending}
-            warning="Loads/unloads/restarts become possible again immediately."
+            warning={t("maintenance.end_warning")}
           />
         </>
       ) : (
         <>
           <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
-            While active, nothing may load, unload, switch, or restart anywhere on this host —
-            use this before a manual repair that needs a quiet system.
+            {t("maintenance.inactive_hint")}
           </div>
           <label className="form-row" style={{ marginBottom: 6 }}>
-            Reason
-            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. rebuilding the vulkan binary" />
+            {t("maintenance.reason_label")}
+            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("maintenance.reason_placeholder")} />
           </label>
           <label className="form-row" style={{ marginBottom: 10 }}>
-            Duration (minutes)
+            {t("maintenance.duration_label")}
             <input type="number" min={1} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} />
           </label>
           <button className="btn primary" disabled={!reason || enter.isPending} onClick={handleEnter}>
-            {enter.isPending ? "…" : "Enter maintenance mode"}
+            {enter.isPending ? "…" : t("maintenance.enter_button")}
           </button>
         </>
       )}

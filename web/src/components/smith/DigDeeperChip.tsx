@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 // DigDeeperChip — S2-Web (docs/v5-smith-experience.md §2.2). The universal
 // "dig deeper" escalation affordance on every fast answer. The backend
 // (answers.go:73 `digDeeperChip`) appends
@@ -11,6 +13,11 @@
 // avoids stripping legitimate italic text. If the suffix isn't present
 // (e.g. a reasoning-tier answer never gets the chip), hasDigDeeper is false
 // and no chip renders.
+//
+// i18n note: this regex matches the backend's own hardcoded English suffix
+// (answers.go) and must NEVER be translated \u2014 matching and display are
+// separate concerns, same as fields.ts/SettingsSearch.tsx. Only the button
+// label below is translated.
 
 const DIG_DEEPER_RE = /\n*_Dig deeper \u2014 ask a follow-up and smith will think it through\._\s*$/;
 
@@ -23,9 +30,10 @@ export function stripDigDeeper(text: string): { answer: string; hasDigDeeper: bo
 }
 
 export function DigDeeperChip({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation("common");
   return (
     <button className="smith-dig-deeper" type="button" onClick={onClick}>
-      Dig deeper — ask a follow-up
+      {t("dig_deeper_chip.button")}
     </button>
   );
 }

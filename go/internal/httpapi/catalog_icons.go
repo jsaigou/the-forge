@@ -34,17 +34,17 @@ const maxIconSize = 1 << 20 // 1 MB
 func (s *Server) handleCatalogIconUpload(w http.ResponseWriter, r *http.Request, subject, notFoundMsg string, setLogo, setLogoDark func(ctx context.Context, id int64, logo string) error) {
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	dark := r.URL.Query().Get("variant") == "dark"
 	if err := r.ParseMultipartForm(maxIconSize); err != nil {
-		writeValidationError(w, map[string]string{"file": "must be ≤1 MB"})
+		writeValidationErrorCodes(w, map[string]string{"file": "must be ≤1 MB"}, map[string]string{"file": "too_large"})
 		return
 	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeValidationError(w, map[string]string{"file": "is required (multipart field 'file')"})
+		writeValidationErrorCodes(w, map[string]string{"file": "is required (multipart field 'file')"}, map[string]string{"file": "required"})
 		return
 	}
 	defer file.Close()
@@ -55,7 +55,7 @@ func (s *Server) handleCatalogIconUpload(w http.ResponseWriter, r *http.Request,
 		ct = extToContentType(ext)
 	}
 	if !allowedIconTypes[ct] {
-		writeValidationError(w, map[string]string{"file": "must be WebM, JPG, PNG, WebP, or SVG"})
+		writeValidationErrorCodes(w, map[string]string{"file": "must be WebM, JPG, PNG, WebP, or SVG"}, map[string]string{"file": "invalid_file_type"})
 		return
 	}
 
@@ -63,7 +63,7 @@ func (s *Server) handleCatalogIconUpload(w http.ResponseWriter, r *http.Request,
 	// io.ReadAll, not a single Read: Read is not guaranteed to fill the buffer.
 	data, err := io.ReadAll(file)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to read icon")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "failed to read icon")
 		return
 	}
 
@@ -84,11 +84,11 @@ func (s *Server) handleCatalogIconUpload(w http.ResponseWriter, r *http.Request,
 		filename := fmt.Sprintf("%s-%d%s%s", subject, id, suffix, ext)
 		dst := filepath.Join(iconsDir, filename)
 		if err := os.MkdirAll(iconsDir, 0o755); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create icons dir")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "failed to create icons dir")
 			return
 		}
 		if err := os.WriteFile(dst, data, 0o600); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to write icon")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "failed to write icon")
 			return
 		}
 		logo = filename
@@ -124,7 +124,7 @@ func (s *Server) handleCatalogIconUpload(w http.ResponseWriter, r *http.Request,
 func (s *Server) handleCatalogModelIcon(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	s.handleCatalogIconUpload(w, r, "model", "model not found", cat.SetModelLogo, cat.SetModelLogoDark)
@@ -133,7 +133,7 @@ func (s *Server) handleCatalogModelIcon(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleCatalogFamilyIcon(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	s.handleCatalogIconUpload(w, r, "family", "family not found", cat.SetFamilyLogo, cat.SetFamilyLogoDark)
@@ -142,7 +142,7 @@ func (s *Server) handleCatalogFamilyIcon(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleCatalogGenealogyIcon(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	s.handleCatalogIconUpload(w, r, "genealogy", "genealogy not found", cat.SetGenealogyLogo, cat.SetGenealogyLogoDark)
@@ -151,7 +151,7 @@ func (s *Server) handleCatalogGenealogyIcon(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleCatalogConfigIcon(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	s.handleCatalogIconUpload(w, r, "config", "config not found", cat.SetConfigLogo, cat.SetConfigLogoDark)

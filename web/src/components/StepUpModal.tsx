@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../lib/api";
 import { useStepUp } from "../lib/queries";
 
@@ -20,6 +21,7 @@ interface StepUpModalProps {
 }
 
 export function StepUpModal({ open, requiredFactor, onSuccess, onClose }: StepUpModalProps) {
+  const { t } = useTranslation("common");
   const stepUp = useStepUp();
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -58,13 +60,13 @@ export function StepUpModal({ open, requiredFactor, onSuccess, onClose }: StepUp
       }}
     >
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Re-authenticate</h3>
+        <h3>{t("step_up.title")}</h3>
         <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 14 }}>
-          This action requires <b>{requiredFactor}</b> assurance. Please re-authenticate to continue.
+          <Trans i18nKey="step_up.hint" ns="common" values={{ factor: requiredFactor }} components={{ b: <b /> }} />
         </div>
         {showPassword && (
           <label className="form-row" style={{ marginBottom: 10 }}>
-            Password
+            {t("step_up.password")}
             <input
               type="password"
               value={password}
@@ -76,7 +78,7 @@ export function StepUpModal({ open, requiredFactor, onSuccess, onClose }: StepUp
         )}
         {showTOTP && (
           <label className="form-row" style={{ marginBottom: 10 }}>
-            TOTP code
+            {t("step_up.totp_code")}
             <input
               value={code}
               onChange={(e) => setCode(e.target.value)}
@@ -89,13 +91,13 @@ export function StepUpModal({ open, requiredFactor, onSuccess, onClose }: StepUp
         )}
         {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
         <div className="form-actions">
-          <button className="btn" disabled={busy} onClick={onClose}>Cancel</button>
+          <button className="btn" disabled={busy} onClick={onClose}>{t("step_up.cancel")}</button>
           <button
             className="btn primary"
             disabled={busy || (showPassword && !password) || (showTOTP && !code)}
             onClick={submit}
           >
-            {busy ? "Verifying…" : "Verify"}
+            {busy ? t("step_up.verifying") : t("step_up.verify")}
           </button>
         </div>
       </div>

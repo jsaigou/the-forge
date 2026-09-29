@@ -38,7 +38,7 @@ func TestBuildContext_StartupTokenBudget(t *testing.T) {
 		}
 	}
 
-	out := s.buildContext(ctx, huge, nil, nil, "")
+	out := s.buildContext(ctx, huge, nil, nil, "", "")
 	if got := approxTokenCount(out); got > 5000 {
 		t.Errorf("assembled startup context ≈ %d tokens (%d chars), want ≤ 5000 — the whole-KB prefill failure mode is back", got, len(out))
 	}

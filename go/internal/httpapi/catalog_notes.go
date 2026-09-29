@@ -45,19 +45,19 @@ func (s *Server) handleCatalogNotesList(w http.ResponseWriter, r *http.Request) 
 	if st := r.URL.Query().Get("subject_type"); st != "" {
 		sid, err := strconv.ParseInt(r.URL.Query().Get("subject_id"), 10, 64)
 		if err != nil {
-			writeValidationError(w, map[string]string{"subject_id": "must be an integer"})
+			writeValidationErrorCodes(w, map[string]string{"subject_id": "must be an integer"}, map[string]string{"subject_id": "must_be_integer"})
 			return
 		}
 		list, err = cat.ListNotesForSubject(ctx, st, sid)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "notes query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "notes query failed")
 			return
 		}
 	} else {
 		var err error
 		list, err = cat.ListNotes(ctx)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "notes query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "notes query failed")
 			return
 		}
 	}
@@ -71,12 +71,12 @@ func (s *Server) handleCatalogNotesList(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleCatalogNoteGet(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -84,7 +84,7 @@ func (s *Server) handleCatalogNoteGet(w http.ResponseWriter, r *http.Request) {
 	n, err := cat.GetNote(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "note not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "note"}, "note not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -96,7 +96,7 @@ func (s *Server) handleCatalogNoteGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCatalogNoteCreate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b noteBody
@@ -104,8 +104,8 @@ func (s *Server) handleCatalogNoteCreate(w http.ResponseWriter, r *http.Request)
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := validateNote(b); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := validateNote(b); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -126,12 +126,12 @@ func (s *Server) handleCatalogNoteCreate(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleCatalogNoteUpdate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	var b noteBody
@@ -139,8 +139,8 @@ func (s *Server) handleCatalogNoteUpdate(w http.ResponseWriter, r *http.Request)
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := validateNote(b); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := validateNote(b); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -151,7 +151,7 @@ func (s *Server) handleCatalogNoteUpdate(w http.ResponseWriter, r *http.Request)
 	})
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "note not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "note"}, "note not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -165,19 +165,19 @@ func (s *Server) handleCatalogNoteUpdate(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleCatalogNoteDelete(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
 	if err := cat.DeleteNote(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "note not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "note"}, "note not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -194,22 +194,29 @@ type noteBody struct {
 	Body        string `json:"body"`
 }
 
-// validateNote checks field constraints.
-func validateNote(b noteBody) map[string]string {
+// validateNote checks field constraints. The second return value is codes'
+// i18n Phase 2 companion (field -> stable error code) — see
+// writeValidationErrorCodes' doc comment in httpapi.go.
+func validateNote(b noteBody) (map[string]string, map[string]string) {
 	fields := map[string]string{}
+	codes := map[string]string{}
 	switch b.SubjectType {
 	case "model", "config", "offering":
 	default:
 		fields["subject_type"] = "must be model, config, or offering"
+		codes["subject_type"] = "must_be_one_of"
 	}
 	if b.SubjectID == 0 {
 		fields["subject_id"] = "is required"
+		codes["subject_id"] = "required"
 	}
 	if b.Body == "" {
 		fields["body"] = "is required"
+		codes["body"] = "required"
 	}
 	if b.Author == "" {
 		fields["author"] = "is required"
+		codes["author"] = "required"
 	}
-	return fields
+	return fields, codes
 }

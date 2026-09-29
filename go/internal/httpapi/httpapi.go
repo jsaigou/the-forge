@@ -676,6 +676,11 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	// rebuild+restart to change.
 	mux.Handle("GET /api/v1/service-icons", s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleServiceIconsGet))))
 	mux.Handle("PUT /api/v1/service-icons", s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleServiceIconsPut))))
+	// infra.service_links (live) — per-service ↗ link override, added
+	// 2026-09-22 (operator feedback: ComfyUI's link was wrong and there was
+	// no way to fix it without a source edit).
+	mux.Handle("GET /api/v1/service-links", s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleServiceLinksGet))))
+	mux.Handle("PUT /api/v1/service-links", s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleServiceLinksPut))))
 	// ADR-0011: custom dashboard pages — system-wide settings key
 	// "dashboard.pages", full-replace PUT (frontend sends complete layout).
 	mux.Handle("GET /api/v1/dashboard/layout", s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleDashboardLayoutGet))))
@@ -1047,7 +1052,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			// No authenticator wired — fail closed. The stub in cmd/forge
 			// always wires authz.StubAuthenticator, so this branch means
 			// misconfiguration, not a normal request path.
-			writeError(w, http.StatusUnauthorized, "Authentication required")
+			writeErrorCode(w, http.StatusUnauthorized, "auth_required", nil, "Authentication required")
 			return
 		case bearerToken(r) != "":
 			ident, err = s.deps.Auth.VerifyBearerFrom(r.Context(), effectiveClientIP(r), bearerToken(r), authz.KindForge)
@@ -1064,7 +1069,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			}
 		}
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "Authentication required")
+			writeErrorCode(w, http.StatusUnauthorized, "auth_required", nil, "Authentication required")
 			return
 		}
 
@@ -1123,12 +1128,12 @@ func (s *Server) resolveSession(r *http.Request) (authz.Identity, store.Session,
 // can be resolved (the caller sends 401).
 func (s *Server) bootstrapNetworkIdentity(w http.ResponseWriter, r *http.Request) (authz.Identity, store.Session, error) {
 	if s.deps.NetworkIdentity == nil {
-		writeError(w, http.StatusUnauthorized, "Authentication required")
+		writeErrorCode(w, http.StatusUnauthorized, "auth_required", nil, "Authentication required")
 		return authz.Identity{}, store.Session{}, authz.ErrUnauthenticated
 	}
 	principal, ok := s.deps.NetworkIdentity.Identify(r)
 	if !ok || principal == "" {
-		writeError(w, http.StatusUnauthorized, "Authentication required")
+		writeErrorCode(w, http.StatusUnauthorized, "auth_required", nil, "Authentication required")
 		return authz.Identity{}, store.Session{}, authz.ErrUnauthenticated
 	}
 
@@ -1142,7 +1147,7 @@ func (s *Server) bootstrapNetworkIdentity(w http.ResponseWriter, r *http.Request
 		}
 		// ErrNotFound → anonymous; other errors → fail closed.
 		if !isNotFound(err) && err != nil {
-			writeError(w, http.StatusUnauthorized, "Authentication required")
+			writeErrorCode(w, http.StatusUnauthorized, "auth_required", nil, "Authentication required")
 			return authz.Identity{}, store.Session{}, authz.ErrUnauthenticated
 		}
 	}
@@ -1187,7 +1192,7 @@ func (s *Server) createNetworkSession(w http.ResponseWriter, r *http.Request, us
 		var err error
 		ident, err = auth.IdentityByID(ctx, userID)
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "Authentication required")
+			writeErrorCode(w, http.StatusUnauthorized, "auth_required", nil, "Authentication required")
 			return authz.Identity{}, store.Session{}, err
 		}
 	} else {
@@ -1197,12 +1202,12 @@ func (s *Server) createNetworkSession(w http.ResponseWriter, r *http.Request, us
 	// Create the L0 session.
 	sid, err := authz.RandomToken(32)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "session creation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "session creation failed")
 		return authz.Identity{}, store.Session{}, err
 	}
 	csrf, err := authz.RandomToken(32)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "session creation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "session creation failed")
 		return authz.Identity{}, store.Session{}, err
 	}
 	now := time.Now()
@@ -1220,7 +1225,7 @@ func (s *Server) createNetworkSession(w http.ResponseWriter, r *http.Request, us
 		NetworkPrincipal: principal,
 	}
 	if err := s.deps.Sessions.Create(ctx, sess); err != nil {
-		writeError(w, http.StatusInternalServerError, "session creation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "session creation failed")
 		return authz.Identity{}, store.Session{}, err
 	}
 	s.setSessionCookie(w, sess)
@@ -1237,7 +1242,7 @@ func (s *Server) requireRole(need authz.Role) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ident, ok := r.Context().Value(identityKey).(authz.Identity)
 			if !ok {
-				writeError(w, http.StatusUnauthorized, "Authentication required")
+				writeErrorCode(w, http.StatusUnauthorized, "auth_required", nil, "Authentication required")
 				return
 			}
 			if !ident.Role.Allows(need) {
@@ -1310,7 +1315,7 @@ func (s *Server) requireAssurance(resourceKey string) func(http.Handler) http.Ha
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ident, ok := r.Context().Value(identityKey).(authz.Identity)
 			if !ok {
-				writeError(w, http.StatusUnauthorized, "Authentication required")
+				writeErrorCode(w, http.StatusUnauthorized, "auth_required", nil, "Authentication required")
 				return
 			}
 			if ident.KeyID != "" {
@@ -1319,7 +1324,7 @@ func (s *Server) requireAssurance(resourceKey string) func(http.Handler) http.Ha
 			}
 			allowed, decision, err := s.evaluateAssurance(r.Context(), ident, resourceKey)
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, "policy load failed")
+				writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "policy load failed")
 				return
 			}
 			if allowed {
@@ -1347,12 +1352,12 @@ func (s *Server) requireStrictAssurance(resourceKey string) func(http.Handler) h
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ident, ok := r.Context().Value(identityKey).(authz.Identity)
 			if !ok {
-				writeError(w, http.StatusUnauthorized, "Authentication required")
+				writeErrorCode(w, http.StatusUnauthorized, "auth_required", nil, "Authentication required")
 				return
 			}
 			allowed, decision, err := s.evaluateAssurance(r.Context(), ident, resourceKey)
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, "policy load failed")
+				writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "policy load failed")
 				return
 			}
 			if allowed {
@@ -1465,21 +1470,82 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-// writeError emits the V4 generic error shape {"error": "<message>"}.
+// writeError emits the V4 generic error shape {"error": "<message>"}. `msg`
+// is English prose and stays wire-compatible forever — the a0 router, MCP,
+// the CLI, and every existing test key on this exact field (i18n ADR-0016
+// §3: those surfaces are deliberately never localized). New call sites that
+// want a translatable client message should prefer writeErrorCode instead;
+// this bare form remains for call sites not yet migrated and for callers
+// that never need a code (there are none — writeErrorCode's `code` is
+// optional-in-spirit but not optional-in-signature, see below).
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// writeErrorCode is writeError's additive companion (i18n Phase 2,
+// docs/adr/0016-localization.md): the response gains a stable machine `code`
+// and optional `params` alongside the unchanged English `error` string.
+// `error` is byte-identical to what writeError(w, status, msg) would have
+// sent — no existing consumer (a0/MCP/CLI/tests) is affected by adopting
+// this at a call site. The web PWA's apiErrorMessage (lib/api.ts) renders
+// `t("errors:"+code, params)` when the errors.json catalog has an entry for
+// `code`, falling back to `error` verbatim otherwise — so a call site may
+// adopt a `code` before the catalog has a translation for it with zero risk.
+// `params` is omitted from the wire body when empty rather than sent as `{}`.
+//
+// `code` must be one of the identifiers TestErrorCodesHaveTranslations (see
+// errors_codes_test.go) scans this package for — that test is the coverage
+// guard keeping the Go code list and the JSON catalogs from drifting apart.
+func writeErrorCode(w http.ResponseWriter, status int, code string, params map[string]any, msg string) {
+	body := map[string]any{"error": msg, "code": code}
+	if len(params) > 0 {
+		body["params"] = params
+	}
+	writeJSON(w, status, body)
+}
+
 // writeValidationError emits the 422 field-level shape
-// {"error": "validation_failed", "fields": {...}} (Pydantic parity).
+// {"error": "validation_failed", "fields": {...}} (Pydantic parity). This is
+// writeValidationErrorCodes(w, fields, nil) — call sites not yet migrated to
+// per-field codes keep this exact wire shape.
 func writeValidationError(w http.ResponseWriter, fields map[string]string) {
+	writeValidationErrorCodes(w, fields, nil)
+}
+
+// writeValidationErrorCodes is writeValidationError's additive companion:
+// adds a parallel `field_codes: {field: code}` map alongside the unchanged
+// `fields: {field: "English message"}` map (i18n Phase 2). `codes` need not
+// cover every key in `fields` — a field with no entry in `codes` simply has
+// no `field_codes` entry, and the frontend falls back to its English
+// `fields[field]` string exactly as before. `codes` may be nil.
+//
+// IMPORTANT: `codes` is field -> single code string, with no channel for
+// per-field params (unlike writeErrorCode's `params`). A code whose
+// errors.json template needs interpolation (e.g. a hypothetical
+// "{{allowed}}" enum listing) would render that placeholder raw and
+// unresolved on the frontend — worse than the untouched English fallback.
+// `must_be_one_of`/`invalid_file_type`/`too_large` are deliberately
+// PARAM-FREE generic templates for exactly this reason (found live: an
+// early migration pass used `must_be_one_of` and shipped a broken
+// "{{allowed}}" string before this was caught and the templates were
+// simplified) — never add a `{{var}}` to an errors.json entry meant to be
+// used from this function's `codes` map.
+//
+// Each code used here must be one of the identifiers
+// TestErrorCodesHaveTranslations scans this package for — see
+// errors_codes_test.go.
+func writeValidationErrorCodes(w http.ResponseWriter, fields map[string]string, codes map[string]string) {
 	if fields == nil {
 		fields = map[string]string{}
 	}
-	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+	body := map[string]any{
 		"error":  "validation_failed",
 		"fields": fields,
-	})
+	}
+	if len(codes) > 0 {
+		body["field_codes"] = codes
+	}
+	writeJSON(w, http.StatusUnprocessableEntity, body)
 }
 
 // identity returns the Identity from the request context, or the zero

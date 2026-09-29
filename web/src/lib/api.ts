@@ -115,6 +115,7 @@ import type {
   TotpEnrollResponse,
   UISettings,
   UISettingsUpdate,
+  ServiceLinks,
   UsageEvent,
   UsageHeatmapResponse,
   UsageResponse,
@@ -129,6 +130,7 @@ import type {
   WebAuthnBeginAssertResponse,
   WebAuthnBeginRegisterResponse,
 } from "./types";
+import i18next from "i18next";
 import type { ConfigWritePayload } from "./configPayload";
 
 let csrfToken: string | null = null;
@@ -149,11 +151,40 @@ class ApiError extends Error {
 
 // Server error bodies are either {error, fields} (pydantic 422s, see
 // validators.format_validation_error) or {error} (everything else).
+// apiErrorMessage renders an API error for display. i18n Phase 2
+// (docs/adr/0016-localization.md): a response may additionally carry a
+// stable `code`/`params` (from writeErrorCode) or `field_codes` (from
+// writeValidationErrorCodes) alongside the always-present English
+// `error`/`fields` strings. When the `errors` namespace has a translation
+// for a given code, it's used; otherwise this falls back to the untouched
+// English text exactly as before Phase 2 — so a code with no catalog entry
+// yet degrades safely rather than showing a raw i18next key. `i18next` is
+// imported directly (not via a React hook) since this is a plain function
+// called from error-handling code outside component render, and by the
+// time any request can fail, `errors.json` (both languages) is already
+// resident — `loadJaNamespaces()` loads every namespace up front, never
+// per-page (see lib/i18n.ts).
 export function apiErrorMessage(e: unknown): string {
   if (e instanceof ApiError && e.body && typeof e.body === "object") {
-    const body = e.body as { error?: string; fields?: Record<string, string>; message?: string };
+    const body = e.body as {
+      error?: string;
+      code?: string;
+      params?: Record<string, unknown>;
+      fields?: Record<string, string>;
+      field_codes?: Record<string, string>;
+      message?: string;
+    };
     if (body.fields && Object.keys(body.fields).length > 0) {
-      return Object.entries(body.fields).map(([k, v]) => `${k}: ${v}`).join("; ");
+      return Object.entries(body.fields)
+        .map(([k, v]) => {
+          const code = body.field_codes?.[k];
+          const translated = code && i18next.exists(`errors:${code}`) ? i18next.t(`errors:${code}`, { field: k }) : v;
+          return `${k}: ${translated}`;
+        })
+        .join("; ");
+    }
+    if (body.code && i18next.exists(`errors:${body.code}`)) {
+      return i18next.t(`errors:${body.code}`, body.params ?? {});
     }
     if (body.message) return body.message;
     if (body.error) return body.error;
@@ -274,6 +305,8 @@ export const api = {
   updateMetricsSettings: (patch: MetricsSettingsUpdate) => put<MetricsSettings>("/api/v1/metrics/settings", patch),
   uiSettings: () => get<UISettings>("/api/v1/ui/settings"),
   updateUiSettings: (patch: UISettingsUpdate) => put<UISettings>("/api/v1/ui/settings", patch),
+  serviceLinks: () => get<ServiceLinks>("/api/v1/service-links"),
+  updateServiceLinks: (links: Record<string, string>) => put<ServiceLinks>("/api/v1/service-links", { links }),
   voiceSettings: () => get<VoiceSettings>("/api/v1/voice/settings"),
   updateVoiceSettings: (patch: VoiceSettingsUpdate) => put<VoiceSettings>("/api/v1/voice/settings", patch),
   voiceList: () => get<VoiceListResponse>("/api/v1/voice/list"),

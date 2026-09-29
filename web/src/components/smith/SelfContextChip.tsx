@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import { appLocale } from "../../lib/format";
 import type { SmithMissedPattern, SmithStatus } from "../../lib/types";
 
 // SmithIndicators / MissedPatterns — split from a single combined
@@ -10,12 +12,13 @@ import type { SmithMissedPattern, SmithStatus } from "../../lib/types";
 // human-readable brain label, or nothing when no model is in use.
 
 export function SmithIndicators({ status }: { status: SmithStatus }) {
+  const { t } = useTranslation("common");
   const br = status.brain;
   const hasModel = br.model && (br.resolution === "local_slot" || br.resolution === "remote");
   const brainLabel = hasModel
     ? br.resolution === "local_slot"
-      ? `brain: ${br.model} on this box`
-      : `brain: ${br.model} · remote`
+      ? t("self_context_chip.brain_local", { model: br.model })
+      : t("self_context_chip.brain_remote", { model: br.model })
     : null;
 
   if (!brainLabel && !status.web.enabled) return null;
@@ -30,15 +33,15 @@ export function SmithIndicators({ status }: { status: SmithStatus }) {
           {brainLabel}
         </span>
       )}
-      {status.web.enabled && <span className="chip">web research on</span>}
+      {status.web.enabled && <span className="chip">{t("self_context_chip.web_research_on")}</span>}
     </div>
   );
 }
 
 function formatMissedAt(unixS: number): string {
   const d = new Date(unixS * 1000);
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
-    " " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return d.toLocaleDateString(appLocale(), { month: "short", day: "numeric" }) +
+    " " + d.toLocaleTimeString(appLocale(), { hour: "numeric", minute: "2-digit" });
 }
 
 // S2-Web: the missed-pattern ledger (§3.7) surfaces as a collapsible
@@ -47,10 +50,11 @@ function formatMissedAt(unixS: number): string {
 // change, never auto-learned, so this only surfaces candidates for
 // follow-up.
 export function MissedPatterns({ patterns }: { patterns: SmithMissedPattern[] }) {
+  const { t } = useTranslation("common");
   if (patterns.length === 0) return null;
   return (
     <details className="smith-missed-patterns">
-      <summary>Questions smith had to think about ({patterns.length})</summary>
+      <summary>{t("self_context_chip.missed_patterns_summary", { count: patterns.length })}</summary>
       <div className="smith-missed-list">
         {patterns.map((p, i) => (
           <div className="smith-missed-row" key={`${p.at}-${i}`}>

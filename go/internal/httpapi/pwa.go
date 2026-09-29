@@ -275,7 +275,7 @@ func (s *Server) setupRequired(r *http.Request) bool {
 // V4's wizard), and redirects to /.
 func (s *Server) handlePostSetup(w http.ResponseWriter, r *http.Request) {
 	if s.deps.AuthSetup == nil {
-		writeError(w, http.StatusServiceUnavailable, "setup not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "setup"}, "setup not available")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -310,7 +310,7 @@ func (s *Server) handlePostSetup(w http.ResponseWriter, r *http.Request) {
 // handlePostLogin verifies the password and establishes a session cookie.
 func (s *Server) handlePostLogin(w http.ResponseWriter, r *http.Request) {
 	if s.deps.AuthSetup == nil {
-		writeError(w, http.StatusServiceUnavailable, "login not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "login"}, "login not available")
 		return
 	}
 	next := sanitizeNextPath(r.URL.Query().Get("next"))

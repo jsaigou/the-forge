@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { BENCHMARK_REFS } from "../../lib/benchmarks";
 import type { CatalogBenchmark, CatalogConfig, CatalogModel, CatalogOffering, CatalogVariant } from "../../lib/types";
 import { SaveButton } from "../SaveButton";
@@ -70,6 +71,7 @@ export function BenchmarkForm({
   pending: boolean;
   isError?: boolean;
 }) {
+  const { t } = useTranslation("common");
   const [metric, setMetric] = useState(existing?.metric ?? "");
   const [value, setValue] = useState(existing?.value ?? "");
   const [source, setSource] = useState(existing?.source ?? "published");
@@ -126,83 +128,83 @@ export function BenchmarkForm({
 
   return (
     <div className="form-grid" style={{ marginTop: 4 }}>
-      <label className="form-row">Benchmark
+      <label className="form-row">{t("benchmark_form.benchmark_label")}
         <select value={activePreset} onChange={(e) => selectPreset(e.target.value)}>
           {presetKeys.map((k) => <option key={k} value={k}>{k}</option>)}
-          <option value="__custom__">Custom…</option>
+          <option value="__custom__">{t("benchmark_form.custom_ellipsis")}</option>
         </select>
       </label>
       {activeRef ? (
         <div className="empty-note" style={{ gridColumn: "1 / -1", marginTop: -4 }}>
-          Frontier ceiling ~{(activeRef.ceiling * 100).toFixed(0)}% ({activeRef.source}, {activeRef.asOf}) — scores normalize against this.
+          {t("benchmark_form.frontier_ceiling", { pct: (activeRef.ceiling * 100).toFixed(0), source: activeRef.source, asOf: activeRef.asOf })}
         </div>
       ) : (
         <div className="empty-note" style={{ gridColumn: "1 / -1", marginTop: -4 }}>
-          Custom benchmark name — no cited frontier ceiling, so the card will show the raw score unnormalized.
+          {t("benchmark_form.custom_no_ceiling")}
         </div>
       )}
-      <label className="form-row">Metric *
+      <label className="form-row">{t("benchmark_form.metric_label")}
         <input value={metric} placeholder="reasoning" onChange={(e) => setMetric(e.target.value)} />
       </label>
-      <label className="form-row">Value *
+      <label className="form-row">{t("benchmark_form.value_label")}
         <input value={value} placeholder="0.843" onChange={(e) => setValue(e.target.value)} />
       </label>
-      <label className="form-row">Source *
+      <label className="form-row">{t("benchmark_form.source_label")}
         <select value={source} onChange={(e) => setSource(e.target.value)}>
           <option value="published">published</option>
           <option value="self_measured">self_measured</option>
           <option value="provider_reported">provider_reported</option>
         </select>
       </label>
-      <label className="form-row">Subject type *
+      <label className="form-row">{t("benchmark_form.subject_type_label")}
         <select value={subjectType} onChange={(e) => { setSubjectType(e.target.value); setSubjectId(0); }}>
-          <option value="model">model — capability scores, shown on model + config cards</option>
-          <option value="variant">variant — performance metrics (decode_tps, prefill_tps, safe_memory_bytes), shown on config cards</option>
-          <option value="config">config — capability or performance scores specific to this launch recipe, shown on this config's card</option>
+          <option value="model">{t("benchmark_form.subject_type_model")}</option>
+          <option value="variant">{t("benchmark_form.subject_type_variant")}</option>
+          <option value="config">{t("benchmark_form.subject_type_config")}</option>
           {isLegacyOffering && (
-            <option value="offering">offering — legacy, not selectable for new rows; never shown on a card</option>
+            <option value="offering">{t("benchmark_form.subject_type_offering")}</option>
           )}
         </select>
       </label>
       {subjectType === "offering" && (
         <div className="empty-note" style={{ gridColumn: "1 / -1", marginTop: -4 }}>
-          Offering-scoped benchmarks predate the config-scoped card fix and never surfaced on any card — re-scope this row to model, variant, or config to make it visible, or leave it as-is to keep the historical record.
+          {t("benchmark_form.offering_scoped_hint")}
         </div>
       )}
       {subjectType === "variant" && (
         <div className="empty-note" style={{ gridColumn: "1 / -1", marginTop: -4 }}>
-          Known performance metric names: <code>decode_tps</code>, <code>prefill_tps</code> (both tok/s), <code>safe_memory_bytes</code> — type one exactly into Metric below. Unlike the capability preset above, these are raw measurements, not normalized against a ceiling.
+          <Trans i18nKey="benchmark_form.variant_metric_hint" ns="common" components={{ code: <code /> }} />
         </div>
       )}
-      <label className="form-row">Subject *
+      <label className="form-row">{t("benchmark_form.subject_label")}
         <select value={subjectId} onChange={(e) => setSubjectId(Number(e.target.value))}>
-          <option value={0}>— select —</option>
+          <option value={0}>{t("benchmark_form.select_placeholder")}</option>
           {subjectOptions.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
         </select>
       </label>
-      <label className="form-row">Source URL {source === "published" && "*"}
+      <label className="form-row">{t("benchmark_form.source_url_label")} {source === "published" && "*"}
         <input value={sourceUrl} placeholder="https://…" onChange={(e) => setSourceUrl(e.target.value)} />
       </label>
-      <label className="form-row">Source date {source === "published" && "*"}
+      <label className="form-row">{t("benchmark_form.source_date_label")} {source === "published" && "*"}
         <input type="date" value={sourceDate} onChange={(e) => setSourceDate(e.target.value)} />
       </label>
       <label className="form-row" style={{ gridColumn: "1 / -1" }}>
-        {activePreset === "__custom__" ? "Benchmark name (custom)" : "Notes"}
+        {activePreset === "__custom__" ? t("benchmark_form.benchmark_name_custom") : t("benchmark_form.notes_label")}
         <textarea value={notes} rows={2} style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "8px 10px", fontSize: 12, resize: "vertical" }} onChange={(e) => setNotes(e.target.value)} />
       </label>
       {f7Violation && (
         <div className="error-note" style={{ gridColumn: "1 / -1" }}>
-          F7 gate: published benchmarks require both source URL and source date.
+          {t("benchmark_form.f7_gate")}
         </div>
       )}
       <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
-        <button className="btn" onClick={onCancel}>Cancel</button>
+        <button className="btn" onClick={onCancel}>{t("benchmark_form.cancel")}</button>
         <SaveButton
           pending={pending}
           isError={isError}
           disabled={pending || !metric || !value || !subjectId || f7Violation}
           onClick={submit}
-          label={existing ? "Save" : "Create"}
+          label={existing ? undefined : t("save_button.create")}
         />
       </div>
     </div>

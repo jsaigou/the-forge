@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   canonicalFlag,
-  hazardsFor,
   LLAMA_FLAGS,
   parseLoadOptions,
   serializeLoadOptions,
@@ -9,6 +9,8 @@ import {
   type FlagRef,
   type LoadOption,
 } from "../lib/llamaFlags";
+import { translatedFlagLabel, translatedFlagWhy } from "../lib/flagI18n";
+import { translatedHazardsFor } from "../lib/hazardLabels";
 import { InfoTip } from "./InfoTip";
 
 // LoadOptionsEditor (Sprint C) — tap-to-select flag picker replacing the
@@ -36,7 +38,9 @@ export function LoadOptionsEditor({
   backend: string;
   nCtx: number;
 }) {
-  const flagTable = backend === "vllm" ? VLLM_FLAGS : LLAMA_FLAGS;
+  const { t } = useTranslation("common");
+  const isVllm = backend === "vllm";
+  const flagTable = isVllm ? VLLM_FLAGS : LLAMA_FLAGS;
   const nextId = useRef(0);
   const [rows, setRows] = useState<(LoadOption & { id: number })[]>(() =>
     parseLoadOptions(value, flagTable).map((o) => ({ ...o, id: nextId.current++ })),
@@ -54,8 +58,8 @@ export function LoadOptionsEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
 
-  const hazards = hazardsFor({ extra_args: serializeLoadOptions(rows), n_ctx: nCtx });
-  const hazardByFlag = new Map(hazards.map((h) => [h.flag, h.message]));
+  const hazards = translatedHazardsFor(t, { extra_args: serializeLoadOptions(rows), n_ctx: nCtx });
+  const hazardByFlag = new Map(hazards.map((h) => [h.flag, h.translated]));
 
   const booleanFlags = Object.entries(flagTable).filter(([, ref]) => ref.arg === "none" && !ref.managed);
   const valueRows = rows.filter((r) => r.ref != null && r.ref.arg !== "none" && !r.malformed);
@@ -117,10 +121,10 @@ export function LoadOptionsEditor({
           onChange={(e) => setRawText(e.target.value)}
         />
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 4 }}>
-          One argv token per line — a flag and its value must each be on their own line (e.g. "--parallel" then "1" on the next line), not "--parallel 1" together. The launcher reads this file with no shell word-splitting.
+          {t("catalog_form.load_options.raw_mode_hint")}
         </div>
         <button type="button" className="btn" style={{ fontSize: 11, padding: "4px 8px", marginTop: 8 }} onClick={exitRawMode}>
-          Back to picker
+          {t("catalog_form.load_options.back_to_picker")}
         </button>
       </div>
     );
@@ -139,8 +143,8 @@ export function LoadOptionsEditor({
                 className={`flag-chip ${present ? "on" : ""}`}
                 onClick={() => toggleBoolean(key, ref)}
               >
-                {ref.label}
-                <InfoTip text={ref.why} />
+                {translatedFlagLabel(t, isVllm, key, ref.label)}
+                <InfoTip text={translatedFlagWhy(t, isVllm, key, ref.why)} />
               </button>
             );
           })}
@@ -174,9 +178,9 @@ export function LoadOptionsEditor({
                   ))}
                 </div>
               )}
-              {r.ref && <InfoTip text={r.ref.why} />}
+              {r.ref && <InfoTip text={translatedFlagWhy(t, isVllm, canonicalFlag(r.flag), r.ref.why)} />}
               {hazard && <InfoTip text={hazard} className="hazard-tip" />}
-              <button type="button" className="row-remove" onClick={() => removeRow(r.id)} aria-label={`Remove ${r.flag}`}>
+              <button type="button" className="row-remove" onClick={() => removeRow(r.id)} aria-label={t("catalog_form.load_options.remove_flag_aria", { flag: r.flag })}>
                 ×
               </button>
             </div>
@@ -192,36 +196,36 @@ export function LoadOptionsEditor({
             if (e.target.value) addCurated(e.target.value);
           }}
         >
-          <option value="">+ Add option…</option>
+          <option value="">{t("catalog_form.load_options.add_option_ellipsis")}</option>
           {addableCurated.map(([key, ref]) => (
             <option key={key} value={key}>
-              {ref.label} ({key})
+              {translatedFlagLabel(t, isVllm, key, ref.label)} ({key})
             </option>
           ))}
         </select>
       )}
 
       <div className="eyebrow" style={{ fontSize: 10.5 }}>
-        Advanced
-        <InfoTip text="Anything not in the curated list above. Edited as raw flag/value pairs, used verbatim — not validated." />
+        {t("catalog_form.load_options.advanced_title")}
+        <InfoTip text={t("catalog_form.load_options.advanced_hint")} />
       </div>
       <div className="load-opts">
         {customRows.map((r) => (
           <div className={`load-opt editable ${r.malformed ? "hazard" : ""}`} key={r.id}>
-            <input className="flag-input" value={r.flag} placeholder="--flag" onChange={(e) => updateFlag(r.id, e.target.value)} />
+            <input className="flag-input" value={r.flag} placeholder={t("catalog_form.load_options.flag_placeholder")} onChange={(e) => updateFlag(r.id, e.target.value)} />
             <input
               className="val-input"
               value={r.value ?? ""}
-              placeholder="(value, optional)"
+              placeholder={t("catalog_form.load_options.value_optional_placeholder")}
               onChange={(e) => updateValue(r.id, e.target.value)}
             />
             {r.malformed && (
               <InfoTip
-                text="Saved as one malformed argv token (a flag and its value on the same line) — will be split into two well-formed tokens when this config is saved."
+                text={t("catalog_form.load_options.malformed_hint")}
                 className="hazard-tip"
               />
             )}
-            <button type="button" className="row-remove" onClick={() => removeRow(r.id)} aria-label={`Remove ${r.flag || "flag"}`}>
+            <button type="button" className="row-remove" onClick={() => removeRow(r.id)} aria-label={t("catalog_form.load_options.remove_flag_aria", { flag: r.flag || "flag" })}>
               ×
             </button>
           </div>
@@ -229,10 +233,10 @@ export function LoadOptionsEditor({
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
         <button type="button" className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={addCustom}>
-          + Add custom flag
+          {t("catalog_form.load_options.add_custom_flag")}
         </button>
         <button type="button" className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={enterRawMode}>
-          Edit as raw text
+          {t("catalog_form.load_options.edit_as_raw_text")}
         </button>
       </div>
     </div>

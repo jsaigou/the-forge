@@ -5,6 +5,7 @@
 // the section merge. Compression proxy management: global + per-proxy
 // passthrough toggle, restart/remove, tokens-saved display, add-proxy form.
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { apiErrorMessage } from "../../lib/api";
 import { formatTokens } from "../../lib/format";
@@ -22,14 +23,15 @@ import {
 const SERVICE_RE = /^[a-z][a-z0-9_-]+$/;
 
 export function CompressorModeCard({ canOperate }: { canOperate: boolean }) {
+  const { t } = useTranslation("settings");
   const compressor = useCompressorConfig();
   const passthrough = useCompressorPassthrough();
 
   if (compressor.isError) {
     return (
       <>
-        <div className="eyebrow" id="compressor-mode">Compressor · routing mode</div>
-        <div className="card empty-note">Operator role required to view Compressor configuration.</div>
+        <div className="eyebrow" id="compressor-mode">{t("compression.mode_title")}</div>
+        <div className="card empty-note">{t("compression.role_required")}</div>
       </>
     );
   }
@@ -38,21 +40,20 @@ export function CompressorModeCard({ canOperate }: { canOperate: boolean }) {
 
   return (
     <>
-      <div className="eyebrow" id="compressor-mode">Compressor · routing mode</div>
+      <div className="eyebrow" id="compressor-mode">{t("compression.mode_title")}</div>
       <div className="card" style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <span
           className={`toggle ${canOperate ? "" : "disabled"}`}
-          title={canOperate ? "Bypass Compressor compression for every proxy — flips live, no teardown" : "Operator role required"}
+          title={canOperate ? t("compression.bypass_title_operator") : t("compression.bypass_title_no_role")}
           onClick={() => canOperate && !passthrough.isPending && passthrough.mutate({ scope: "all", enabled: !globalOn })}
         >
           <span className={`sw heat ${globalOn ? "on" : ""}`} />
           <span>
-            Global passthrough <b style={{ color: "var(--text)" }}>{globalOn ? "on" : "off"}</b>
+            {t("compression.global_passthrough_label")} <b style={{ color: "var(--text)" }}>{globalOn ? t("compression.on") : t("compression.off")}</b>
           </span>
         </span>
         <div style={{ fontSize: 12, color: "var(--text-mute)", maxWidth: 520, lineHeight: 1.5 }}>
-          When on, every consumer routes straight to upstream and Compressor compression is bypassed for all proxies
-          live — no teardown. Use to A/B compression quality or when debugging a provider.
+          {t("compression.global_note")}
         </div>
       </div>
     </>
@@ -60,6 +61,7 @@ export function CompressorModeCard({ canOperate }: { canOperate: boolean }) {
 }
 
 export function CompressorProxiesCard({ canOperate, canAdmin }: { canOperate: boolean; canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const compressor = useCompressorConfig();
   const usage = useUsage("7d");
   const restart = useCompressorRestart();
@@ -150,13 +152,13 @@ export function CompressorProxiesCard({ canOperate, canAdmin }: { canOperate: bo
 
   return (
     <>
-      <div className="eyebrow" id="compressor-proxies">Compressor · compression proxies</div>
+      <div className="eyebrow" id="compressor-proxies">{t("compression.proxies_title")}</div>
       <div className="card">
-        {!compressor.data && <div className="empty-note">Loading proxies…</div>}
+        {!compressor.data && <div className="empty-note">{t("compression.loading_proxies")}</div>}
         {canAdmin && (
           adding ? (
             <div className="form-grid" style={{ marginBottom: 14 }}>
-              <label className="form-row" style={{ gridColumn: "1 / -1" }}>Mode
+              <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("compression.mode_label")}
                 <select
                   value={addMode}
                   onChange={(e) => {
@@ -164,22 +166,22 @@ export function CompressorProxiesCard({ canOperate, canAdmin }: { canOperate: bo
                     setError(null);
                   }}
                 >
-                  <option value="provider">Link to provider</option>
-                  <option value="standalone">Standalone (no provider)</option>
+                  <option value="provider">{t("compression.mode_link_provider")}</option>
+                  <option value="standalone">{t("compression.mode_standalone")}</option>
                 </select>
               </label>
               {addMode === "provider" && (
-                <label className="form-row" style={{ gridColumn: "1 / -1" }}>Provider
+                <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("compression.provider_label")}
                   {unlinkedProviders.length === 0 ? (
                     <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
-                      All providers already have a proxy linked. Create a standalone proxy instead, or add a new provider first.
+                      {t("compression.all_providers_linked")}
                     </span>
                   ) : (
                     <select
                       value={selectedProviderId ?? ""}
                       onChange={(e) => onProviderSelect(Number(e.target.value))}
                     >
-                      <option value="">Select a provider…</option>
+                      <option value="">{t("compression.select_provider_ellipsis")}</option>
                       {unlinkedProviders.map((p) => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
@@ -188,7 +190,7 @@ export function CompressorProxiesCard({ canOperate, canAdmin }: { canOperate: bo
                 </label>
               )}
               {addMode === "standalone" && (
-                <label className="form-row" style={{ gridColumn: "1 / -1" }}>Label
+                <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("compression.label_label")}
                   <input
                     value={label}
                     placeholder="Local upstream"
@@ -196,7 +198,7 @@ export function CompressorProxiesCard({ canOperate, canAdmin }: { canOperate: bo
                   />
                 </label>
               )}
-              <label className="form-row">Service name
+              <label className="form-row">{t("compression.service_name_label")}
                 <input
                   value={serviceName}
                   placeholder="deepseek"
@@ -205,14 +207,14 @@ export function CompressorProxiesCard({ canOperate, canAdmin }: { canOperate: bo
                 />
                 <span style={{ fontSize: 11, color: serviceValid ? "var(--text-dim)" : "var(--warn)" }}>
                   {serviceTaken
-                    ? "A proxy with this service name already exists."
+                    ? t("compression.service_taken")
                     : serviceValid
-                      ? `Becomes the systemd unit forge-compress@${serviceName}.service`
-                      : "Must match ^[a-z][a-z0-9_-]+$ — lowercase, starts with a letter."}
+                      ? t("compression.service_becomes_unit", { service: serviceName })
+                      : t("compression.service_invalid")}
                 </span>
               </label>
               {addMode === "standalone" && (
-                <label className="form-row" style={{ gridColumn: "1 / -1" }}>Target URL
+                <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("compression.target_url_label")}
                   <input
                     value={targetUrl}
                     placeholder="https://api.example.com/v1"
@@ -222,19 +224,19 @@ export function CompressorProxiesCard({ canOperate, canAdmin }: { canOperate: bo
               )}
               {error && <div className="error-note" style={{ gridColumn: "1 / -1" }}>{error}</div>}
               <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
-                <button className="btn" onClick={resetForm}>Cancel</button>
+                <button className="btn" onClick={resetForm}>{t("compression.cancel")}</button>
                 <button
                   className="btn primary"
                   disabled={creating || !canSubmit}
                   onClick={submitCreate}
                 >
-                  {creating ? "Creating…" : "Create proxy"}
+                  {creating ? t("compression.creating") : t("compression.create_proxy")}
                 </button>
               </div>
             </div>
           ) : (
             <button className="btn" style={{ marginBottom: 14 }} onClick={() => { setAdding(true); setError(null); }}>
-              + Add proxy
+              {t("compression.add_proxy_button")}
             </button>
           )
         )}
@@ -249,10 +251,10 @@ export function CompressorProxiesCard({ canOperate, canAdmin }: { canOperate: bo
                   style={{ flex: "0 0 auto", cursor: canOperate && !globalOn ? "pointer" : "default", opacity: globalOn ? 0.5 : 1 }}
                   title={
                     globalOn
-                      ? "Overridden by global passthrough"
+                      ? t("compression.overridden_by_global")
                       : compressionOn
-                        ? "Compression on — click to bypass this proxy"
-                        : "Bypassed — click to re-enable compression"
+                        ? t("compression.compression_on_title")
+                        : t("compression.bypassed_title")
                   }
                   onClick={() =>
                     canOperate &&
@@ -267,11 +269,11 @@ export function CompressorProxiesCard({ canOperate, canAdmin }: { canOperate: bo
                   </div>
                   <div className="pu">
                     {p.unit} · :{p.port}
-                    {p.orphaned ? ` · orphaned (${p.orphaned_days_left}d left)` : ""}
+                    {p.orphaned ? t("compression.orphaned_suffix", { days: p.orphaned_days_left }) : ""}
                   </div>
                 </div>
                 <div className="saved">
-                  <span className="k">{p.passthrough ? "bypassed" : "compressed"} · tokens saved 7d</span>
+                  <span className="k">{t("compression.saved_label", { state: p.passthrough ? t("compression.bypassed_word") : t("compression.compressed_word") })}</span>
                   {savings ? formatTokens(savings.saved) : "—"}
                 </div>
                 {canOperate && (
@@ -288,7 +290,7 @@ export function CompressorProxiesCard({ canOperate, canAdmin }: { canOperate: bo
                       return (
                         <button disabled={restart.isPending} onClick={() => restart.mutate(p.service)}>
                           <span className={restartingThis ? "spin-icon" : ""} aria-hidden="true">↻</span>{" "}
-                          {restartingThis ? "Restarting…" : "Restart"}
+                          {restartingThis ? t("compression.restarting") : t("routing.restart_button")}
                         </button>
                       );
                     })()}
@@ -297,9 +299,9 @@ export function CompressorProxiesCard({ canOperate, canAdmin }: { canOperate: bo
                         className=""
                         pending={teardown.isPending && teardown.variables === p.service}
                         onConfirm={() => teardown.mutate(p.service)}
-                        label="Remove"
-                        pendingLabel="Removing…"
-                        warning={`Remove proxy "${p.label}"? This tears down the systemd unit and orphans the proxy row.`}
+                        label={t("compression.remove_button")}
+                        pendingLabel={t("compression.removing")}
+                        warning={t("compression.remove_warning", { label: p.label })}
                       />
                     )}
                   </div>
@@ -309,9 +311,7 @@ export function CompressorProxiesCard({ canOperate, canAdmin }: { canOperate: bo
           })}
         </div>
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 12, lineHeight: 1.5 }}>
-          Tokens-saved figures are Compressor's own durable lifetime counters, scraped from each proxy's{" "}
-          <span style={{ fontFamily: "var(--mono)" }}>/metrics</span> — Compressor-reported, not independently
-          verified.
+          <Trans i18nKey="compression.footer_note" ns="settings" components={{ code: <span style={{ fontFamily: "var(--mono)" }} /> }} />
         </div>
       </div>
     </>

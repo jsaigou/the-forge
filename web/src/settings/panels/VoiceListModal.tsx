@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useVoiceList } from "../../lib/queries";
 import type { VoiceListEntry } from "../../lib/types";
 
@@ -6,12 +7,7 @@ import type { VoiceListEntry } from "../../lib/types";
 // forge-tts's flat voice registry (GET /api/v1/voice/list) by the `engine`
 // field the backend computes from each voice's Type, in the same order the
 // Voice engines card above lists them.
-const ENGINE_ORDER: { key: string; label: string }[] = [
-  { key: "kokoro", label: "Kokoro (fast tier)" },
-  { key: "customvoice", label: "Custom voice" },
-  { key: "voicedesign", label: "Voice design" },
-  { key: "base", label: "Base / clone" },
-];
+const ENGINE_ORDER_KEYS = ["kokoro", "customvoice", "voicedesign", "base"] as const;
 
 function groupByEngine(voices: VoiceListEntry[]): Map<string, VoiceListEntry[]> {
   const groups = new Map<string, VoiceListEntry[]>();
@@ -24,20 +20,22 @@ function groupByEngine(voices: VoiceListEntry[]): Map<string, VoiceListEntry[]> 
 }
 
 export function VoiceListModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation("settings");
+  const engineOrder = ENGINE_ORDER_KEYS.map((key) => ({ key, label: t(`voice.engine_${key}`) }));
   const list = useVoiceList(true);
   const groups = list.data ? groupByEngine(list.data.voices) : null;
-  const knownKeys = new Set(ENGINE_ORDER.map((e) => e.key));
+  const knownKeys = new Set(ENGINE_ORDER_KEYS as readonly string[]);
   const otherKeys = groups ? [...groups.keys()].filter((k) => !knownKeys.has(k)) : [];
 
   return (
     <div className="modal-backdrop" onClick={(e) => { e.stopPropagation(); onClose(); }}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
-        <h3>Voices by engine</h3>
-        {list.isLoading && <div className="empty-note">Loading voices…</div>}
-        {list.isError && <div className="error-note">Could not reach forge-tts's voice registry.</div>}
+        <h3>{t("voice_list_modal.title")}</h3>
+        {list.isLoading && <div className="empty-note">{t("voice_list_modal.loading")}</div>}
+        {list.isError && <div className="error-note">{t("voice_list_modal.error")}</div>}
         {groups && (
           <>
-            {[...ENGINE_ORDER, ...otherKeys.map((k) => ({ key: k, label: k }))].map(({ key, label }) => {
+            {[...engineOrder, ...otherKeys.map((k) => ({ key: k, label: k }))].map(({ key, label }) => {
               const voices = groups.get(key) ?? [];
               return (
                 <div key={key} style={{ marginBottom: 16 }}>
@@ -45,7 +43,7 @@ export function VoiceListModal({ onClose }: { onClose: () => void }) {
                     {label} <span style={{ color: "var(--text-mute)", fontWeight: 400 }}>({voices.length})</span>
                   </div>
                   {voices.length === 0 ? (
-                    <div className="empty-note">No voices registered for this engine.</div>
+                    <div className="empty-note">{t("voice_list_modal.no_voices")}</div>
                   ) : (
                     <div className="form-grid">
                       {voices.map((v) => (
@@ -55,7 +53,7 @@ export function VoiceListModal({ onClose }: { onClose: () => void }) {
                             <span style={{ color: "var(--text-mute)", fontFamily: "var(--mono)", fontSize: 11 }}>{v.id}</span>
                           </span>
                           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            {v.builtin && <span className="chip apply-live">Built-in</span>}
+                            {v.builtin && <span className="chip apply-live">{t("voice_list_modal.builtin")}</span>}
                             <span style={{ color: "var(--text-mute)" }}>{v.language}</span>
                           </span>
                         </div>
@@ -68,7 +66,7 @@ export function VoiceListModal({ onClose }: { onClose: () => void }) {
           </>
         )}
         <div className="form-actions">
-          <button className="btn" onClick={onClose}>Close</button>
+          <button className="btn" onClick={onClose}>{t("voice_list_modal.close")}</button>
         </div>
       </div>
     </div>

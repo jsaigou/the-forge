@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../../lib/api";
+import { appLocale } from "../../lib/format";
 import {
   useSmithBlockedWork,
   useSmithFindings,
@@ -41,14 +44,19 @@ const SEV_COLOR: Record<string, string> = {
   crit: "var(--crit)",
 };
 
-function sevChip(sev: string) {
+// Severity/status/confidence values are a small, fixed backend vocabulary
+// (Severity, investigation.status, finding.confidence) — never translate the
+// comparisons or the values themselves, only the displayed label, via a
+// defaultValue fallback to the raw value so an unlisted future value still
+// renders instead of breaking.
+function sevChip(sev: string, t: TFunction) {
   const c = SEV_COLOR[sev] ?? "var(--text-mute)";
   return (
     <span
       className="chip"
       style={{ color: c, borderColor: `color-mix(in srgb, ${c} 40%, var(--border))` }}
     >
-      {sev}
+      {t(`diagnostics.severity.${sev}`, { defaultValue: sev })}
     </span>
   );
 }
@@ -57,21 +65,22 @@ function sevChip(sev: string) {
 // degraded from the default "high", matching the advisory-tone/hazard-badge
 // precedent elsewhere in this codebase: a normal, fully-measured finding
 // shouldn't carry a badge every row just to say "nothing was missing".
-function confChip(confidence: string | undefined, note: string | undefined) {
+function confChip(confidence: string | undefined, note: string | undefined, t: TFunction) {
   if (!confidence || confidence === "high") return null;
   const c = confidence === "medium" ? "var(--warn)" : "var(--crit)";
+  const label = t(`diagnostics.finding.confidence_${confidence}`, { defaultValue: `${confidence} confidence` });
   return (
     <span
       className="chip"
       style={{ color: c, borderColor: `color-mix(in srgb, ${c} 40%, var(--border))` }}
-      title={note || `${confidence} confidence: some evidence was unavailable`}
+      title={note || t("diagnostics.finding.confidence_default_note", { confidence })}
     >
-      {confidence} confidence
+      {label}
     </span>
   );
 }
 
-function statusChip(status: string) {
+function statusChip(status: string, t: TFunction) {
   const c =
     status === "open" ? "var(--warn)" :
     status === "resolved" ? "var(--ok)" :
@@ -81,7 +90,7 @@ function statusChip(status: string) {
       className="chip"
       style={{ color: c, borderColor: `color-mix(in srgb, ${c} 40%, var(--border))` }}
     >
-      {status}
+      {t(`diagnostics.investigation_status.${status}`, { defaultValue: status })}
     </span>
   );
 }
@@ -89,7 +98,7 @@ function statusChip(status: string) {
 function fmtTime(unixOrISO: string | number): string {
   const d = typeof unixOrISO === "number" ? new Date(unixOrISO * 1000) : new Date(unixOrISO);
   if (isNaN(d.getTime())) return String(unixOrISO);
-  return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  return d.toLocaleString(appLocale(), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 // fmtDuration renders a whole-second duration compactly (e.g. "45s", "3m 12s").
@@ -133,6 +142,7 @@ function renderEvidence(evidence: string | Record<string, unknown>): string {
 // ── Evidence row (expandable) ────────────────────────────────────────────────
 
 function EvidenceRow({ evidence }: { evidence: string | Record<string, unknown> }) {
+  const { t } = useTranslation("help");
   const [expanded, setExpanded] = useState(false);
   const text = useMemo(() => renderEvidence(evidence), [evidence]);
   return (
@@ -142,7 +152,7 @@ function EvidenceRow({ evidence }: { evidence: string | Record<string, unknown> 
         style={{ fontSize: 10, padding: "2px 8px", cursor: "pointer" }}
         onClick={() => setExpanded(!expanded)}
       >
-        {expanded ? "▼ evidence" : "▶ evidence"}
+        {expanded ? "▼ " : "▶ "}{t("diagnostics.common.evidence")}
       </button>
       {expanded && (
         <pre
@@ -166,6 +176,7 @@ function EvidenceRow({ evidence }: { evidence: string | Record<string, unknown> 
 // chips never fetches anything.
 
 function KBRefChip({ refId }: { refId: string }) {
+  const { t } = useTranslation("help");
   const [expanded, setExpanded] = useState(false);
   const chunk = useSmithKBRef(expanded ? refId : null);
   return (
@@ -174,7 +185,7 @@ function KBRefChip({ refId }: { refId: string }) {
         className="chip"
         style={{ cursor: "pointer", fontSize: 10 }}
         onClick={() => setExpanded(!expanded)}
-        title="Knowledge base reference"
+        title={t("diagnostics.finding.kb_ref_title")}
       >
         {expanded ? "▼" : "▶"} 📖 {refId}
       </button>
@@ -188,10 +199,10 @@ function KBRefChip({ refId }: { refId: string }) {
           }}
         >
           {chunk.isLoading ? (
-            "Loading…"
+            t("diagnostics.common.loading")
           ) : chunk.isError || !chunk.data ? (
             <span className="error-note" style={{ fontSize: 11 }}>
-              {chunk.error ? apiErrorMessage(chunk.error) : "Unable to load this reference."}
+              {chunk.error ? apiErrorMessage(chunk.error) : t("diagnostics.finding.kb_ref_unavailable")}
             </span>
           ) : (
             <>
@@ -219,7 +230,21 @@ function hasSweepKind(f: FindingLike): f is SmithStoredFinding {
   return "sweep_kind" in f;
 }
 
+// findingSummaryText renders a translated summary when the check has been
+// migrated to the multilanguage plan's Phase 3 SummaryKey/Params scheme
+// (t("smith:"+summary_key, params)), falling back to the raw (always-
+// English) f.summary otherwise — same exists()-gated pattern as
+// apiErrorMessage (lib/api.ts) and the smith:status SSE listener (lib/
+// sse.ts), so a key with no catalog entry yet degrades safely.
+function findingSummaryText(t: TFunction, i18n: { exists: (key: string) => boolean }, f: FindingLike): string {
+  if (f.summary_key && i18n.exists(`smith:${f.summary_key}`)) {
+    return t(`smith:${f.summary_key}`, f.params ?? {});
+  }
+  return f.summary;
+}
+
 function FindingCard({ f, stored }: { f: FindingLike; stored?: boolean }) {
+  const { t, i18n } = useTranslation("help");
   const sweepKind = stored && hasSweepKind(f) ? f.sweep_kind : undefined;
   const createdAt = stored && hasSweepKind(f) ? f.created_at : undefined;
   const repeatCount = stored && hasSweepKind(f) ? f.repeat_count : 0;
@@ -229,8 +254,8 @@ function FindingCard({ f, stored }: { f: FindingLike; stored?: boolean }) {
   return (
     <div className="card" style={{ padding: "10px 14px", marginBottom: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        {sevChip(f.severity)}
-        {confChip(f.confidence, f.confidence_note)}
+        {sevChip(f.severity, t)}
+        {confChip(f.confidence, f.confidence_note, t)}
         {repeatCount > 1 && <span className="chip" style={{ fontSize: 10 }}>×{repeatCount}</span>}
         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{f.check_id}</span>
         {sweepKind && <span className="chip">{sweepKind}</span>}
@@ -242,11 +267,11 @@ function FindingCard({ f, stored }: { f: FindingLike; stored?: boolean }) {
         {askable && (
           <AskSmithButton
             context={[{ code: f.check_id, message: f.summary, source: f.check_id, at: toUnixSeconds(createdAt) }]}
-            title={`Ask smith about ${f.check_id}`}
+            title={t("diagnostics.finding.ask_smith_title", { checkId: f.check_id })}
           />
         )}
       </div>
-      <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>{f.summary}</div>
+      <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>{findingSummaryText(t, i18n, f)}</div>
       <EvidenceRow evidence={f.evidence as string | Record<string, unknown>} />
       {f.kb_refs.length > 0 && (
         <div style={{ marginTop: 4, display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -265,13 +290,14 @@ function FindingCard({ f, stored }: { f: FindingLike; stored?: boolean }) {
 // confirms before mutating; there is no undo.
 
 function FindingsPurgeButtons() {
+  const { t } = useTranslation("help");
   const { canOperate } = useSession();
   const purge = useSmithFindingsPurge();
   if (!canOperate) return null;
   const buttons: { label: string; maxAge: "all" | "72h" | "168h"; confirm: string }[] = [
-    { label: "Older than 72h", maxAge: "72h", confirm: "Delete all standalone findings older than 72 hours?" },
-    { label: "Older than a week", maxAge: "168h", confirm: "Delete all standalone findings older than a week?" },
-    { label: "Delete all", maxAge: "all", confirm: "Delete ALL standalone findings? Findings attached to investigations are kept." },
+    { label: t("diagnostics.purge.older_72h"), maxAge: "72h", confirm: t("diagnostics.purge.older_72h_confirm") },
+    { label: t("diagnostics.purge.older_week"), maxAge: "168h", confirm: t("diagnostics.purge.older_week_confirm") },
+    { label: t("diagnostics.purge.delete_all"), maxAge: "all", confirm: t("diagnostics.purge.delete_all_confirm") },
   ];
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
@@ -285,7 +311,7 @@ function FindingsPurgeButtons() {
             if (window.confirm(b.confirm)) purge.mutate(b.maxAge);
           }}
         >
-          {purge.isPending ? "Purging…" : b.label}
+          {purge.isPending ? t("diagnostics.purge.purging") : b.label}
         </button>
       ))}
       {purge.isError && <span className="error-note" style={{ fontSize: 10 }}>{apiErrorMessage(purge.error)}</span>}
@@ -296,11 +322,12 @@ function FindingsPurgeButtons() {
 // ── Sweep result banner (also used by AskSmith.tsx's SweepControls) ────────
 
 export function SweepResult({ count, worst }: { count: number; worst: string }) {
+  const { t } = useTranslation("help");
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-      <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{count} findings</span>
-      <span style={{ fontSize: 12, color: "var(--text-dim)" }}>worst:</span>
-      {sevChip(worst)}
+      <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{t("diagnostics.sweep_result.count", { count })}</span>
+      <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{t("diagnostics.sweep_result.worst")}</span>
+      {sevChip(worst, t)}
     </div>
   );
 }
@@ -320,6 +347,7 @@ function InvestigationRow({
   active: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation("help");
   return (
     <div
       className="card"
@@ -330,7 +358,7 @@ function InvestigationRow({
       onClick={onClick}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        {statusChip(inv.status)}
+        {statusChip(inv.status, t)}
         <span className="chip">{inv.trigger}</span>
         <span style={{ fontSize: 10, color: "var(--text-mute)", marginLeft: "auto" }}>
           {fmtTime(inv.opened_at)}
@@ -340,7 +368,7 @@ function InvestigationRow({
         <span onClick={(e) => e.stopPropagation()}>
           <AskSmithButton
             context={[{ code: inv.trigger, message: inv.summary || `Investigation #${inv.id}`, source: "investigation", at: inv.opened_at }]}
-            title={`Ask smith about investigation #${inv.id}`}
+            title={t("diagnostics.investigations.ask_smith_investigation_title", { id: inv.id })}
           />
         </span>
       </div>
@@ -360,6 +388,7 @@ function InvestigationDetail({
   onBack: () => void;
   onSubChange?: (sub: string, opts?: { replace?: boolean }) => void;
 }) {
+  const { t } = useTranslation("help");
   const detail = useSmithInvestigation(id);
   const checksRun = useSmithInvestigationChecks(id);
   const resolve = useSmithInvestigationResolve(id);
@@ -377,20 +406,20 @@ function InvestigationDetail({
     );
   }
 
-  if (detail.isLoading) return <div className="empty-note">Loading investigation…</div>;
-  if (detail.isError || !detail.data) return <div className="empty-note">Investigation not found.</div>;
+  if (detail.isLoading) return <div className="empty-note">{t("diagnostics.investigations.loading_detail")}</div>;
+  if (detail.isError || !detail.data) return <div className="empty-note">{t("diagnostics.investigations.not_found")}</div>;
 
   const inv = detail.data;
 
   return (
     <div className="card">
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-        <button className="tab" onClick={onBack} style={{ cursor: "pointer" }}>← back</button>
-        {statusChip(inv.status)}
+        <button className="tab" onClick={onBack} style={{ cursor: "pointer" }}>{t("diagnostics.investigations.back")}</button>
+        {statusChip(inv.status, t)}
         <span className="chip">{inv.trigger}</span>
         <span style={{ fontSize: 10, color: "var(--text-mute)", marginLeft: "auto" }}>
-          opened {fmtTime(inv.opened_at)}
-          {inv.closed_at ? ` · closed ${fmtTime(inv.closed_at)}` : ""}
+          {t("diagnostics.investigations.opened_at", { time: fmtTime(inv.opened_at) })}
+          {inv.closed_at ? t("diagnostics.investigations.closed_at", { time: fmtTime(inv.closed_at) }) : ""}
         </span>
       </div>
 
@@ -401,21 +430,21 @@ function InvestigationDetail({
       {/* Run more checks */}
       {inv.status === "open" && (
         <div style={{ marginBottom: 10, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
-          <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 4 }}>Run more checks</div>
+          <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 4 }}>{t("diagnostics.investigations.run_more_checks")}</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <button
               className="tab"
               onClick={() => runChecks("quick")}
               disabled={checksRun.isPending}
             >
-              Quick
+              {t("diagnostics.investigations.quick")}
             </button>
             <button
               className="tab"
               onClick={() => runChecks("deep")}
               disabled={checksRun.isPending}
             >
-              Deep
+              {t("diagnostics.investigations.deep")}
             </button>
           </div>
           {checksRun.isError && (
@@ -430,10 +459,10 @@ function InvestigationDetail({
       {/* Findings trail */}
       <div style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 4 }}>
-          Findings trail ({inv.findings.length})
+          {t("diagnostics.investigations.findings_trail", { count: inv.findings.length })}
         </div>
         {inv.findings.length === 0 ? (
-          <div className="empty-note">No findings attached to this investigation.</div>
+          <div className="empty-note">{t("diagnostics.investigations.none_attached")}</div>
         ) : (
           inv.findings.map((f) => <FindingCard key={f.id} f={f} stored />)
         )}
@@ -444,7 +473,7 @@ function InvestigationDetail({
           created), with approve/reject/handoff. Additive alongside the
           findings trail above, not a replacement for it. */}
       <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 4 }}>Actions</div>
+        <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 4 }}>{t("diagnostics.investigations.actions")}</div>
         <ActionsTray investigationId={inv.id} />
       </div>
 
@@ -462,7 +491,7 @@ function InvestigationDetail({
           }
           disabled={analyze.isPending}
         >
-          {analyze.isPending ? "Asking the smith…" : "Ask the smith to analyze"}
+          {analyze.isPending ? t("diagnostics.investigations.asking_smith") : t("diagnostics.investigations.ask_smith_analyze")}
         </button>
         {analyze.isError && (
           <div className="error-note" style={{ marginTop: 4 }}>
@@ -479,14 +508,14 @@ function InvestigationDetail({
             onClick={() => resolve.mutate("resolved")}
             disabled={resolve.isPending}
           >
-            Resolve
+            {t("diagnostics.investigations.resolve")}
           </button>
           <button
             className="tab"
             onClick={() => resolve.mutate("dismissed")}
             disabled={resolve.isPending}
           >
-            Dismiss
+            {t("diagnostics.investigations.dismiss")}
           </button>
         </div>
       )}
@@ -552,8 +581,9 @@ function ProcedureStepRow({ step }: { step: SmithProcedureStepOutcome }) {
 // same posture as KBRefChip above, since most runs in the history list will
 // never be opened.
 function ScorecardStrip({ actionId }: { actionId: number }) {
+  const { t } = useTranslation("help");
   const sc = useSmithProcedureScorecard(actionId);
-  if (sc.isLoading) return <div className="empty-note">Loading scorecard…</div>;
+  if (sc.isLoading) return <div className="empty-note">{t("diagnostics.common.loading")}</div>;
   if (sc.isError || !sc.data) return null;
   const d = sc.data;
   if (d.precondition_failed) {
@@ -562,7 +592,7 @@ function ScorecardStrip({ actionId }: { actionId: number }) {
     // executed a single step, so neither framing applies.
     return (
       <div style={{ fontSize: 11, color: "var(--reserved)", padding: "8px 0 0", marginTop: 6, borderTop: "1px solid var(--border)" }}>
-        precondition not met: not applicable to this host, nothing was attempted
+        {t("diagnostics.procedure_runs.precondition_not_met")}
       </div>
     );
   }
@@ -570,16 +600,16 @@ function ScorecardStrip({ actionId }: { actionId: number }) {
     <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, color: "var(--text-dim)", padding: "8px 0 0", marginTop: 6, borderTop: "1px solid var(--border)" }}>
       <span style={{ color: d.unattended_completion ? "var(--ok)" : "var(--text-dim)" }}>
         {d.unattended_completion
-          ? "✓ unattended"
-          : `${d.checkpoints_reached} checkpoint${d.checkpoints_reached === 1 ? "" : "s"} needed a human`}
+          ? t("diagnostics.procedure_runs.unattended")
+          : t("diagnostics.procedure_runs.checkpoints_needed_human", { count: d.checkpoints_reached })}
       </span>
       <span style={{ color: d.post_verify_passed ? "var(--ok)" : "var(--text-mute)" }}>
-        {d.post_verify_passed ? "✓ post-verify clean" : "post-verify not confirmed clean"}
+        {d.post_verify_passed ? t("diagnostics.procedure_runs.post_verify_clean") : t("diagnostics.procedure_runs.post_verify_not_confirmed")}
       </span>
       {d.needs_maintenance && (
         <span>
-          downtime: {d.actual_duration_seconds != null ? fmtDuration(d.actual_duration_seconds) : "—"} actual
-          {d.est_duration_seconds ? ` vs. ${fmtDuration(d.est_duration_seconds)} estimated` : ""}
+          {t("diagnostics.procedure_runs.downtime_actual", { value: d.actual_duration_seconds != null ? fmtDuration(d.actual_duration_seconds) : "—" })}
+          {d.est_duration_seconds ? t("diagnostics.procedure_runs.downtime_vs_estimated", { value: fmtDuration(d.est_duration_seconds) }) : ""}
         </span>
       )}
     </div>
@@ -595,13 +625,14 @@ function ProcedureRunRow({
   expanded: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation("help");
   const duration = run.finished_at != null ? run.finished_at - run.started_at : null;
   const color = procRunStatusColor(run.status);
   return (
     <div className="card" style={{ padding: "10px 14px", marginBottom: 6, cursor: "pointer" }} onClick={onClick}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span className="chip" style={{ color, borderColor: `color-mix(in srgb, ${color} 40%, var(--border))` }}>
-          {run.status}
+          {t(`diagnostics.procedure_status.${run.status}`, { defaultValue: run.status })}
         </span>
         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{run.procedure_id}</span>
         <span style={{ fontSize: 11, color: "var(--text-mute)" }}>{run.action_title}</span>
@@ -626,6 +657,7 @@ function ProcedureRunRow({
 }
 
 function ProcedureRunsSection() {
+  const { t } = useTranslation("help");
   const runs = useSmithProcedureRunsList(50);
   const [collapsed, setCollapsed] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -633,23 +665,23 @@ function ProcedureRunsSection() {
   return (
     <div className="card" style={{ marginTop: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <h3 style={{ margin: 0 }}>Procedure runs</h3>
+        <h3 style={{ margin: 0 }}>{t("diagnostics.procedure_runs.heading")}</h3>
         <button
           className="tab"
           style={{ marginLeft: "auto", cursor: "pointer" }}
           onClick={() => setCollapsed(!collapsed)}
         >
-          {collapsed ? `Show${runs.data ? ` (${runs.data.length})` : ""}` : "Hide"}
+          {collapsed ? (runs.data ? t("diagnostics.common.show_count", { count: runs.data.length }) : t("diagnostics.common.show")) : t("diagnostics.common.hide")}
         </button>
       </div>
       {!collapsed && (
         <div style={{ marginTop: 8 }}>
           {runs.isLoading ? (
-            <div className="empty-note">Loading…</div>
+            <div className="empty-note">{t("diagnostics.common.loading")}</div>
           ) : runs.isError ? (
             <div className="error-note">{apiErrorMessage(runs.error)}</div>
           ) : !runs.data || runs.data.length === 0 ? (
-            <div className="empty-note">No procedure runs yet.</div>
+            <div className="empty-note">{t("diagnostics.procedure_runs.none")}</div>
           ) : (
             runs.data.map((run) => (
               <ProcedureRunRow
@@ -672,23 +704,24 @@ function ProcedureRunsSection() {
 // diagnostic surface like findings/investigations above it.
 
 function BlockedItemRow({ item }: { item: SmithBlockedItem }) {
+  const { t } = useTranslation("help");
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="card" style={{ padding: "10px 14px", marginBottom: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        {statusChip(item.status)}
+        {statusChip(item.status, t)}
         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
           #{item.number} {item.title}
         </span>
         {item.last_checked && (
           <span style={{ fontSize: 10, color: "var(--text-mute)", marginLeft: "auto" }}>
-            checked {item.last_checked}
+            {t("diagnostics.blocked_work.checked_at", { time: item.last_checked })}
           </span>
         )}
       </div>
       {item.blocked_on && (
         <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>
-          <span style={{ color: "var(--text-mute)" }}>Blocked on: </span>
+          <span style={{ color: "var(--text-mute)" }}>{t("diagnostics.blocked_work.blocked_on")}</span>
           <Markdown text={item.blocked_on} />
         </div>
       )}
@@ -697,7 +730,7 @@ function BlockedItemRow({ item }: { item: SmithBlockedItem }) {
         style={{ fontSize: 10, padding: "2px 8px", marginTop: 6, cursor: "pointer" }}
         onClick={() => setExpanded(!expanded)}
       >
-        {expanded ? "▼ details" : "▶ details"}
+        {expanded ? "▼ " : "▶ "}{t("diagnostics.common.details")}
       </button>
       {expanded && (
         <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--border)" }}>
@@ -709,7 +742,7 @@ function BlockedItemRow({ item }: { item: SmithBlockedItem }) {
           {item.where_to_check && (
             <div style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 10, color: "var(--text-mute)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>
-                Where to check
+                {t("diagnostics.blocked_work.where_to_check")}
               </div>
               <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
                 <Markdown text={item.where_to_check} />
@@ -719,7 +752,7 @@ function BlockedItemRow({ item }: { item: SmithBlockedItem }) {
           {item.when_unblocked && (
             <div>
               <div style={{ fontSize: 10, color: "var(--text-mute)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>
-                When unblocked
+                {t("diagnostics.blocked_work.when_unblocked")}
               </div>
               <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
                 <Markdown text={item.when_unblocked} />
@@ -733,29 +766,30 @@ function BlockedItemRow({ item }: { item: SmithBlockedItem }) {
 }
 
 function BlockedWorkSection() {
+  const { t } = useTranslation("help");
   const blocked = useSmithBlockedWork();
   const [collapsed, setCollapsed] = useState(true);
 
   return (
     <div className="card" style={{ marginTop: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <h3 style={{ margin: 0 }}>Externally blocked work</h3>
+        <h3 style={{ margin: 0 }}>{t("diagnostics.blocked_work.heading")}</h3>
         <button
           className="tab"
           style={{ marginLeft: "auto", cursor: "pointer" }}
           onClick={() => setCollapsed(!collapsed)}
         >
-          {collapsed ? `Show${blocked.data ? ` (${blocked.data.count})` : ""}` : "Hide"}
+          {collapsed ? (blocked.data ? t("diagnostics.common.show_count", { count: blocked.data.count }) : t("diagnostics.common.show")) : t("diagnostics.common.hide")}
         </button>
       </div>
       {!collapsed && (
         <div style={{ marginTop: 8 }}>
           {blocked.isLoading ? (
-            <div className="empty-note">Loading…</div>
+            <div className="empty-note">{t("diagnostics.common.loading")}</div>
           ) : blocked.isError ? (
             <div className="error-note">{apiErrorMessage(blocked.error)}</div>
           ) : !blocked.data || blocked.data.items.length === 0 ? (
-            <div className="empty-note">Nothing tracked.</div>
+            <div className="empty-note">{t("diagnostics.blocked_work.none")}</div>
           ) : (
             blocked.data.items.map((it) => <BlockedItemRow key={it.number} item={it} />)
           )}
@@ -774,6 +808,7 @@ export function Diagnostics({
   sub?: string;
   onSubChange?: (sub: string, opts?: { replace?: boolean }) => void;
 }) {
+  const { t } = useTranslation("help");
   // Parse deep-link: #help/smith/inv/<id>
   const deepLinkedId = useMemo(() => {
     if (!sub) return null;
@@ -826,7 +861,7 @@ export function Diagnostics({
     <>
       {/* ── Findings ── */}
       <div className="card" style={{ marginBottom: 12 }}>
-        <h3>Findings</h3>
+        <h3>{t("diagnostics.findings.heading")}</h3>
         {status.data?.missed_patterns && status.data.missed_patterns.length > 0 && (
           <MissedPatterns patterns={status.data.missed_patterns} />
         )}
@@ -837,7 +872,7 @@ export function Diagnostics({
             style={{ fontSize: 10, padding: "2px 8px" }}
             onClick={() => setSeverityFilter("")}
           >
-            all
+            {t("diagnostics.severity.all")}
           </button>
           {SEV_ORDER.map((s) => (
             <button
@@ -846,7 +881,7 @@ export function Diagnostics({
               style={{ fontSize: 10, padding: "2px 8px", ...(severityFilter === s ? { color: SEV_COLOR[s] } : {}) }}
               onClick={() => setSeverityFilter(s)}
             >
-              {s}
+              {t(`diagnostics.severity.${s}`, { defaultValue: s })}
             </button>
           ))}
         </div>
@@ -854,22 +889,25 @@ export function Diagnostics({
         <FindingsPurgeButtons />
 
         {findings.isLoading ? (
-          <div className="empty-note">Loading findings…</div>
+          <div className="empty-note">{t("diagnostics.findings.loading")}</div>
         ) : findings.isError ? (
           <div className="error-note">{apiErrorMessage(findings.error)}</div>
         ) : groupedFindings.size === 0 ? (
-          <div className="empty-note">No findings recorded.</div>
+          <div className="empty-note">{t("diagnostics.findings.none")}</div>
         ) : (
           <>
             {findings.data && (
               <div style={{ fontSize: 10, color: "var(--text-mute)", marginBottom: 6 }}>
-                {findings.data.count} total{severityFilter ? ` (filtered: ${severityFilter})` : ""}
+                {t("diagnostics.findings.total_count", { count: findings.data.count })}
+                {severityFilter
+                  ? t("diagnostics.findings.filtered_suffix", { severity: t(`diagnostics.severity.${severityFilter}`, { defaultValue: severityFilter }) })
+                  : ""}
               </div>
             )}
             {SEV_ORDER.filter((s) => groupedFindings.has(s)).map((sev) => (
               <div key={sev} style={{ marginBottom: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                  {sevChip(sev)}
+                  {sevChip(sev, t)}
                   <span style={{ fontSize: 10, color: "var(--text-mute)" }}>
                     ({groupedFindings.get(sev)!.length})
                   </span>
@@ -886,13 +924,13 @@ export function Diagnostics({
       {/* ── Investigations ── */}
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <h3 style={{ margin: 0 }}>Investigations</h3>
+          <h3 style={{ margin: 0 }}>{t("diagnostics.investigations.heading")}</h3>
           <button
             className="tab"
             style={{ marginLeft: "auto", cursor: "pointer" }}
             onClick={() => setShowManual(!showManual)}
           >
-            {showManual ? "Cancel" : "+ Open investigation"}
+            {showManual ? t("diagnostics.investigations.cancel") : t("diagnostics.investigations.open_new")}
           </button>
         </div>
 
@@ -901,7 +939,7 @@ export function Diagnostics({
           <div style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
             <input
               type="text"
-              placeholder="Summary (optional)"
+              placeholder={t("diagnostics.investigations.summary_placeholder")}
               value={manualSummary}
               onChange={(e) => setManualSummary(e.target.value)}
               style={{
@@ -934,7 +972,7 @@ export function Diagnostics({
               }
               disabled={createInvestigation.isPending}
             >
-              Create
+              {t("diagnostics.investigations.create")}
             </button>
             {createInvestigation.isError && (
               <div className="error-note" style={{ marginTop: 4 }}>
@@ -948,15 +986,15 @@ export function Diagnostics({
         {selectedInvId !== null ? (
           <InvestigationDetail id={selectedInvId} onBack={backToList} onSubChange={onSubChange} />
         ) : investigations.isLoading ? (
-          <div className="empty-note">Loading investigations…</div>
+          <div className="empty-note">{t("diagnostics.investigations.loading")}</div>
         ) : investigations.isError ? (
           <div className="error-note">{apiErrorMessage(investigations.error)}</div>
         ) : !investigations.data || investigations.data.investigations.length === 0 ? (
-          <div className="empty-note">No investigations.</div>
+          <div className="empty-note">{t("diagnostics.investigations.none")}</div>
         ) : (
           <>
             <div style={{ fontSize: 10, color: "var(--text-mute)", marginBottom: 6 }}>
-              {investigations.data.count} total
+              {t("diagnostics.investigations.total_count", { count: investigations.data.count })}
             </div>
             {investigations.data.investigations.map((inv) => (
               <InvestigationRow

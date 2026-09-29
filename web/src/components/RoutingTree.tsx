@@ -62,6 +62,7 @@
 // so it paints above the SVG's link curves, which do pass through that
 // corner; a panel backdrop keeps it legible over them.
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Icon } from "./Icon";
 import { creatorIconSlug } from "../lib/creatorIcon";
 import { groupOfferingsByModel } from "../lib/offeringPreference";
@@ -77,17 +78,18 @@ import {
 } from "../lib/queries";
 import type { CatalogOffering, CompressorProxy, InfraService } from "../lib/types";
 
-const LAYOUT_MODES = [
-  { key: "az", label: "A–Z" },
-  { key: "group", label: "Group" },
-] as const;
-type LayoutMode = (typeof LAYOUT_MODES)[number]["key"];
+// Labels come from the "common" translation namespace (routing_tree.layout_*),
+// built inside the component where useTranslation is available.
+const LAYOUT_MODE_KEYS = ["az", "group"] as const;
+type LayoutMode = (typeof LAYOUT_MODE_KEYS)[number];
 
 const COMPRESSOR_ROW_PREFIX = "Compressor (";
 
 type LinkVisual = { cls: string; color: string; opacity: number; dash?: string };
 
 export function RoutingTree({ readOnly = false }: { readOnly?: boolean }) {
+  const { t } = useTranslation("common");
+  const layoutModeOptions = LAYOUT_MODE_KEYS.map((key) => ({ key, label: t(`routing_tree.layout_${key}`) }));
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("az");
   const offerings = useCatalogOfferings();
   const models = useCatalogModels();
@@ -265,10 +267,10 @@ export function RoutingTree({ readOnly = false }: { readOnly?: boolean }) {
   }
 
   if (offeringList.length === 0) {
-    return <div className="empty-note">No offerings configured — nothing to map yet.</div>;
+    return <div className="empty-note">{t("routing_tree.no_offerings")}</div>;
   }
   if (visibleOfferings.length === 0) {
-    return <div className="empty-note">All offerings are currently disabled.</div>;
+    return <div className="empty-note">{t("routing_tree.all_disabled")}</div>;
   }
 
   const lpressCircumference = 2 * Math.PI * 17;
@@ -276,7 +278,7 @@ export function RoutingTree({ readOnly = false }: { readOnly?: boolean }) {
   return (
     <>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-        <RangeToggle options={LAYOUT_MODES} value={layoutMode} onChange={setLayoutMode} />
+        <RangeToggle options={layoutModeOptions} value={layoutMode} onChange={setLayoutMode} />
       </div>
       <div className={`rtree${readOnly ? " rtree-readonly" : ""}`} style={{ position: "relative", width: "100%", maxWidth: 720, height: H, margin: "0 auto" }}>
         <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block", pointerEvents: "none" }}>
@@ -313,7 +315,7 @@ export function RoutingTree({ readOnly = false }: { readOnly?: boolean }) {
               onPointerUp={cancelHold}
               onPointerLeave={cancelHold}
               onPointerCancel={cancelHold}
-              title={readOnly ? undefined : "Hold to enable/disable this provider"}
+              title={readOnly ? undefined : t("routing_tree.hold_to_toggle_title")}
             >
               {isHolding && (
                 <svg className="rtree-lpress" width={40} height={40} viewBox="0 0 40 40" aria-hidden="true">
@@ -322,14 +324,14 @@ export function RoutingTree({ readOnly = false }: { readOnly?: boolean }) {
               )}
               <Icon slug={providerIconSlug(name)} name={name} sm />
               <span className="rtree-label">{name}</span>
-              {prov && !prov.enabled && <span className="chip" style={{ color: "var(--warn)" }}>off</span>}
+              {prov && !prov.enabled && <span className="chip" style={{ color: "var(--warn)" }}>{t("routing_tree.off_chip")}</span>}
             </div>
           );
         })}
         {modelIds.map((id) => {
           const y = modelY.get(id)!;
           const m = modelById.get(id);
-          const name = m?.name ?? `Model #${id}`;
+          const name = m?.name ?? t("routing_tree.model_fallback_name", { id });
           // Models missing a catalog logo fall back to the creator's brand icon
           // (then the letter badge) instead of rendering nothing.
           const modelSlug = m?.logo || creatorIconSlug(m?.creator);
@@ -352,15 +354,15 @@ export function RoutingTree({ readOnly = false }: { readOnly?: boolean }) {
             operator disables the shared external proxy), it's just no
             longer documented in the key since it can't happen today. */}
         <div className="rtree-legend" role="doc-tip" style={{ top: LEGEND_TOP }}>
-          <span className="rtree-lg"><i className="rtree-lg-line compressing" /> compressing</span>
-          <span className="rtree-lg"><i className="rtree-lg-line degraded" /> compressing · degraded</span>
-          <span className="rtree-lg"><i className="rtree-lg-line bypassed" /> operator bypass</span>
-          <span className="rtree-lg"><i className="rtree-lg-line autobypass" /> auto-bypassed (compressor down)</span>
-          <span className="rtree-lg"><i className="rtree-lg-line failing" /> failing (compressor + upstream down)</span>
-          <span className="rtree-lg"><i className="rtree-lg-line unreachable" /> provider unreachable</span>
-          <span className="rtree-lg"><i className="rtree-lg-line disabled" /> disabled</span>
+          <span className="rtree-lg"><i className="rtree-lg-line compressing" /> {t("routing_tree.legend_compressing")}</span>
+          <span className="rtree-lg"><i className="rtree-lg-line degraded" /> {t("routing_tree.legend_degraded")}</span>
+          <span className="rtree-lg"><i className="rtree-lg-line bypassed" /> {t("routing_tree.legend_bypassed")}</span>
+          <span className="rtree-lg"><i className="rtree-lg-line autobypass" /> {t("routing_tree.legend_autobypass")}</span>
+          <span className="rtree-lg"><i className="rtree-lg-line failing" /> {t("routing_tree.legend_failing")}</span>
+          <span className="rtree-lg"><i className="rtree-lg-line unreachable" /> {t("routing_tree.legend_unreachable")}</span>
+          <span className="rtree-lg"><i className="rtree-lg-line disabled" /> {t("routing_tree.legend_disabled")}</span>
           <span className="rtree-lg-note">
-            thicker = higher priority{readOnly ? "" : " · hold a provider node to enable/disable"}
+            {t("routing_tree.legend_note")}{readOnly ? "" : t("routing_tree.legend_note_hold_suffix")}
           </span>
         </div>
       </div>

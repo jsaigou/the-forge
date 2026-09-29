@@ -87,11 +87,11 @@ type routingPreviewPerfMember struct {
 func (s *Server) handleRoutingPreview(w http.ResponseWriter, r *http.Request) {
 	model := strings.TrimSpace(r.URL.Query().Get("model"))
 	if model == "" {
-		writeValidationError(w, map[string]string{"model": "is required"})
+		writeValidationErrorCodes(w, map[string]string{"model": "is required"}, map[string]string{"model": "required"})
 		return
 	}
 	if s.deps.Catalog == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)

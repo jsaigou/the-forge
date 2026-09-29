@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { countryFlag } from "../../lib/format";
 import { useProviders } from "../../lib/queries";
 import type { CatalogModel, CatalogOffering, CatalogVariant } from "../../lib/types";
@@ -59,6 +60,7 @@ export function OfferingForm({
   pending: boolean;
   isError?: boolean;
 }) {
+  const { t } = useTranslation("common");
   const [modelId, setModelId] = useState(existing?.model_id ?? 0);
   const [variantId, setVariantId] = useState(existing?.variant_id ?? 0);
   const [provider, setProvider] = useState(existing?.provider ?? "");
@@ -107,21 +109,21 @@ export function OfferingForm({
 
   return (
     <div className="form-grid" style={{ marginTop: 4 }}>
-      <label className="form-row">Model *
+      <label className="form-row">{t("catalog_form.offering.model_label")}
         <select value={modelId} onChange={(e) => { setModelId(Number(e.target.value)); setVariantId(0); }}>
-          <option value={0}>— select —</option>
+          <option value={0}>{t("catalog_form.offering.select_ellipsis")}</option>
           {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
       </label>
-      <label className="form-row">Variant (optional)
+      <label className="form-row">{t("catalog_form.offering.variant_label")}
         <select value={variantId} onChange={(e) => setVariantId(Number(e.target.value))}>
-          <option value={0}>— none —</option>
+          <option value={0}>{t("catalog_form.offering.none_option")}</option>
           {modelVariants.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
         </select>
       </label>
-      <label className="form-row">Provider *
+      <label className="form-row">{t("catalog_form.offering.provider_label")}
         <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-          <option value="">— select —</option>
+          <option value="">{t("catalog_form.offering.select_ellipsis")}</option>
           {providers.map((p) => (
             <option key={p.name} value={p.name}>
               {p.name}{p.country ? ` ${countryFlag(p.country)}` : ""}{p.data_residency_group ? ` (${p.data_residency_group})` : ""}
@@ -129,97 +131,97 @@ export function OfferingForm({
           ))}
         </select>
       </label>
-      <label className="form-row">Wire model *
-        <input value={wireModel} placeholder="deepseek-chat" onChange={(e) => setWireModel(e.target.value)} />
+      <label className="form-row">{t("catalog_form.offering.wire_model_label")}
+        <input value={wireModel} placeholder={t("catalog_form.offering.wire_model_placeholder")} onChange={(e) => setWireModel(e.target.value)} />
       </label>
-      <label className="form-row">Price in / 1M
+      <label className="form-row">{t("catalog_form.offering.price_in_label")}
         <input type="number" step="0.01" min={0} value={priceIn} onChange={(e) => setPriceIn(Number(e.target.value))} />
       </label>
-      <label className="form-row">Price out / 1M
+      <label className="form-row">{t("catalog_form.offering.price_out_label")}
         <input type="number" step="0.01" min={0} value={priceOut} onChange={(e) => setPriceOut(Number(e.target.value))} />
       </label>
-      <label className="form-row">Cached price in / 1M (optional)
+      <label className="form-row">{t("catalog_form.offering.cached_price_in_label")}
         <input
           type="number"
           step="0.001"
           min={0}
           value={priceCachedIn ?? ""}
-          placeholder="unmodelled — full price applies to cache hits"
+          placeholder={t("catalog_form.offering.cached_price_placeholder")}
           onChange={(e) => setPriceCachedIn(e.target.value === "" ? null : Number(e.target.value))}
         />
       </label>
       <div style={{ gridColumn: "1 / -1", marginTop: 4 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-          <span style={{ fontSize: 12, fontWeight: 600 }}>Time-of-day pricing (optional)</span>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>{t("catalog_form.offering.peak_pricing_title")}</span>
           <button type="button" className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={fillPeakDouble}>
-            Fill: peak = 2× off-peak
+            {t("catalog_form.offering.fill_peak_button")}
           </button>
         </div>
         {selectedProvider && !selectedProvider.hasPeakWindows && (priceInPeak != null || priceOutPeak != null || priceCachedInPeak != null) && (
           <div style={{ fontSize: 11, color: "var(--warn)", marginBottom: 4 }}>
-            {selectedProvider.name} has no peak schedule configured (Settings → Providers) — these peak rates will never apply.
+            {t("catalog_form.offering.no_peak_schedule_warning", { provider: selectedProvider.name })}
           </div>
         )}
         {((priceInPeak != null && priceInPeak < priceIn) || (priceOutPeak != null && priceOutPeak < priceOut)) && (
           <div style={{ fontSize: 11, color: "var(--warn)", marginBottom: 4 }}>
-            A peak rate is lower than its off-peak rate — unusual, but the provider's own pricing policy isn't enforced here.
+            {t("catalog_form.offering.peak_lower_warning")}
           </div>
         )}
       </div>
-      <label className="form-row">Price in / 1M, peak
+      <label className="form-row">{t("catalog_form.offering.price_in_peak_label")}
         <input
           type="number" step="0.01" min={0}
           value={priceInPeak ?? ""}
-          placeholder="same as off-peak"
+          placeholder={t("catalog_form.offering.same_as_off_peak_placeholder")}
           onChange={(e) => setPriceInPeak(e.target.value === "" ? null : Number(e.target.value))}
         />
       </label>
-      <label className="form-row">Price out / 1M, peak
+      <label className="form-row">{t("catalog_form.offering.price_out_peak_label")}
         <input
           type="number" step="0.01" min={0}
           value={priceOutPeak ?? ""}
-          placeholder="same as off-peak"
+          placeholder={t("catalog_form.offering.same_as_off_peak_placeholder")}
           onChange={(e) => setPriceOutPeak(e.target.value === "" ? null : Number(e.target.value))}
         />
       </label>
-      <label className="form-row">Cached price in / 1M, peak
+      <label className="form-row">{t("catalog_form.offering.cached_price_peak_label")}
         <input
           type="number" step="0.001" min={0}
           value={priceCachedInPeak ?? ""}
-          placeholder="same as off-peak"
+          placeholder={t("catalog_form.offering.same_as_off_peak_placeholder")}
           onChange={(e) => setPriceCachedInPeak(e.target.value === "" ? null : Number(e.target.value))}
         />
       </label>
-      <label className="form-row">Currency
+      <label className="form-row">{t("catalog_form.offering.currency_label")}
         <input value={currency} maxLength={3} placeholder="USD" onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
       </label>
-      <label className="form-row">Context length
+      <label className="form-row">{t("catalog_form.offering.context_length_label")}
         <input type="number" min={0} value={contextLength} placeholder="65536" onChange={(e) => setContextLength(Number(e.target.value))} />
       </label>
-      <label className="form-row">Priority
+      <label className="form-row">{t("catalog_form.offering.priority_label")}
         <input type="number" min={0} value={priority} onChange={(e) => setPriority(Number(e.target.value))} />
         <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
-          When several providers offer this model, the LOWEST value is served via a0 (100 = no preference; ties break by provider name).
+          {t("catalog_form.offering.priority_hint")}
         </span>
       </label>
       <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-        Enabled (route to this offering)
+        {t("catalog_form.offering.enabled_checkbox")}
       </label>
       {selectedProvider?.country && (
         <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "var(--text-dim)" }}>
-          {countryFlag(selectedProvider.country)} Data residency: {selectedProvider.country}
-          {selectedProvider.data_residency_group ? ` · group: ${selectedProvider.data_residency_group}` : ""}
+          {countryFlag(selectedProvider.country)} {t("catalog_form.offering.data_residency_label", { country: selectedProvider.country })}
+          {selectedProvider.data_residency_group ? t("catalog_form.offering.data_residency_group_suffix", { group: selectedProvider.data_residency_group }) : ""}
         </div>
       )}
       <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
-        <button className="btn" onClick={onCancel}>Cancel</button>
+        <button className="btn" onClick={onCancel}>{t("catalog_form.offering.cancel")}</button>
         <SaveButton
           pending={pending}
           isError={isError}
           disabled={pending || !modelId || !provider || !wireModel}
           onClick={submit}
-          label={existing ? "Save" : "Create"}
+          label={existing ? undefined : t("save_button.create")}
         />
       </div>
     </div>

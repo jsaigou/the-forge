@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { withTranslation, type WithTranslation } from "react-i18next";
 
 // There was no ErrorBoundary anywhere in the app before this (verified: zero
 // hits for ErrorBoundary/componentDidCatch across web/src). Any render throw
@@ -12,7 +13,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 // boundary per sub-tab (e.g. Dashboard's four tabs) and have it auto-clear
 // when the key changes (tab switch), instead of the error state persisting
 // until "Try again" is clicked — see joyful-splashing-moonbeam.md Phase 5.
-interface Props {
+interface Props extends WithTranslation {
   children: ReactNode;
   resetKeys?: unknown[];
 }
@@ -21,7 +22,10 @@ interface State {
   error: Error | null;
 }
 
-export class ErrorBoundary extends Component<Props, State> {
+// withTranslation (below) re-renders this boundary on language change, which
+// a plain i18next.t() call wouldn't — a class component can't use the
+// useTranslation hook.
+class ErrorBoundaryBase extends Component<Props, State> {
   state: State = { error: null };
 
   static getDerivedStateFromError(error: Error): State {
@@ -48,19 +52,20 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.error) {
+      const { t } = this.props;
       return (
         <section className="page">
           <div className="card" style={{ borderLeft: "3px solid var(--crit)", padding: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--crit)", marginBottom: 8 }}>
-              Something went wrong rendering this page
+              {t("error_boundary.title")}
             </div>
             <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 4, fontFamily: "var(--mono)" }}>
               {this.state.error.message}
             </div>
             <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 14 }}>
-              The rest of the app is unaffected — you can try again or switch tabs.
+              {t("error_boundary.hint")}
             </div>
-            <button className="btn primary" onClick={this.reset}>Try again</button>
+            <button className="btn primary" onClick={this.reset}>{t("error_boundary.try_again")}</button>
           </div>
         </section>
       );
@@ -68,3 +73,5 @@ export class ErrorBoundary extends Component<Props, State> {
     return this.props.children;
   }
 }
+
+export const ErrorBoundary = withTranslation("common")(ErrorBoundaryBase);

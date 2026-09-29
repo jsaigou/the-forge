@@ -14,13 +14,14 @@
 // Metrics cards, so an unsaved draft in one card never leaks into another
 // card's save.
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../../lib/api";
-import { formatGB } from "../../lib/format";
+import { appLocale, formatGB } from "../../lib/format";
 import { SaveButton } from "../../components/SaveButton";
 import { StepUpModal } from "../../components/StepUpModal";
 import { useCatalogConfigs, useCatalogOfferings, useSmithAutonomy, useSmithSettings, useSmithSourcingEvaluate, useSmithStatus, useSmithWebProbe, useUpdateSmithAutonomy, useUpdateSmithSettings } from "../../lib/queries";
 import type { SmithAutonomyPolicy, SmithAutonomyProcedurePolicy, SmithSourcingEvaluation, SmithWebProviderSettings, SmithWebSettings } from "../../lib/types";
-import { Field } from "../Field";
+import { Field, fieldHelp, fieldLabel } from "../Field";
 import { SMITH_FIELDS } from "../fields";
 import { useSettingsGroup } from "../useSettingsGroup";
 import { useStepUpGate } from "../../lib/useStepUpGate";
@@ -28,6 +29,7 @@ import { useStepUpGate } from "../../lib/useStepUpGate";
 const F = Object.fromEntries(SMITH_FIELDS.map((f) => [f.id, f]));
 
 function ReasoningCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useSmithSettings();
   const update = useUpdateSmithSettings();
   const g = useSettingsGroup(cfg.data, update);
@@ -37,16 +39,16 @@ function ReasoningCard({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError) {
     return (
       <>
-        <div className="eyebrow">smith → Reasoning</div>
-        <div className="card"><div className="empty-note">Operator role required to view smith settings.</div></div>
+        <div className="eyebrow">{t("smith.eyebrow.reasoning")}</div>
+        <div className="card"><div className="empty-note">{t("shared.role_required", { resource: "smith" })}</div></div>
       </>
     );
   }
   if (!g.active) {
     return (
       <>
-        <div className="eyebrow">smith → Reasoning</div>
-        <div className="card"><div className="empty-note">Loading smith settings…</div></div>
+        <div className="eyebrow">{t("smith.eyebrow.reasoning")}</div>
+        <div className="card"><div className="empty-note">{t("shared.loading", { resource: "smith" })}</div></div>
       </>
     );
   }
@@ -86,23 +88,23 @@ function ReasoningCard({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow">smith → Reasoning</div>
+      <div className="eyebrow">{t("smith.eyebrow.reasoning")}</div>
       <div className="card">
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
 
         <div id="smith-model" className="form-row">
-          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>{F["smith.model"].label}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>{fieldLabel(t, F["smith.model"])}</span>
           <select value={active.model} disabled={!canAdmin} onChange={(e) => g.setField("model", e.target.value)}>
-            <option value="">— none (answers without a model) —</option>
+            <option value="">{t("smith.reasoning.none_model")}</option>
             {visibleConfigs.length > 0 && (
-              <optgroup label="Local configs">
+              <optgroup label={t("smith.reasoning.local_configs")}>
                 {visibleConfigs.map((c) => (
                   <option key={`c${c.id}`} value={c.name}>{c.name}</option>
                 ))}
               </optgroup>
             )}
             {enabledOfferings.length > 0 && (
-              <optgroup label="Remote offerings">
+              <optgroup label={t("smith.reasoning.remote_offerings")}>
                 {enabledOfferings.map((o) => (
                   <option key={`o${o.id}`} value={o.wire_model}>
                     {o.wire_model} ({o.provider})
@@ -113,16 +115,16 @@ function ReasoningCard({ canAdmin }: { canAdmin: boolean }) {
           </select>
         </div>
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 2, marginBottom: 14 }}>
-          {F["smith.model"].help}
+          {fieldHelp(t, F["smith.model"])}
         </div>
 
         <div id="smith-handoff-offerings">
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{F["smith.handoff_offerings"].label}</div>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{fieldLabel(t, F["smith.handoff_offerings"])}</div>
           <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
-            {F["smith.handoff_offerings"].help}
+            {fieldHelp(t, F["smith.handoff_offerings"])}
           </div>
           {enabledOfferings.length === 0 ? (
-            <div className="empty-note">No enabled remote offerings to choose from.</div>
+            <div className="empty-note">{t("smith.reasoning.no_offerings")}</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {active.handoff_offerings.map((id, i) => {
@@ -146,7 +148,7 @@ function ReasoningCard({ canAdmin }: { canAdmin: boolean }) {
                           ↓
                         </button>
                         <button className="tab" style={{ padding: "1px 6px" }} onClick={() => toggleOffering(id)}>
-                          remove
+                          {t("smith.reasoning.remove")}
                         </button>
                       </span>
                     )}
@@ -155,7 +157,7 @@ function ReasoningCard({ canAdmin }: { canAdmin: boolean }) {
               })}
               {canAdmin && enabledOfferings.some((o) => !active.handoff_offerings.includes(o.id)) && (
                 <div style={{ marginTop: 6 }}>
-                  <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginBottom: 4 }}>Add:</div>
+                  <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginBottom: 4 }}>{t("smith.reasoning.add_label")}</div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     {enabledOfferings
                       .filter((o) => !active.handoff_offerings.includes(o.id))
@@ -172,17 +174,17 @@ function ReasoningCard({ canAdmin }: { canAdmin: boolean }) {
         </div>
 
         <div id="smith-brain-chain" style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{F["smith.brain_chain"].label}</div>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{fieldLabel(t, F["smith.brain_chain"])}</div>
           <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
-            {F["smith.brain_chain"].help}
+            {fieldHelp(t, F["smith.brain_chain"])}
           </div>
           {visibleConfigs.length === 0 ? (
-            <div className="empty-note">No local configs to choose from.</div>
+            <div className="empty-note">{t("smith.reasoning.no_configs")}</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {active.brain_chain.length === 0 && (
                 <div style={{ fontSize: 11, color: "var(--text-mute)" }}>
-                  Empty — smith escalates straight to smith.model above, no chain.
+                  {t("smith.reasoning.chain_empty")}
                 </div>
               )}
               {active.brain_chain.map((name, i) => (
@@ -201,7 +203,7 @@ function ReasoningCard({ canAdmin }: { canAdmin: boolean }) {
                         ↓
                       </button>
                       <button className="tab" style={{ padding: "1px 6px" }} onClick={() => toggleBrainChainMember(name)}>
-                        remove
+                        {t("smith.reasoning.remove")}
                       </button>
                     </span>
                   )}
@@ -209,7 +211,7 @@ function ReasoningCard({ canAdmin }: { canAdmin: boolean }) {
               ))}
               {canAdmin && visibleConfigs.some((c) => !active.brain_chain.includes(c.name)) && (
                 <div style={{ marginTop: 6 }}>
-                  <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginBottom: 4 }}>Add:</div>
+                  <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginBottom: 4 }}>{t("smith.reasoning.add_label")}</div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     {visibleConfigs
                       .filter((c) => !active.brain_chain.includes(c.name))
@@ -227,7 +229,7 @@ function ReasoningCard({ canAdmin }: { canAdmin: boolean }) {
 
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={g.reset}>Reset</button>
+            <button className="btn" onClick={g.reset}>{t("shared.reset")}</button>
             <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
           </div>
         )}
@@ -238,6 +240,7 @@ function ReasoningCard({ canAdmin }: { canAdmin: boolean }) {
 }
 
 function ScheduleCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useSmithSettings();
   const update = useUpdateSmithSettings();
   const g = useSettingsGroup(cfg.data, update);
@@ -245,9 +248,9 @@ function ScheduleCard({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError || !g.active) {
     return (
       <>
-        <div className="eyebrow">smith → Schedule</div>
+        <div className="eyebrow">{t("smith.eyebrow.schedule")}</div>
         <div className="card">
-          <div className="empty-note">{cfg.isError ? "Operator role required to view smith settings." : "Loading…"}</div>
+          <div className="empty-note">{cfg.isError ? t("shared.role_required", { resource: "smith" }) : t("common:app.loading")}</div>
         </div>
       </>
     );
@@ -256,7 +259,7 @@ function ScheduleCard({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow">smith → Schedule</div>
+      <div className="eyebrow">{t("smith.eyebrow.schedule")}</div>
       <div className="card">
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
         <div className="form-grid">
@@ -267,7 +270,7 @@ function ScheduleCard({ canAdmin }: { canAdmin: boolean }) {
         </div>
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={g.reset}>Reset</button>
+            <button className="btn" onClick={g.reset}>{t("shared.reset")}</button>
             <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
           </div>
         )}
@@ -278,6 +281,7 @@ function ScheduleCard({ canAdmin }: { canAdmin: boolean }) {
 }
 
 function ThresholdsCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useSmithSettings();
   const update = useUpdateSmithSettings();
   const g = useSettingsGroup(cfg.data, update);
@@ -285,9 +289,9 @@ function ThresholdsCard({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError || !g.active) {
     return (
       <>
-        <div className="eyebrow">smith → Thresholds</div>
+        <div className="eyebrow">{t("smith.eyebrow.thresholds")}</div>
         <div className="card">
-          <div className="empty-note">{cfg.isError ? "Operator role required to view smith settings." : "Loading…"}</div>
+          <div className="empty-note">{cfg.isError ? t("shared.role_required", { resource: "smith" }) : t("common:app.loading")}</div>
         </div>
       </>
     );
@@ -296,7 +300,7 @@ function ThresholdsCard({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow">smith → Thresholds</div>
+      <div className="eyebrow">{t("smith.eyebrow.thresholds")}</div>
       <div className="card">
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
         <div className="form-grid">
@@ -317,7 +321,7 @@ function ThresholdsCard({ canAdmin }: { canAdmin: boolean }) {
         </div>
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={g.reset}>Reset</button>
+            <button className="btn" onClick={g.reset}>{t("shared.reset")}</button>
             <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
           </div>
         )}
@@ -328,6 +332,7 @@ function ThresholdsCard({ canAdmin }: { canAdmin: boolean }) {
 }
 
 function WatchlistCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useSmithSettings();
   const update = useUpdateSmithSettings();
   const g = useSettingsGroup(cfg.data, update);
@@ -336,9 +341,9 @@ function WatchlistCard({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError || !g.active) {
     return (
       <>
-        <div className="eyebrow">smith → Build-refresh watchlist</div>
+        <div className="eyebrow">{t("smith.eyebrow.watchlist")}</div>
         <div className="card">
-          <div className="empty-note">{cfg.isError ? "Operator role required to view smith settings." : "Loading…"}</div>
+          <div className="empty-note">{cfg.isError ? t("shared.role_required", { resource: "smith" }) : t("common:app.loading")}</div>
         </div>
       </>
     );
@@ -357,14 +362,14 @@ function WatchlistCard({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow">smith → Build-refresh watchlist</div>
+      <div className="eyebrow">{t("smith.eyebrow.watchlist")}</div>
       <div id="smith-build-refresh-watchlist" className="card">
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
-          {F["smith.build_refresh_watchlist"].help}
+          {fieldHelp(t, F["smith.build_refresh_watchlist"])}
         </div>
         {active.build_refresh_watchlist.length === 0 ? (
-          <div className="empty-note">Empty — no commit-subject matching happens.</div>
+          <div className="empty-note">{t("smith.watchlist.empty")}</div>
         ) : (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: canAdmin ? 10 : 0 }}>
             {active.build_refresh_watchlist.map((kw) => (
@@ -376,7 +381,7 @@ function WatchlistCard({ canAdmin }: { canAdmin: boolean }) {
                 {kw}
                 {canAdmin && (
                   <button
-                    aria-label={`remove ${kw}`}
+                    aria-label={t("smith.watchlist.remove_aria", { keyword: kw })}
                     onClick={() => removeKeyword(kw)}
                     style={{ background: "none", border: "none", color: "var(--text-mute)", cursor: "pointer", padding: 0, fontSize: 13, lineHeight: 1 }}
                   >
@@ -390,18 +395,18 @@ function WatchlistCard({ canAdmin }: { canAdmin: boolean }) {
         {canAdmin && (
           <div style={{ display: "flex", gap: 6 }}>
             <input
-              placeholder="e.g. CVE, breaking, security"
+              placeholder={t("smith.watchlist.placeholder")}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addKeyword()}
               style={{ flex: 1 }}
             />
-            <button className="btn" disabled={!draft.trim()} onClick={addKeyword}>+ Add</button>
+            <button className="btn" disabled={!draft.trim()} onClick={addKeyword}>{t("smith.watchlist.add")}</button>
           </div>
         )}
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={g.reset}>Reset</button>
+            <button className="btn" onClick={g.reset}>{t("shared.reset")}</button>
             <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
           </div>
         )}
@@ -419,6 +424,7 @@ function providerDotColor(reachable: boolean, checkedAt: string | null): string 
 }
 
 function WebResearchCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useSmithSettings();
   const update = useUpdateSmithSettings();
   const g = useSettingsGroup(cfg.data, update);
@@ -428,9 +434,9 @@ function WebResearchCard({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError || !g.active) {
     return (
       <>
-        <div className="eyebrow">smith → Web research</div>
+        <div className="eyebrow">{t("smith.eyebrow.web_research")}</div>
         <div className="card">
-          <div className="empty-note">{cfg.isError ? "Operator role required to view smith settings." : "Loading…"}</div>
+          <div className="empty-note">{cfg.isError ? t("shared.role_required", { resource: "smith" }) : t("common:app.loading")}</div>
         </div>
       </>
     );
@@ -464,23 +470,23 @@ function WebResearchCard({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow">smith → Web research</div>
+      <div className="eyebrow">{t("smith.eyebrow.web_research")}</div>
       <div className="card">
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
 
         <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={webCfg.enabled} disabled={!canAdmin}
             onChange={(e) => setWeb({ enabled: e.target.checked })} />
-          {F["smith.web.enabled"].label}
+          {fieldLabel(t, F["smith.web.enabled"])}
         </label>
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 2, marginBottom: 14 }}>
-          {F["smith.web.enabled"].help}
+          {fieldHelp(t, F["smith.web.enabled"])}
         </div>
 
         <div id="smith-web-order" style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{F["smith.web.provider_order"].label}</div>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{fieldLabel(t, F["smith.web.provider_order"])}</div>
           <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
-            {F["smith.web.provider_order"].help}
+            {fieldHelp(t, F["smith.web.provider_order"])}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {orderedNames.map((name, i) => {
@@ -489,7 +495,7 @@ function WebResearchCard({ canAdmin }: { canAdmin: boolean }) {
                 <div key={name} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5 }}>
                   <span style={{ fontFamily: "var(--mono)", color: "var(--text-mute)" }}>{i + 1}.</span>
                   <span
-                    title={ps ? (ps.checked_at ? `${ps.reachable ? "reachable" : "unreachable"} — ${ps.detail || "no detail"}` : "never probed") : "unknown"}
+                    title={ps ? (ps.checked_at ? t("smith.web.status_detail", { state: ps.reachable ? t("smith.web.reachable") : t("smith.web.unreachable"), detail: ps.detail || t("smith.web.no_detail") }) : t("smith.web.never_probed")) : t("smith.web.unknown")}
                     style={{
                       display: "inline-block", width: 8, height: 8, borderRadius: "50%",
                       background: ps ? providerDotColor(ps.reachable, ps.checked_at) : "var(--text-mute)",
@@ -497,7 +503,7 @@ function WebResearchCard({ canAdmin }: { canAdmin: boolean }) {
                   />
                   <span>{name}</span>
                   {name === "direct" && (
-                    <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>(always tried last, regardless of order)</span>
+                    <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>{t("smith.web.direct_note")}</span>
                   )}
                   {canAdmin && name !== "direct" && (
                     <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
@@ -512,27 +518,27 @@ function WebResearchCard({ canAdmin }: { canAdmin: boolean }) {
         </div>
 
         <div id="smith-web-keys" style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
-          <div style={{ fontSize: 12, fontWeight: 600 }}>{F["smith.web.api_keys"].label}</div>
-          <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{F["smith.web.api_keys"].help}</div>
+          <div style={{ fontSize: 12, fontWeight: 600 }}>{fieldLabel(t, F["smith.web.api_keys"])}</div>
+          <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{fieldHelp(t, F["smith.web.api_keys"])}</div>
           {(["searxng", "customsearch", "firecrawl", "customfetch"] as const).map((name) => (
             <div key={name} style={{ display: "flex", flexDirection: "column", gap: 4, padding: "8px 0", borderTop: "1px solid var(--border)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <strong style={{ fontSize: 12, textTransform: "capitalize" }}>{name}</strong>
                 {(name === "customsearch" || name === "customfetch") && (
                   <span style={{ fontSize: 10, color: "var(--text-mute)" }}>
-                    {name === "customsearch" ? "(SearxNG-compatible GET ?q= endpoint)" : "(GET ?url= text proxy)"}
+                    {name === "customsearch" ? t("smith.web.customsearch_note") : t("smith.web.customfetch_note")}
                   </span>
                 )}
                 <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, marginLeft: "auto" }}>
                   <input type="checkbox" checked={webCfg[name].enabled} disabled={!canAdmin}
                     onChange={(e) => setProvider(name, { enabled: e.target.checked })} />
-                  enabled
+                  {t("smith.web.enabled_label")}
                 </label>
               </div>
-              <input type="text" placeholder="https://…" value={webCfg[name].base_url} disabled={!canAdmin}
+              <input type="text" placeholder={t("smith.web.url_placeholder")} value={webCfg[name].base_url} disabled={!canAdmin}
                 onChange={(e) => setProvider(name, { base_url: e.target.value })} />
               <input
-                type="password" placeholder="API key (leave as-is to keep unchanged)" value={webCfg[name].api_key}
+                type="password" placeholder={t("smith.web.key_placeholder")} value={webCfg[name].api_key}
                 disabled={!canAdmin} autoComplete="off" spellCheck={false}
                 onChange={(e) => setProvider(name, { api_key: e.target.value })}
               />
@@ -546,11 +552,11 @@ function WebResearchCard({ canAdmin }: { canAdmin: boolean }) {
         {canAdmin && (
           <div className="form-actions" style={{ marginTop: 12 }}>
             <button className="btn" disabled={probe.isPending} onClick={() => probe.mutate()}>
-              {probe.isPending ? "Probing…" : "Re-probe now"}
+              {probe.isPending ? t("smith.web.probing") : t("smith.web.reprobe")}
             </button>
             {g.dirty && (
               <>
-                <button className="btn" onClick={g.reset}>Reset</button>
+                <button className="btn" onClick={g.reset}>{t("shared.reset")}</button>
                 <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
               </>
             )}
@@ -570,6 +576,7 @@ function WebResearchCard({ canAdmin }: { canAdmin: boolean }) {
 // verdict for the CURRENT brain reads off SelfContextChip (GET /status),
 // not this form — this form only edits the configured policy.
 function ToolsCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useSmithSettings();
   const update = useUpdateSmithSettings();
   const g = useSettingsGroup(cfg.data, update);
@@ -577,9 +584,9 @@ function ToolsCard({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError || !g.active) {
     return (
       <>
-        <div className="eyebrow">smith → Tools</div>
+        <div className="eyebrow">{t("smith.eyebrow.tools")}</div>
         <div className="card">
-          <div className="empty-note">{cfg.isError ? "Operator role required to view smith settings." : "Loading…"}</div>
+          <div className="empty-note">{cfg.isError ? t("shared.role_required", { resource: "smith" }) : t("common:app.loading")}</div>
         </div>
       </>
     );
@@ -589,34 +596,32 @@ function ToolsCard({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow">smith → Tools</div>
+      <div className="eyebrow">{t("smith.eyebrow.tools")}</div>
       <div className="card">
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
 
         <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={tools.enabled} disabled={!canAdmin}
             onChange={(e) => g.setField("tools", { ...tools, enabled: e.target.checked })} />
-          Read-only tool loop
+          {t("smith.tools.readonly_loop")}
         </label>
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 2, marginBottom: 14 }}>
-          Lets the reasoning brain call smith's own checks, findings, knowledge base, catalog, and
-          (when web research is enabled) web search/fetch mid-conversation instead of only answering
-          from the context snapshot. Never mutates anything — every tool is a read.
+          {t("smith.tools.description")}
         </div>
 
         <div className="form-grid">
           <div className="form-row">
-            <span>Mode</span>
+            <span>{t("smith.tools.mode_label")}</span>
             <select value={tools.mode} disabled={!canAdmin}
               onChange={(e) => g.setField("tools", { ...tools, mode: e.target.value as typeof tools.mode })}>
-              <option value="auto">auto — detect per brain (recommended)</option>
-              <option value="native">native — force OpenAI tool_calls</option>
-              <option value="fenced">fenced — force the ```tool_call fallback</option>
-              <option value="off">off</option>
+              <option value="auto">{t("smith.tools.mode_auto")}</option>
+              <option value="native">{t("smith.tools.mode_native")}</option>
+              <option value="fenced">{t("smith.tools.mode_fenced")}</option>
+              <option value="off">{t("smith.tools.mode_off")}</option>
             </select>
           </div>
           <div className="form-row">
-            <span>Max rounds</span>
+            <span>{t("smith.tools.max_rounds_label")}</span>
             <input
               type="number" min={1} max={8} value={tools.max_rounds} disabled={!canAdmin}
               onChange={(e) => g.setField("tools", { ...tools, max_rounds: Number(e.target.value) })}
@@ -626,7 +631,7 @@ function ToolsCard({ canAdmin }: { canAdmin: boolean }) {
 
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={g.reset}>Reset</button>
+            <button className="btn" onClick={g.reset}>{t("shared.reset")}</button>
             <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
           </div>
         )}
@@ -640,6 +645,7 @@ function ToolsCard({ canAdmin }: { canAdmin: boolean }) {
 // entirely (kept, never pruned) rather than deleting everything — the same
 // footgun-avoidance as the Cost tab's metrics retention.
 function RetentionCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useSmithSettings();
   const update = useUpdateSmithSettings();
   const g = useSettingsGroup(cfg.data, update);
@@ -648,9 +654,9 @@ function RetentionCard({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError || !g.active) {
     return (
       <>
-        <div className="eyebrow">smith → Retention</div>
+        <div className="eyebrow">{t("smith.eyebrow.retention")}</div>
         <div className="card">
-          <div className="empty-note">{cfg.isError ? "Operator role required to view smith settings." : "Loading…"}</div>
+          <div className="empty-note">{cfg.isError ? t("shared.role_required", { resource: "smith" }) : t("common:app.loading")}</div>
         </div>
       </>
     );
@@ -661,54 +667,53 @@ function RetentionCard({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow">smith → Retention</div>
+      <div className="eyebrow">{t("smith.eyebrow.retention")}</div>
       <div className="card">
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
 
         <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={r.enabled} disabled={!canAdmin}
             onChange={(e) => set({ enabled: e.target.checked })} />
-          Prune old findings + web cache automatically
+          {t("smith.retention.prune_label")}
         </label>
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 2, marginBottom: 8 }}>
-          A finding attached to an open or closed investigation is never pruned, at any age, regardless
-          of these settings — only standalone sweep findings age out. 0 keeps a tier forever.
+          {t("smith.retention.description")}
         </div>
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 14 }}>
           {status.data?.retention.last_run_at ? (
-            <>
-              Last run {new Date(status.data.retention.last_run_at * 1000).toLocaleString()} — deleted{" "}
-              {status.data.retention.deleted_findings} findings, {status.data.retention.deleted_web_cache} web
-              cache rows.
-            </>
+            t("smith.retention.last_run", {
+              when: new Date(status.data.retention.last_run_at * 1000).toLocaleString(appLocale()),
+              findings: status.data.retention.deleted_findings,
+              cache: status.data.retention.deleted_web_cache,
+            })
           ) : (
-            "No prune has run yet — runs automatically every 6h once smith is started."
+            t("smith.retention.never_run")
           )}
         </div>
 
         <div className="form-grid">
           <div className="form-row">
-            <span>"ok" findings, days</span>
+            <span>{t("smith.retention.ok_days")}</span>
             <input type="number" min={0} value={r.ok_days} disabled={!canAdmin}
               onChange={(e) => set({ ok_days: Number(e.target.value) })} />
           </div>
           <div className="form-row">
-            <span>"info" findings, hours</span>
+            <span>{t("smith.retention.info_hours")}</span>
             <input type="number" min={0} value={r.info_hours} disabled={!canAdmin}
               onChange={(e) => set({ info_hours: Number(e.target.value) })} />
           </div>
           <div className="form-row">
-            <span>"warn"/"crit" findings, days</span>
+            <span>{t("smith.retention.warn_crit_days")}</span>
             <input type="number" min={0} value={r.warn_crit_days} disabled={!canAdmin}
               onChange={(e) => set({ warn_crit_days: Number(e.target.value) })} />
           </div>
           <div className="form-row">
-            <span>Web cache, days</span>
+            <span>{t("smith.retention.web_cache_days")}</span>
             <input type="number" min={0} value={r.web_cache_days} disabled={!canAdmin}
               onChange={(e) => set({ web_cache_days: Number(e.target.value) })} />
           </div>
           <div className="form-row">
-            <span>Web cache, max rows</span>
+            <span>{t("smith.retention.web_cache_max_rows")}</span>
             <input type="number" min={0} value={r.web_cache_max_rows} disabled={!canAdmin}
               onChange={(e) => set({ web_cache_max_rows: Number(e.target.value) })} />
           </div>
@@ -716,7 +721,7 @@ function RetentionCard({ canAdmin }: { canAdmin: boolean }) {
 
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={g.reset}>Reset</button>
+            <button className="btn" onClick={g.reset}>{t("shared.reset")}</button>
             <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
           </div>
         )}
@@ -733,6 +738,7 @@ function RetentionCard({ canAdmin }: { canAdmin: boolean }) {
 // actually close), never auto-resolved here — this card only shows whether
 // the sweep is running and what it's found, same posture as RetentionCard.
 function SelfReviewCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useSmithSettings();
   const update = useUpdateSmithSettings();
   const g = useSettingsGroup(cfg.data, update);
@@ -741,9 +747,9 @@ function SelfReviewCard({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError || !g.active) {
     return (
       <>
-        <div className="eyebrow">smith → Self-review</div>
+        <div className="eyebrow">{t("smith.eyebrow.self_review")}</div>
         <div className="card">
-          <div className="empty-note">{cfg.isError ? "Operator role required to view smith settings." : "Loading…"}</div>
+          <div className="empty-note">{cfg.isError ? t("shared.role_required", { resource: "smith" }) : t("common:app.loading")}</div>
         </div>
       </>
     );
@@ -754,38 +760,34 @@ function SelfReviewCard({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow">smith → Self-review</div>
+      <div className="eyebrow">{t("smith.eyebrow.self_review")}</div>
       <div className="card">
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
 
         <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={sr.enabled} disabled={!canAdmin}
             onChange={(e) => set({ enabled: e.target.checked })} />
-          Periodically re-check open investigations and parked actions
+          {t("smith.self_review.toggle_label")}
         </label>
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 2, marginBottom: 8 }}>
-          An investigation whose checks now read clean gets a closure proposal in the pending
-          tray — approve it to actually close the investigation. A stuck "done, unverified"
-          action is promoted to "done" automatically once its own checks re-verify clean (that's
-          bookkeeping catching up to reality, not a new action); a pending proposal smith made on
-          its own is superseded automatically once the condition it was about no longer applies.
+          {t("smith.self_review.description")}
         </div>
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 14 }}>
           {status.data?.self_review.last_run_at ? (
-            <>
-              Last run {new Date(status.data.self_review.last_run_at * 1000).toLocaleString()} —
-              promoted {status.data.self_review.actions_promoted} action(s), superseded{" "}
-              {status.data.self_review.actions_superseded}, proposed{" "}
-              {status.data.self_review.investigations_proposed} investigation closure(s).
-            </>
+            t("smith.self_review.last_run", {
+              when: new Date(status.data.self_review.last_run_at * 1000).toLocaleString(appLocale()),
+              promoted: status.data.self_review.actions_promoted,
+              superseded: status.data.self_review.actions_superseded,
+              proposed: status.data.self_review.investigations_proposed,
+            })
           ) : (
-            "No self-review sweep has run yet — runs automatically every 2h once smith is started."
+            t("smith.self_review.never_run")
           )}
         </div>
 
         <div className="form-grid">
           <div className="form-row">
-            <span>Grace period, minutes</span>
+            <span>{t("smith.self_review.grace_minutes")}</span>
             <input type="number" min={0} value={sr.grace_minutes} disabled={!canAdmin}
               onChange={(e) => set({ grace_minutes: Number(e.target.value) })} />
           </div>
@@ -793,7 +795,7 @@ function SelfReviewCard({ canAdmin }: { canAdmin: boolean }) {
 
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={g.reset}>Reset</button>
+            <button className="btn" onClick={g.reset}>{t("shared.reset")}</button>
             <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
           </div>
         )}
@@ -810,6 +812,7 @@ function SelfReviewCard({ canAdmin }: { canAdmin: boolean }) {
 // per normal idle policy — this toggle is for operators who'd rather pay
 // the VRAM permanently than the load latency per escalated turn.
 function BrainResidencyCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useSmithSettings();
   const update = useUpdateSmithSettings();
   const g = useSettingsGroup(cfg.data, update);
@@ -818,9 +821,9 @@ function BrainResidencyCard({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError || !g.active) {
     return (
       <>
-        <div className="eyebrow">smith → Brain residency</div>
+        <div className="eyebrow">{t("smith.eyebrow.brain_residency")}</div>
         <div className="card">
-          <div className="empty-note">{cfg.isError ? "Operator role required to view smith settings." : "Loading…"}</div>
+          <div className="empty-note">{cfg.isError ? t("shared.role_required", { resource: "smith" }) : t("common:app.loading")}</div>
         </div>
       </>
     );
@@ -832,37 +835,34 @@ function BrainResidencyCard({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow">smith → Brain residency</div>
+      <div className="eyebrow">{t("smith.eyebrow.brain_residency")}</div>
       <div className="card">
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
 
         <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={br.stay_resident} disabled={!canAdmin}
             onChange={(e) => set({ stay_resident: e.target.checked })} />
-          Keep smith's brain always loaded
+          {t("smith.brain_residency.toggle_label")}
         </label>
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 2, marginBottom: 8 }}>
-          Off (default): smith's brain is loaded on demand, only when a question actually needs
-          the reasoning tier, and left to unload afterward per normal idle policy — no standing
-          VRAM cost, but each first escalated question after an idle period pays a real load
-          delay. On: smith proactively keeps the brain resident, permanently giving up its VRAM
-          footprint in exchange for no per-question load latency. Either way, the brain is never
-          pinned to a specific slot — the scheduler picks whichever is free.
+          {t("smith.brain_residency.description")}
         </div>
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 14 }}>
           {res?.last_attempt_at ? (
-            <>
-              Last load attempt {new Date(res.last_attempt_at * 1000).toLocaleString()} —{" "}
-              {res.last_loaded ? `succeeded (slot ${res.last_slot ?? "?"})` : `failed (${res.last_error ?? "unknown error"})`}.
-            </>
+            t("smith.brain_residency.last_attempt", {
+              when: new Date(res.last_attempt_at * 1000).toLocaleString(appLocale()),
+              result: res.last_loaded
+                ? t("smith.brain_residency.succeeded", { slot: res.last_slot ?? "?" })
+                : t("smith.brain_residency.failed", { error: res.last_error ?? t("smith.brain_residency.unknown_error") }),
+            })
           ) : (
-            "No load attempt yet."
+            t("smith.brain_residency.never_attempted")
           )}
         </div>
 
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={g.reset}>Reset</button>
+            <button className="btn" onClick={g.reset}>{t("shared.reset")}</button>
             <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
           </div>
         )}
@@ -880,6 +880,7 @@ function BrainResidencyCard({ canAdmin }: { canAdmin: boolean }) {
 // step-up, lowering it never does, so this card drives useStepUpGate
 // directly rather than through useSettingsGroup's generic wiring.
 function AutonomyCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const policyQuery = useSmithAutonomy();
   const update = useUpdateSmithAutonomy();
   const gate = useStepUpGate();
@@ -889,9 +890,9 @@ function AutonomyCard({ canAdmin }: { canAdmin: boolean }) {
   if (policyQuery.isError || !policyQuery.data) {
     return (
       <>
-        <div className="eyebrow">smith → Standing autonomy policy</div>
+        <div className="eyebrow">{t("smith.eyebrow.autonomy")}</div>
         <div className="card">
-          <div className="empty-note">{policyQuery.isError ? "Operator role required to view smith settings." : "Loading…"}</div>
+          <div className="empty-note">{policyQuery.isError ? t("shared.role_required", { resource: "smith" }) : t("common:app.loading")}</div>
         </div>
       </>
     );
@@ -922,30 +923,24 @@ function AutonomyCard({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow">smith → Standing autonomy policy</div>
+      <div className="eyebrow">{t("smith.eyebrow.autonomy")}</div>
       <div className="card">
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 12, lineHeight: 1.55 }}>
-          Off by default. When enabled here, smith may carry out a specific, opted-in fix the
-          moment it detects the problem — no click, no approval — instead of only ever proposing
-          it for a human. Every autonomous run still goes through the same procedure engine
-          (checkpoints, post-verify, full audit trail) as a manually-approved one, and is bounded
-          by a cooldown plus a daily cap per procedure. Only procedures assessed as low-risk are
-          ever eligible for this — the list below can't be widened from here.
+          {t("smith.autonomy.intro")}
         </div>
         {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
 
         <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={current.enabled} disabled={!canAdmin}
             onChange={(e) => setPolicy({ enabled: e.target.checked })} />
-          <b>Global switch — smith may run opted-in fixes unattended</b>
+          <b>{t("smith.autonomy.global_switch")}</b>
         </label>
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 2, marginBottom: 14 }}>
-          The kill switch. Off always means nothing is autonomous, regardless of the per-procedure
-          toggles below.
+          {t("smith.autonomy.global_switch_note")}
         </div>
 
         {eligible.length === 0 ? (
-          <div className="empty-note">No procedures are currently eligible for standing autonomy.</div>
+          <div className="empty-note">{t("smith.autonomy.none_eligible")}</div>
         ) : (
           eligible.map((p) => {
             const pa = current.procedures[p.id] ?? { enabled: false, cooldown_seconds: 0, max_per_day: 0 };
@@ -958,13 +953,13 @@ function AutonomyCard({ canAdmin }: { canAdmin: boolean }) {
                 </label>
                 <div className="form-row" style={{ flexDirection: "row", gap: 16, marginTop: 6 }}>
                   <label style={{ fontSize: 11, color: "var(--text-mute)" }}>
-                    Cooldown (seconds)
+                    {t("smith.autonomy.cooldown_label")}
                     <input type="number" min={0} style={{ width: 90, marginLeft: 6 }} disabled={!canAdmin}
                       value={pa.cooldown_seconds || ""} placeholder="600"
                       onChange={(e) => setProcedure(p.id, { cooldown_seconds: Number(e.target.value) || 0 })} />
                   </label>
                   <label style={{ fontSize: 11, color: "var(--text-mute)" }}>
-                    Max runs / day
+                    {t("smith.autonomy.max_per_day_label")}
                     <input type="number" min={0} style={{ width: 70, marginLeft: 6 }} disabled={!canAdmin}
                       value={pa.max_per_day || ""} placeholder="3"
                       onChange={(e) => setProcedure(p.id, { max_per_day: Number(e.target.value) || 0 })} />
@@ -977,8 +972,8 @@ function AutonomyCard({ canAdmin }: { canAdmin: boolean }) {
 
         {canAdmin && dirty && (
           <div className="form-actions" style={{ marginTop: 14 }}>
-            <button className="btn" onClick={() => { setDraft(null); setError(null); }}>Reset</button>
-            <button className="btn primary" disabled={update.isPending} onClick={save}>Save policy</button>
+            <button className="btn" onClick={() => { setDraft(null); setError(null); }}>{t("shared.reset")}</button>
+            <button className="btn primary" disabled={update.isPending} onClick={save}>{t("smith.autonomy.save_policy")}</button>
           </div>
         )}
       </div>
@@ -995,6 +990,7 @@ function AutonomyCard({ canAdmin }: { canAdmin: boolean }) {
 // of 0 (left blank) tells the backend to fall back to the live collector
 // snapshot's GTT total (smith.Evaluate's own default).
 function SourcingCard() {
+  const { t } = useTranslation("settings");
   const [repo, setRepo] = useState("");
   const [budgetGB, setBudgetGB] = useState("");
   const [result, setResult] = useState<SmithSourcingEvaluation | null>(null);
@@ -1016,29 +1012,27 @@ function SourcingCard() {
 
   return (
     <>
-      <div className="eyebrow">smith → Model sourcing</div>
+      <div className="eyebrow">{t("smith.eyebrow.sourcing")}</div>
       <div className="card">
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 10 }}>
-          Evaluate a HuggingFace repo's real GGUF files against a memory budget — ranked by the
-          documented 1.2× VRAM rule and quant-preference heuristics (modelselection.md). Read-only;
-          nothing is downloaded or added to the catalog.
+          {t("smith.sourcing.description")}
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <label className="form-row" style={{ flex: "1 1 260px" }}>
             <input
-              placeholder="org/repo (e.g. Qwen/Qwen2.5-Coder-7B-Instruct-GGUF)"
+              placeholder={t("smith.sourcing.repo_placeholder")}
               value={repo} onChange={(e) => setRepo(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && repo.trim() && run()}
             />
           </label>
           <label className="form-row" style={{ width: 140 }}>
             <input
-              placeholder="budget GB (auto)"
+              placeholder={t("smith.sourcing.budget_placeholder")}
               value={budgetGB} onChange={(e) => setBudgetGB(e.target.value)}
             />
           </label>
           <button className="btn primary" disabled={!repo.trim() || evaluate.isPending} onClick={run}>
-            {evaluate.isPending ? "Evaluating…" : "Evaluate"}
+            {evaluate.isPending ? t("smith.sourcing.evaluating") : t("smith.sourcing.evaluate")}
           </button>
         </div>
 
@@ -1047,27 +1041,27 @@ function SourcingCard() {
         {result && (
           <div style={{ marginTop: 12 }}>
             <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 6 }}>
-              {result.repo} — budget {formatGB(result.budget_bytes, 1)} GB
-              {result.cached && " (cached)"}
+              {t("smith.sourcing.result_summary", { repo: result.repo, budget: formatGB(result.budget_bytes, 1) })}
+              {result.cached && t("smith.sourcing.cached_suffix")}
             </div>
             {result.candidates.length === 0 ? (
-              <div className="empty-note">No GGUF files found in this repo.</div>
+              <div className="empty-note">{t("smith.sourcing.no_gguf")}</div>
             ) : (
               <table style={{ width: "100%", fontSize: 11.5, borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ color: "var(--text-mute)", textAlign: "left" }}>
-                    <th style={{ padding: "3px 6px", fontWeight: 500 }}>file</th>
-                    <th style={{ padding: "3px 6px", fontWeight: 500 }}>quant</th>
-                    <th style={{ padding: "3px 6px", fontWeight: 500, textAlign: "right" }}>size</th>
-                    <th style={{ padding: "3px 6px", fontWeight: 500, textAlign: "right" }}>est. VRAM</th>
-                    <th style={{ padding: "3px 6px", fontWeight: 500 }}>fits</th>
+                    <th style={{ padding: "3px 6px", fontWeight: 500 }}>{t("smith.sourcing.col_file")}</th>
+                    <th style={{ padding: "3px 6px", fontWeight: 500 }}>{t("smith.sourcing.col_quant")}</th>
+                    <th style={{ padding: "3px 6px", fontWeight: 500, textAlign: "right" }}>{t("smith.sourcing.col_size")}</th>
+                    <th style={{ padding: "3px 6px", fontWeight: 500, textAlign: "right" }}>{t("smith.sourcing.col_vram")}</th>
+                    <th style={{ padding: "3px 6px", fontWeight: 500 }}>{t("smith.sourcing.col_fits")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {result.candidates.map((c) => (
                     <tr key={c.filename} style={c.recommended ? { background: "color-mix(in srgb, var(--ok) 10%, transparent)" } : undefined}>
                       <td style={{ padding: "3px 6px", fontFamily: "var(--mono)", wordBreak: "break-all" }}>
-                        {c.recommended && <span title="Recommended">★ </span>}
+                        {c.recommended && <span title={t("smith.sourcing.recommended_title")}>★ </span>}
                         {c.filename}
                       </td>
                       <td style={{ padding: "3px 6px", color: "var(--text-dim)" }}>{c.quant || "—"}</td>
@@ -1078,7 +1072,7 @@ function SourcingCard() {
                         {formatGB(c.estimated_vram_bytes, 1)} GB
                       </td>
                       <td style={{ padding: "3px 6px", color: c.fits_budget ? "var(--ok)" : "var(--text-mute)" }}>
-                        {c.fits_budget ? "yes" : "no"}
+                        {c.fits_budget ? t("smith.sourcing.fits_yes") : t("smith.sourcing.fits_no")}
                       </td>
                     </tr>
                   ))}
@@ -1087,7 +1081,7 @@ function SourcingCard() {
             )}
             {result.download_steps.length > 0 && (
               <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Download the recommended file</div>
+                <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{t("smith.sourcing.download_heading")}</div>
                 {result.download_steps.map((step, i) => (
                   <pre key={`${step.command}-${i}`} style={{
                     padding: 8, borderRadius: 6, fontSize: 10.5, lineHeight: 1.45,

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Icon } from "../Icon";
 import { apiErrorMessage } from "../../lib/api";
 import { creatorIconSlug } from "../../lib/creatorIcon";
@@ -62,6 +63,7 @@ function baseModelOf(result: HFSearchResult): string | null {
 }
 
 export function AddModelPanel() {
+  const { t } = useTranslation("models");
   const [query, setQuery] = useState("");
   const [expandedRepo, setExpandedRepo] = useState<string | null>(null);
 
@@ -79,7 +81,7 @@ export function AddModelPanel() {
     <>
       <HFDownloadTray />
 
-      <div className="eyebrow">Add a model from HuggingFace</div>
+      <div className="eyebrow">{t("add_model.heading")}</div>
       <div className="card">
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <label className="form-row" style={{ flex: "1 1 320px" }}>
@@ -87,11 +89,11 @@ export function AddModelPanel() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && runSearch()}
-              placeholder="Search HuggingFace, e.g. Qwen2.5-Coder or an org/repo"
+              placeholder={t("add_model.search_placeholder")}
             />
           </label>
           <button type="button" className="btn primary" disabled={!query.trim() || search.isPending} onClick={runSearch}>
-            {search.isPending ? "Searching…" : "Search"}
+            {search.isPending ? t("add_model.searching") : t("add_model.search")}
           </button>
         </div>
 
@@ -100,13 +102,12 @@ export function AddModelPanel() {
         {search.isSuccess && (
           <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
             {results.length === 0 ? (
-              <div className="empty-note">No repos found.</div>
+              <div className="empty-note">{t("add_model.no_repos")}</div>
             ) : (
               <>
                 {!results.some(isOfficialRepo) && !results.some((r) => r.no_gguf) && (
                   <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginBottom: 2 }}>
-                    None of these are from the original publisher — every result below is a
-                    community quantization (the publisher hasn't released a GGUF themselves).
+                    {t("add_model.all_community_note")}
                   </div>
                 )}
                 {results.map((r) => (
@@ -137,6 +138,7 @@ function SearchResultRow({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const { t } = useTranslation("models");
   const slug = creatorIconSlug(result.author);
   const official = isOfficialRepo(result);
   const abliterated = abliteratedFrom(result);
@@ -159,12 +161,12 @@ function SearchResultRow({
         <div style={{ flex: "1 1 auto", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             <span style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{result.id}</span>
-            <span className="badge evict" title="This is the original publisher, but they haven't released a GGUF — this engine can't download or run it">
-              No GGUF · not compatible
+            <span className="badge evict" title={t("add_model.no_gguf_badge_title")}>
+              {t("add_model.no_gguf_badge")}
             </span>
           </div>
           <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginTop: 2 }}>
-            The original publisher — download only, from HuggingFace directly (not through this flow)
+            {t("add_model.no_gguf_note")}
           </div>
         </div>
         <a
@@ -174,7 +176,7 @@ function SearchResultRow({
           className="btn"
           onClick={(e) => e.stopPropagation()}
         >
-          View on HuggingFace ↗
+          {t("add_model.view_on_hf")}
         </a>
       </div>
     );
@@ -197,14 +199,14 @@ function SearchResultRow({
           <span style={{ fontFamily: "var(--mono)", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {result.id}
           </span>
-          {official && <span className="badge yes" title="The same org that trained this model quantized it">Official</span>}
-          {abliterated && <span className="badge evict" title="Refusal-direction ablation detected in the repo name/tags">Abliterated</span>}
+          {official && <span className="badge yes" title={t("add_model.official_title")}>{t("add_model.official")}</span>}
+          {abliterated && <span className="badge evict" title={t("add_model.abliterated_title")}>{t("add_model.abliterated")}</span>}
           {result.pipeline_tag && <span className="chip">{result.pipeline_tag}</span>}
         </div>
         <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginTop: 2 }}>
-          {result.downloads.toLocaleString()} downloads
-          {baseModel && <> · based on <span style={{ fontFamily: "var(--mono)" }}>{baseModel}</span></>}
-          {result.gated && " · gated (needs a token)"}
+          {t("add_model.downloads_suffix", { count: result.downloads.toLocaleString() })}
+          {baseModel && <>{t("add_model.based_on")}<span style={{ fontFamily: "var(--mono)" }}>{baseModel}</span></>}
+          {result.gated && t("add_model.gated_suffix")}
         </div>
       </div>
     </button>
@@ -216,6 +218,7 @@ function SearchResultRow({
 // name/artifact join CatalogPanel's ConfigForm already does inline for its
 // own Variant/weight-artifact selects.
 function useRepointOptions() {
+  const { t } = useTranslation("models");
   const configs = useCatalogConfigs();
   const variants = useCatalogVariants();
   const models = useCatalogModels();
@@ -231,13 +234,14 @@ function useRepointOptions() {
         const artifact = artifactById.get(c.weight_artifact_id);
         const currentFile = artifact?.file_path.split("/").pop();
         const modelLabel = model && variant ? `${model.name} / ${variant.name}` : c.name;
-        return { name: c.name, label: `${modelLabel} — ${c.name}${currentFile ? ` (currently ${currentFile})` : ""}` };
+        return { name: c.name, label: `${modelLabel} — ${c.name}${currentFile ? t("add_model.currently_suffix", { file: currentFile }) : ""}` };
       })
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [configs.data, variants.data, models.data, artifacts.data]);
+  }, [configs.data, variants.data, models.data, artifacts.data, t]);
 }
 
 function RepoFiles({ repo }: { repo: string }) {
+  const { t } = useTranslation("models");
   const tree = useHFTreeMutation();
   const preflight = useHFPreflightMutation();
   const start = useHFDownloadStart();
@@ -274,18 +278,18 @@ function RepoFiles({ repo }: { repo: string }) {
 
   return (
     <div style={{ marginLeft: 16, borderLeft: "2px solid var(--border)", paddingLeft: 14, marginTop: 6, marginBottom: 10 }}>
-      {tree.isPending && <div className="empty-note">Loading file tree…</div>}
+      {tree.isPending && <div className="empty-note">{t("add_model.loading_tree")}</div>}
       {tree.isError && <div className="error-note">{apiErrorMessage(tree.error)}</div>}
-      {tree.isSuccess && candidates.length === 0 && <div className="empty-note">No GGUF files found in this repo.</div>}
+      {tree.isSuccess && candidates.length === 0 && <div className="empty-note">{t("add_model.no_gguf_in_repo")}</div>}
 
       {candidates.length > 0 && (
         <table style={{ width: "100%", fontSize: 11.5, borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ color: "var(--text-mute)", textAlign: "left" }}>
-              <th style={{ padding: "3px 6px", fontWeight: 500 }}>file</th>
-              <th style={{ padding: "3px 6px", fontWeight: 500 }}>quant</th>
-              <th style={{ padding: "3px 6px", fontWeight: 500, textAlign: "right" }}>size</th>
-              <th style={{ padding: "3px 6px", fontWeight: 500 }}>fits</th>
+              <th style={{ padding: "3px 6px", fontWeight: 500 }}>{t("add_model.col_file")}</th>
+              <th style={{ padding: "3px 6px", fontWeight: 500 }}>{t("add_model.col_quant")}</th>
+              <th style={{ padding: "3px 6px", fontWeight: 500, textAlign: "right" }}>{t("add_model.col_size")}</th>
+              <th style={{ padding: "3px 6px", fontWeight: 500 }}>{t("add_model.col_fits")}</th>
               <th style={{ padding: "3px 6px" }} />
             </tr>
           </thead>
@@ -302,17 +306,17 @@ function RepoFiles({ repo }: { repo: string }) {
                 }
               >
                 <td style={{ padding: "3px 6px", fontFamily: "var(--mono)", wordBreak: "break-all" }}>
-                  {c.recommended && <span title="Recommended">★ </span>}
+                  {c.recommended && <span title={t("add_model.recommended_title")}>★ </span>}
                   {c.filename}
                 </td>
                 <td style={{ padding: "3px 6px", color: "var(--text-dim)" }}>{c.quant || "—"}</td>
                 <td style={{ padding: "3px 6px", textAlign: "right", color: "var(--text-dim)" }}>{formatGB(c.size_bytes, 1)} GB</td>
                 <td style={{ padding: "3px 6px", color: c.fits_budget ? "var(--ok)" : "var(--text-mute)" }}>
-                  {c.fits_budget ? "yes" : "no"}
+                  {c.fits_budget ? t("add_model.fits_yes") : t("add_model.fits_no")}
                 </td>
                 <td style={{ padding: "3px 6px", textAlign: "right" }}>
                   <button type="button" className="btn" onClick={() => pick(c)}>
-                    Select
+                    {t("add_model.select")}
                   </button>
                 </td>
               </tr>
@@ -324,7 +328,7 @@ function RepoFiles({ repo }: { repo: string }) {
       {selected && (
         <div className="card" style={{ marginTop: 10 }}>
           <div style={{ fontSize: 11.5, fontFamily: "var(--mono)", marginBottom: 8 }}>{selected.filename}</div>
-          {preflight.isPending && <div className="empty-note">Running pre-flight checks…</div>}
+          {preflight.isPending && <div className="empty-note">{t("add_model.running_preflight")}</div>}
           {preflight.isError && <div className="error-note">{apiErrorMessage(preflight.error)}</div>}
           {report && (
             <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
@@ -335,16 +339,16 @@ function RepoFiles({ repo }: { repo: string }) {
               ))}
               {report.requires_backend && (
                 <span className={`chip ${report.requires_backend}`} style={{ alignSelf: "flex-start" }}>
-                  requires {report.requires_backend}
+                  {t("add_model.requires_backend", { backend: report.requires_backend })}
                 </span>
               )}
             </div>
           )}
           {!start.isSuccess && (
             <label className="form-row" style={{ marginBottom: 10 }}>
-              Repoint an existing config (optional)
+              {t("add_model.repoint_label")}
               <select value={repointTarget} onChange={(e) => setRepointTarget(e.target.value)} style={{ flex: 1 }}>
-                <option value="">— register as a new model —</option>
+                <option value="">{t("add_model.repoint_new")}</option>
                 {repointOptions.map((o) => (
                   <option key={o.name} value={o.name}>{o.label}</option>
                 ))}
@@ -353,14 +357,12 @@ function RepoFiles({ repo }: { repo: string }) {
           )}
           {repointTarget && !start.isSuccess && (
             <div className="empty-note" style={{ marginBottom: 10 }}>
-              This overwrites <strong>{repointTarget}</strong>'s current weight file in place — its
-              quantization label, context size, and any mmproj/sharded companion files are left
-              unchanged. Only repoint to a genuinely compatible build of the same model.
+              <Trans i18nKey="add_model.repoint_warning" ns="models" values={{ target: repointTarget }} components={{ b: <strong /> }} />
             </div>
           )}
           {start.isError && <div className="error-note">{apiErrorMessage(start.error)}</div>}
           {start.isSuccess ? (
-            <div className="empty-note">Download started — see the Downloads list above.</div>
+            <div className="empty-note">{t("add_model.download_started")}</div>
           ) : (
             <button
               type="button"
@@ -368,7 +370,7 @@ function RepoFiles({ repo }: { repo: string }) {
               disabled={!report || report.blocked || start.isPending}
               onClick={download}
             >
-              {start.isPending ? "Starting…" : repointTarget ? `Download & repoint ${repointTarget}` : "Download"}
+              {start.isPending ? t("add_model.starting") : repointTarget ? t("add_model.download_and_repoint", { target: repointTarget }) : t("add_model.download")}
             </button>
           )}
         </div>

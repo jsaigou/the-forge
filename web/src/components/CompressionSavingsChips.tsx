@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { formatCurrencyPrecise, formatDurationShort, formatTokens } from "../lib/format";
 import { useCompressorSummary } from "../lib/queries";
 import type { CompressorSummaryProxy } from "../lib/types";
@@ -117,6 +118,7 @@ function sumExternal(proxies: CompressorSummaryProxy[]) {
 }
 
 export function CompressorSavingsChips({ window_ }: { window_: string }) {
+  const { t } = useTranslation("common");
   const compressorSummary = useCompressorSummary(window_);
   const proxies = compressorSummary.data?.proxies ?? [];
   const displayCurrency = compressorSummary.data?.display_currency ?? "USD";
@@ -129,11 +131,11 @@ export function CompressorSavingsChips({ window_ }: { window_: string }) {
     return (
       <>
         <div className="stat">
-          <div className="k">{`Local · compressor saved (${window_})`}</div>
+          <div className="k">{t("compressor_chips.local_label", { window: window_ })}</div>
           <div className="v saved"></div>
         </div>
         <div className="stat">
-          <div className="k">{`External · compressor saved (${window_})`}</div>
+          <div className="k">{t("compressor_chips.external_label", { window: window_ })}</div>
           <div className="v saved"></div>
         </div>
       </>
@@ -144,21 +146,21 @@ export function CompressorSavingsChips({ window_ }: { window_: string }) {
   const external = sumExternal(proxies);
 
   const localTitle = !local.hasTokens
-    ? "No cached or compressed local requests this window"
+    ? t("compressor_chips.local_title_none")
     : local.hasTime
       ? [
-          local.hasCompressedTokens ? `${formatTokens(local.tokensCompressed)} tokens dropped by compression` : null,
-          local.hasCachedTokens ? `${formatTokens(local.tokensCachedEst)} tokens not re-prefilled (cache hit, estimated)` : null,
+          local.hasCompressedTokens ? t("compressor_chips.local_title_tokens_dropped", { tokens: formatTokens(local.tokensCompressed) }) : null,
+          local.hasCachedTokens ? t("compressor_chips.local_title_tokens_cached", { tokens: formatTokens(local.tokensCachedEst) }) : null,
         ]
           .filter(Boolean)
-          .join(" + ") + `, avoided-prefill time estimated against real prefill TPS via ${Array.from(local.sources).join(", ")}`
-      : "No model with cached/compressed requests this window had a real measured prefill TPS — time estimate unavailable";
+          .join(" + ") + t("compressor_chips.local_title_time_suffix", { sources: Array.from(local.sources).join(", ") })
+      : t("compressor_chips.local_title_no_tps");
 
   const externalTitle = !external.hasTokens
-    ? "No compressed external requests this window"
+    ? t("compressor_chips.external_title_none")
     : external.hasMoney
-      ? `${formatTokens(external.compressedTokens)} tokens compressed, priced at each provider's blended input rate in ${displayCurrency}`
-      : `${formatTokens(external.compressedTokens)} tokens compressed, but no priced offering to value them against this window`;
+      ? t("compressor_chips.external_title_priced", { tokens: formatTokens(external.compressedTokens), currency: displayCurrency })
+      : t("compressor_chips.external_title_unpriced", { tokens: formatTokens(external.compressedTokens) });
 
   // The tooltip (title=) carries the full disclosure sentence, but a title
   // attribute is invisible without a mouse and unreachable on touch — the
@@ -167,24 +169,24 @@ export function CompressorSavingsChips({ window_ }: { window_: string }) {
   const localValue = local.hasTime
     ? formatDurationShort(local.timeSavedS)
     : local.hasTokens
-      ? "unmeasured"
-      : "no data";
+      ? t("compressor_chips.value_unmeasured")
+      : t("compressor_chips.value_no_data");
   const externalValue = external.hasMoney
     ? formatCurrencyPrecise(external.moneyDisplay, displayCurrency)
     : external.hasTokens
-      ? "unpriced"
-      : "no data";
+      ? t("compressor_chips.value_unpriced")
+      : t("compressor_chips.value_no_data");
 
   return (
     <>
       <div className="stat">
-        <div className="k">{`Local · compressor saved (${window_})`}</div>
+        <div className="k">{t("compressor_chips.local_label", { window: window_ })}</div>
         <div className={`v ${local.hasTime ? "saved" : "empty"}`} title={localTitle}>
           {localValue}
         </div>
       </div>
       <div className="stat">
-        <div className="k">{`External · compressor saved (${window_})`}</div>
+        <div className="k">{t("compressor_chips.external_label", { window: window_ })}</div>
         <div className={`v ${external.hasMoney ? "saved" : "empty"}`} title={externalTitle}>
           {externalValue}
         </div>

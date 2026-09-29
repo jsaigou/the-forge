@@ -14,6 +14,7 @@ require (
 	github.com/daulet/tokenizers v1.27.0
 	github.com/dlclark/regexp2 v1.12.0
 	github.com/go-webauthn/webauthn v0.17.4
+	github.com/mattn/go-runewidth v0.0.19
 	github.com/yalue/onnxruntime_go v1.34.0
 	golang.org/x/crypto v0.54.0
 	golang.org/x/net v0.57.0
@@ -43,7 +44,6 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
-	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect

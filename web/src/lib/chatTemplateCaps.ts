@@ -4,21 +4,30 @@
 // store.Config.ChatTemplateCaps's doc comment) — so this is a label lookup
 // with a readable fallback, not an exhaustive enum: an unrecognized key
 // still renders, title-cased from its raw name.
+//
+// Values are "models:caps.*" translation key paths, not literal text — the
+// consumer (ConfigDetailView) resolves them via
+// `t(entry.label, { defaultValue: entry.label })`. i18next returns the
+// literal string unchanged when it isn't a real key, so a genuinely unknown
+// backend field's dynamically title-cased fallback (built below, never a
+// key path) still displays correctly with zero special-casing at the call
+// site. Two raw keys deliberately share one value (supports_tool_calls /
+// supports_tools) so dedupedCapEntries's group-by-label still merges them.
 const LABELS: Record<string, string> = {
-  supports_reasoning_effort: "Reasoning effort",
-  supports_preserve_reasoning: "Preserve reasoning",
-  supports_tool_calls: "Tool calls",
-  supports_tools: "Tool calls",
-  supports_parallel_tool_calls: "Parallel tool calls",
-  supports_object_arguments: "Object tool arguments",
-  supports_string_content: "String content",
-  supports_system_role: "System role",
-  supports_typed_content: "Typed content",
+  supports_reasoning_effort: "models:caps.reasoning_effort",
+  supports_preserve_reasoning: "models:caps.preserve_reasoning",
+  supports_tool_calls: "models:caps.tool_calls",
+  supports_tools: "models:caps.tool_calls",
+  supports_parallel_tool_calls: "models:caps.parallel_tool_calls",
+  supports_object_arguments: "models:caps.object_tool_arguments",
+  supports_string_content: "models:caps.string_content",
+  supports_system_role: "models:caps.system_role",
+  supports_typed_content: "models:caps.typed_content",
   // Override-only (router/reasoning.go) — there is deliberately no live
   // probe for this one: chat_template_kwargs is a raw Jinja passthrough,
   // and llama.cpp's own chat_template_caps never reports which kwargs a
   // given template understands. An operator has to say so.
-  supports_enable_thinking: "Honors enable_thinking kwarg",
+  supports_enable_thinking: "models:caps.honors_enable_thinking_kwarg",
 };
 
 // OVERRIDE_ONLY_KEYS never appear in a live probe (LABELS' comment above) —

@@ -480,16 +480,25 @@ func (s *Smith) publishTierChanged(convID int64, tier, reason string) {
 // publishStatus emits one S4 progress event for a reasoning turn: what the
 // turn is waiting on right now and how long it typically takes. This is the
 // "show estimated waits" requirement — a brain load or a thinking round
-// must never look like a silent hang again.
-func (s *Smith) publishStatus(convID, msgID int64, text string) {
+// must never look like a silent hang again. statusKey/params are the Phase
+// 3 (multilanguage plan) additive translation hook — "" when this status
+// text has no natural small-enum key (most of smith's SSE prose is
+// genuinely dynamic runtime text, see profile:failed/load_failed/HF
+// download failure, deliberately left English-only, docs/v5-*.md).
+func (s *Smith) publishStatus(convID, msgID int64, text, statusKey string, params map[string]any) {
 	if s.d.Publisher == nil {
 		return
 	}
-	s.d.Publisher.Publish(EventStatus, map[string]any{
+	ev := map[string]any{
 		"conversation_id": convID,
 		"message_id":      msgID,
 		"status":          text,
-	})
+	}
+	if statusKey != "" {
+		ev["status_key"] = statusKey
+		ev["params"] = params
+	}
+	s.d.Publisher.Publish(EventStatus, ev)
 }
 
 // publishToolCall emits one tool-round liveness event (P7). "started" fires
@@ -795,20 +804,59 @@ func toolParamsJSON(v any) string {
 	return string(b)
 }
 
+// languageDirective returns the Phase 3 (multilanguage plan,
+// docs/adr/0016-localization.md) instruction appended to every prompt the
+// brain sees for a "ja" turn — the executor header, the verify-round
+// nudge, and the swapped-in auditor prompt all get the identical text so
+// the model never gets a mixed signal mid-turn. "" for anything other than
+// "ja" (including "en" and unset), so an English turn's prompt is
+// byte-identical to before this phase.
+// resolveChatLang decides Chat()'s effective reasoning-tier language and
+// whether a downgrade notice is owed, isolated from AppendNotice/DB access
+// so the gate logic itself is unit-testable without a full Chat() harness.
+// requested is opts.Lang ("en"/"ja"/""); enabled is JapaneseEnabled(ctx);
+// tier is the already-decided Chat tier. A notice only makes sense when the
+// turn would otherwise have gone to the reasoning tier in Japanese — a
+// deterministic-tier turn never sees lang at all (fast-path/deterministic
+// answers are English-template-driven and translate client-side, see the
+// doc comment at Chat()'s call site).
+func resolveChatLang(requested string, enabled bool, tier string) (lang, notice string) {
+	if requested != "ja" {
+		return "en", ""
+	}
+	if enabled {
+		return "ja", ""
+	}
+	if tier == TierReasoning {
+		return "en", "smith: Japanese replies for the reasoning tier aren't enabled yet — answering in English for this turn."
+	}
+	return "en", ""
+}
+
+func languageDirective(lang string) string {
+	if lang != "ja" {
+		return ""
+	}
+	return "\nAnswer in Japanese. Keep config names, slot IDs, commands, file paths, flags, and kind:ref citations exactly as written, in English. " +
+		"The knowledge base is English-only — when calling kb_search, use English keywords, not Japanese ones.\n"
+}
+
 // buildContext assembles the token-budgeted system message for a Tier 2
 // turn. The header (including the P7 tools instruction block, fenced mode
-// only) is never dropped; the remaining blocks are appended in priority
-// order — web-research (if this turn requested one), findings,
-// notifications, catalog matches, and KB matches — and the lowest-priority
-// blocks are dropped first, never truncated mid-block, until under
-// contextCharBudget. Every free-text field is scrubbed via
-// scrubSecretPatterns and structured evidence via redactValue before
-// assembly (docs §7 — the LLM never sees secrets). research is nil/empty
-// for a turn with no web:true request; tools/mode are nil/"" when the tool
-// loop is disabled for this turn.
-func (s *Smith) buildContext(ctx context.Context, userText string, research []*web.Document, tools []Tool, mode string) string {
+// only, and the Phase 3 language directive) is never dropped; the
+// remaining blocks are appended in priority order — web-research (if this
+// turn requested one), findings, notifications, catalog matches, and KB
+// matches — and the lowest-priority blocks are dropped first, never
+// truncated mid-block, until under contextCharBudget. Every free-text
+// field is scrubbed via scrubSecretPatterns and structured evidence via
+// redactValue before assembly (docs §7 — the LLM never sees secrets).
+// research is nil/empty for a turn with no web:true request; tools/mode
+// are nil/"" when the tool loop is disabled for this turn; lang is ""/"en"
+// for every turn before Phase 3 and for any non-Japanese turn after it.
+func (s *Smith) buildContext(ctx context.Context, userText string, research []*web.Document, tools []Tool, mode, lang string) string {
 	header := embeddedPrompt + "\n"
 	header += toolsInstructionBlock(tools, mode)
+	header += languageDirective(lang)
 
 	blocks := []string{s.selfContextBlock(ctx)}
 	if wb := webResearchBlock(research); wb != "" {
@@ -910,6 +958,12 @@ type ChatOptions struct {
 	Escalate bool
 	Web      bool
 	Context  []ChatContext
+	// Lang is the FE's current locale ("en"/"ja", "" treated as "en" — the
+	// multilanguage plan's Phase 3, docs/adr/0016-localization.md). "ja"
+	// only actually changes the prompt when JapaneseEnabled is true; until
+	// the braineval gate passes, Chat() degrades to English plus a notice
+	// rather than silently taking the brain into unevaluated territory.
+	Lang string
 }
 
 // ChatContext is one attached error context item (§2.3, §3.4). When the FE
@@ -1025,11 +1079,26 @@ func (s *Smith) Chat(ctx context.Context, convID int64, userText string, opts Ch
 		s.setPendingMissed(id, scrubSecretPatterns(userText))
 	}
 
+	// Phase 3 language gate (docs/adr/0016-localization.md): a ja-locale FE
+	// only actually gets a Japanese-directed reasoning-tier prompt once the
+	// braineval gate has passed and the operator has turned this on
+	// (JapaneseEnabled). Until then the turn proceeds in English exactly as
+	// before, with a one-line notice so the request wasn't silently
+	// ignored. Fast-path/deterministic answers are unaffected either way —
+	// those translate client-side off SummaryKey/Params, never through the
+	// brain, so they carry no evaluation risk.
+	lang, notice := resolveChatLang(opts.Lang, s.JapaneseEnabled(ctx), tier)
+	if notice != "" {
+		if _, nerr := s.AppendNotice(ctx, convID, notice); nerr != nil {
+			s.logf("chat: japanese notice: %v", nerr)
+		}
+	}
+
 	bg := s.bgCtx
 	if bg == nil {
 		bg = context.Background()
 	}
-	go s.runTurn(bg, convID, id, userText, tier, opts.Web, escalate)
+	go s.runTurn(bg, convID, id, userText, tier, opts.Web, escalate, lang)
 	return id, nil
 }
 
@@ -1046,7 +1115,7 @@ func fastAnswerEvidenceJSON(ev []AnswerEvidence) string {
 	return string(b)
 }
 
-func (s *Smith) runTurn(ctx context.Context, convID, msgID int64, userText, tier string, doWeb bool, escalate bool) {
+func (s *Smith) runTurn(ctx context.Context, convID, msgID int64, userText, tier string, doWeb bool, escalate bool, lang string) {
 	var sources []MessageSource
 	var docs []*web.Document
 	var notice string
@@ -1059,7 +1128,7 @@ func (s *Smith) runTurn(ctx context.Context, convID, msgID int64, userText, tier
 		}
 	}
 	if tier == TierReasoning {
-		s.runReasoningTurn(ctx, convID, msgID, userText, docs, sources, escalate)
+		s.runReasoningTurn(ctx, convID, msgID, userText, docs, sources, escalate, lang)
 		return
 	}
 	s.runDeterministicTurn(ctx, convID, msgID, userText, sources)
@@ -1119,7 +1188,7 @@ func (s *Smith) degradeToDeterministic(ctx context.Context, convID, msgID int64,
 // is the persisted-message-shape projection of the same fetch, reused by
 // degradeToDeterministic if this turn fails, and merged with any sources
 // the tool loop's own web_search/web_fetch tools produced.
-func (s *Smith) runReasoningTurn(ctx context.Context, convID, msgID int64, userText string, docs []*web.Document, sources []MessageSource, escalate bool) {
+func (s *Smith) runReasoningTurn(ctx context.Context, convID, msgID int64, userText string, docs []*web.Document, sources []MessageSource, escalate bool, lang string) {
 	if s.chatBudgetExceeded(convID) {
 		s.degradeToDeterministic(ctx, convID, msgID,
 			"smith: too many thinking failures in this conversation recently — answering from what I can see directly. Try again shortly, or start a new conversation.",
@@ -1141,7 +1210,12 @@ func (s *Smith) runReasoningTurn(ctx context.Context, convID, msgID int64, userT
 			return
 		}
 		model := s.settingModel(ctx)
-		s.publishStatus(convID, msgID, fmt.Sprintf("loading brain model%s… — first load typically takes 20–90s", model))
+		// The missing separator between "model" and %s here was a real,
+		// long-standing bug (every production status line since this shipped
+		// read "loading brain modelqwen38-27b…" with no space) — fixed in
+		// passing while touching this line for the Phase 3 status key.
+		s.publishStatus(convID, msgID, fmt.Sprintf("loading brain model %s… — first load typically takes 20–90s", model),
+			"status.loading_brain", map[string]any{"model": model})
 		t0 := s.d.Now()
 		br = s.ensureBrainLoaded(ctx)
 		brainLoadMS = s.d.Now().Sub(t0).Milliseconds()
@@ -1151,7 +1225,7 @@ func (s *Smith) runReasoningTurn(ctx context.Context, convID, msgID int64, userT
 				sources)
 			return
 		}
-		s.publishStatus(convID, msgID, "brain ready — thinking")
+		s.publishStatus(convID, msgID, "brain ready — thinking", "status.brain_ready", nil)
 	}
 
 	tb := s.TurnBudget(ctx)
@@ -1172,7 +1246,7 @@ func (s *Smith) runReasoningTurn(ctx context.Context, convID, msgID int64, userT
 		}
 	}
 
-	sysPrompt := s.buildContext(ctx, userText, docs, tools, mode)
+	sysPrompt := s.buildContext(ctx, userText, docs, tools, mode, lang)
 	batcher := s.newTokenBatcher(convID, msgID)
 
 	// a0-down direct-connect fallback (decideTier already confirmed this
@@ -1192,7 +1266,7 @@ func (s *Smith) runReasoningTurn(ctx context.Context, convID, msgID int64, userT
 	if br.Resolution == BrainLocalSlot && br.Slot != "" {
 		s.markSlotActivity(br.Slot) // attribution START — refreshed on completion below
 	}
-	result, err := s.runToolLoop(ctx, convID, msgID, sysPrompt, userText, br.Model, mode, tools, batcher, br.Resolution == BrainLocalSlot, baseOverride)
+	result, err := s.runToolLoop(ctx, convID, msgID, sysPrompt, userText, br.Model, mode, tools, batcher, br.Resolution == BrainLocalSlot, baseOverride, lang)
 	if br.Resolution == BrainLocalSlot && br.Slot != "" {
 		s.markSlotActivity(br.Slot) // completion/refresh — the 120s freshness window covers long streams
 	}

@@ -202,13 +202,25 @@ func (s *Smith) KBSearch(ctx context.Context, q string, limit int) ([]KBResult, 
 
 var kbTokenRe = regexp.MustCompile(`[a-z0-9._-]+`)
 
+// tokenizeKBQuery extracts ASCII terms via kbTokenRe (this alone already
+// handles a Japanese question that quotes an identifier like "GTT" or a
+// slot ID verbatim) and, additively, expands any recognized Japanese domain
+// vocabulary via kb_ja_terms.go's expandJapaneseTerms into the equivalent
+// English terms — Phase 3 of the multilanguage plan
+// (docs/adr/0016-localization.md). The KB corpus itself stays English-only
+// (see reasoning.go's languageDirective doc comment for why), so this is
+// what makes a Japanese question retrieve anything at all.
 func tokenizeKBQuery(q string) []string {
-	tokens := kbTokenRe.FindAllString(strings.ToLower(q), -1)
+	lower := strings.ToLower(q)
+	tokens := kbTokenRe.FindAllString(lower, -1)
 	out := tokens[:0]
 	for _, t := range tokens {
 		if len(t) >= 2 {
 			out = append(out, t)
 		}
+	}
+	for _, t := range expandJapaneseTerms(q) {
+		out = append(out, t)
 	}
 	return out
 }

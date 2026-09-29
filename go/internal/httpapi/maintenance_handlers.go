@@ -14,7 +14,7 @@ import (
 // gate itself was never wired.
 func (s *Server) handleMaintenanceGet(w http.ResponseWriter, _ *http.Request) {
 	if s.deps.Maintenance == nil {
-		writeError(w, http.StatusServiceUnavailable, "maintenance gate not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "maintenance gate"}, "maintenance gate not wired")
 		return
 	}
 	writeJSON(w, http.StatusOK, s.deps.Maintenance.Status())
@@ -36,7 +36,7 @@ type maintenanceEnterBody struct {
 // extend-in-place).
 func (s *Server) handleMaintenanceEnter(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Maintenance == nil {
-		writeError(w, http.StatusServiceUnavailable, "maintenance gate not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "maintenance gate"}, "maintenance gate not wired")
 		return
 	}
 	var b maintenanceEnterBody
@@ -45,7 +45,7 @@ func (s *Server) handleMaintenanceEnter(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if b.Reason == "" {
-		writeValidationError(w, map[string]string{"reason": "required"})
+		writeValidationErrorCodes(w, map[string]string{"reason": "required"}, map[string]string{"reason": "required"})
 		return
 	}
 
@@ -58,7 +58,7 @@ func (s *Server) handleMaintenanceEnter(w http.ResponseWriter, r *http.Request) 
 		Duration:         time.Duration(b.DurationMinutes) * time.Minute,
 	})
 	if err == maintenance.ErrAlreadyActive {
-		writeError(w, http.StatusConflict, "a maintenance window is already active")
+		writeErrorCode(w, http.StatusConflict, "already_in_progress", nil, "a maintenance window is already active")
 		return
 	}
 	if err != nil {
@@ -75,7 +75,7 @@ func (s *Server) handleMaintenanceEnter(w http.ResponseWriter, r *http.Request) 
 // opened the window. 409 if nothing is active.
 func (s *Server) handleMaintenanceExit(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Maintenance == nil {
-		writeError(w, http.StatusServiceUnavailable, "maintenance gate not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "maintenance gate"}, "maintenance gate not wired")
 		return
 	}
 	actor := identity(r).Name

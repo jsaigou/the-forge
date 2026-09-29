@@ -323,8 +323,10 @@ func parsePositiveInt(s string) (int, error) {
 // writeInternalError logs the full error server-side and returns a generic
 // "internal error" message to the client, avoiding disclosure of internal
 // paths, DB errors, or provisioning details. Use for all 5xx responses where
-// the error comes from store/DB/filesystem/provisioning layers.
+// the error comes from store/DB/filesystem/provisioning layers. Every one of
+// this function's ~160 call sites gets the "internal" code for free — no
+// call-site change needed (i18n Phase 2, docs/adr/0016-localization.md).
 func writeInternalError(w http.ResponseWriter, err error) {
 	log.Printf("httpapi: internal error: %v", err)
-	writeError(w, http.StatusInternalServerError, "internal error")
+	writeErrorCode(w, http.StatusInternalServerError, "internal", nil, "internal error")
 }

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { CopyButton } from "../CopyButton";
 
 // Markdown — a hand-rolled, safe-subset renderer for smith chat content
@@ -54,6 +55,7 @@ function Heading({ level, children }: { level: number; children: ReactNode }) {
 }
 
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  const { t } = useTranslation("common");
   const trimmed = code.replace(/\n$/, "");
   return (
     <div className="smith-code-block">
@@ -61,7 +63,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
       <pre>
         <code>{trimmed}</code>
       </pre>
-      <CopyButton text={trimmed} title="Copy code" sm />
+      <CopyButton text={trimmed} title={t("markdown.copy_code_title")} sm />
     </div>
   );
 }

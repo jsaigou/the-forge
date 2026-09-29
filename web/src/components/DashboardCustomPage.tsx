@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ErrorBoundary } from "./ErrorBoundary";
 import {
   getWidget,
@@ -22,6 +23,7 @@ interface DashboardCustomPageProps {
 }
 
 export function DashboardCustomPage({ page, canEdit, onUpdatePage }: DashboardCustomPageProps) {
+  const { t } = useTranslation("dashboard");
   const [editing, setEditing] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [configuringIndex, setConfiguringIndex] = useState<number | null>(null);
@@ -62,13 +64,13 @@ export function DashboardCustomPage({ page, canEdit, onUpdatePage }: DashboardCu
       {canEdit && (
         <div className="eyebrow" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button className={`tab ${editing ? "active" : ""}`} onClick={() => setEditing(!editing)}>
-            {editing ? "Done" : "Edit"}
+            {editing ? t("custom_page.done") : t("custom_page.edit")}
           </button>
         </div>
       )}
       {page.widgets.length === 0 && (
         <div className="empty-note">
-          {editing ? 'No widgets yet. Use "Add Widget" below.' : "This page is empty."}
+          {editing ? t("custom_page.empty_editing") : t("custom_page.empty_viewing")}
         </div>
       )}
       {page.widgets.map((widget, index) => {
@@ -76,7 +78,7 @@ export function DashboardCustomPage({ page, canEdit, onUpdatePage }: DashboardCu
         if (!entry) {
           return (
             <div className="card" key={index}>
-              <div className="empty-note">Unknown widget: {widget.slug}</div>
+              <div className="empty-note">{t("custom_page.unknown_widget", { slug: widget.slug })}</div>
             </div>
           );
         }
@@ -115,19 +117,19 @@ export function DashboardCustomPage({ page, canEdit, onUpdatePage }: DashboardCu
                   <button
                     className="btn"
                     style={{ fontSize: 11, padding: "2px 8px" }}
-                    title="Configure"
+                    title={t("custom_page.configure_title")}
                     onClick={() => setConfiguringIndex(configuringIndex === index ? null : index)}
                   >
-                    Config
+                    {t("custom_page.config_button")}
                   </button>
                 )}
                 <button
                   className="btn"
                   style={{ fontSize: 11, padding: "2px 8px" }}
-                  title="Remove"
+                  title={t("custom_page.remove_title")}
                   onClick={() => removeWidget(index)}
                 >
-                  Remove
+                  {t("custom_page.remove_button")}
                 </button>
               </div>
             )}
@@ -152,21 +154,21 @@ export function DashboardCustomPage({ page, canEdit, onUpdatePage }: DashboardCu
         <>
           {showGallery ? (
             <div className="card">
-              <div className="eyebrow">Add widget</div>
+              <div className="eyebrow">{t("custom_page.add_widget_title")}</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {listWidgets().map((entry) => (
                   <button key={entry.slug} className="btn" style={{ fontSize: 12 }} onClick={() => addWidget(entry.slug)}>
-                    {entry.displayName}
+                    {t(entry.displayName)}
                   </button>
                 ))}
                 <button className="btn" style={{ fontSize: 12 }} onClick={() => setShowGallery(false)}>
-                  Cancel
+                  {t("custom_page.cancel")}
                 </button>
               </div>
             </div>
           ) : (
             <button className="btn" onClick={() => setShowGallery(true)}>
-              + Add Widget
+              {t("custom_page.add_widget_button")}
             </button>
           )}
         </>
@@ -186,11 +188,12 @@ function WidgetConfigForm({
   onSave: (props: WidgetProps) => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation("dashboard");
   const [props, setProps] = useState<WidgetProps>({ ...currentProps });
 
   return (
     <div className="card" style={{ marginBottom: 8 }}>
-      <div className="eyebrow">Configure {entry.displayName}</div>
+      <div className="eyebrow">{t("custom_page.configure_heading", { name: t(entry.displayName) })}</div>
       {entry.configSchema.map((prop) => (
         <div key={prop.name} style={{ marginBottom: 8 }}>
           <label style={{ fontSize: 11, color: "var(--text-mute)", display: "block", marginBottom: 4 }}>
@@ -203,7 +206,7 @@ function WidgetConfigForm({
           >
             {prop.options.map((opt) => (
               <option key={opt.key} value={opt.key}>
-                {opt.label}
+                {t(opt.label)}
               </option>
             ))}
           </select>
@@ -211,10 +214,10 @@ function WidgetConfigForm({
       ))}
       <div style={{ display: "flex", gap: 8 }}>
         <button className="btn" onClick={() => onSave(props)}>
-          Save
+          {t("custom_page.save")}
         </button>
         <button className="btn" onClick={onCancel}>
-          Cancel
+          {t("custom_page.cancel")}
         </button>
       </div>
     </div>

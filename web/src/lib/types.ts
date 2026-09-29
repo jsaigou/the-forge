@@ -573,6 +573,18 @@ export interface InfraService {
   // compressor_samples row exists yet.
   compressor_rss_bytes?: number | null;
   compressor_restarts?: number | null;
+  // Operator-set override (Settings → General → Service links,
+  // infra.service_links) for the ↗ "open in a new window" link, keyed by
+  // name server-side. null when unset — FE falls back to guessing
+  // `http://<dashboard-host>:<port>`. Added 2026-09-22.
+  url: string | null;
+}
+
+// GET/PUT /api/v1/service-links (infra.service_links) — see InfraService.url
+// above. Keyed by the service's display Name (InfraService.name on the
+// wire). An empty string as a PUT value clears that service's override.
+export interface ServiceLinks {
+  links: Record<string, string>;
 }
 
 // RouterSettings mirrors go/internal/httpapi/shapes.go's
@@ -2005,6 +2017,12 @@ export interface SmithFinding {
   // completeness, never guessed by a model. "high" when unset.
   confidence: "high" | "medium" | "low";
   confidence_note?: string;
+  // summary_key/params (multilanguage plan Phase 3) let the UI render a
+  // translated summary via t("smith:"+summary_key, params) — see
+  // findingSummary() in Diagnostics.tsx. Absent for a check not yet
+  // migrated; the raw (always-English) summary is the fallback either way.
+  summary_key?: string;
+  params?: Record<string, unknown>;
 }
 
 // StoredFinding is a persisted finding row (GET /findings, investigation
@@ -2022,6 +2040,8 @@ export interface SmithStoredFinding {
   repeat_count: number;
   confidence: "high" | "medium" | "low";
   confidence_note?: string;
+  summary_key?: string;
+  params?: Record<string, unknown>;
 }
 
 export interface SmithInvestigation {
@@ -2126,6 +2146,8 @@ export interface SmithVerifyResult {
   severity: "ok" | "info" | "warn" | "crit";
   summary: string;
   at: number;
+  summary_key?: string;
+  params?: Record<string, unknown>;
 }
 
 export interface SmithActionResult {
@@ -2540,13 +2562,18 @@ export interface SmithChatContext {
 // no longer sent by the FE — web research is always on unless disabled in
 // Settings (Sprint S1), and escalation is automatic. context (Sprint S3
 // §3.4) carries attached error context; when present and text is empty, the
-// server composes the seed user message from it.
+// server composes the seed user message from it. lang (multilanguage plan
+// Phase 3, docs/adr/0016-localization.md) is the FE's current i18n locale —
+// the server only actually honors "ja" once its own braineval gate passes;
+// until then it silently answers in English with a notice, so it's always
+// safe for the FE to send its real locale unconditionally.
 export interface SmithChatRequest {
   conversation_id?: number;
   text: string;
   escalate?: boolean;
   web?: boolean;
   context?: SmithChatContext[];
+  lang?: string;
 }
 
 // SmithPendingAsk is a client-only cache slot (never fetched from the
@@ -2719,10 +2746,17 @@ export interface SmithTokenEvent {
 // load typically takes 20-90s"), published by Smith.publishStatus
 // (reasoning.go). status is free-text prose, not a machine-readable ETA
 // field — there is no numeric duration to drive a progress bar with.
+// status_key/params (multilanguage plan Phase 3) are additive — present
+// only for the small closed set of status lines that have one (most of
+// smith's SSE prose is genuinely dynamic runtime text with no natural key,
+// left English-only); the FE renders t("smith:"+status_key, params) when
+// present, falling back to status otherwise.
 export interface SmithStatusEvent {
   conversation_id: number;
   message_id: number;
   status: string;
+  status_key?: string;
+  params?: Record<string, unknown>;
 }
 
 export interface SmithMessageDoneEvent {

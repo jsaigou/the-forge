@@ -20,9 +20,11 @@
 // with no way back). Non-admin viewers still see the original read-only,
 // enabled-only view.
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { OfferingForm, useCatalogProviders } from "./catalog/OfferingForm";
 import { countryFlag, formatCurrencyPrecise } from "../lib/format";
 import { groupOfferingsByModel, preferredOfferingIds } from "../lib/offeringPreference";
+import { translatedDataResidencyGroup } from "../lib/providerPresetI18n";
 import { presetFor, providerIconSlug } from "../lib/providerPresets";
 import {
   useCatalogModels,
@@ -40,6 +42,7 @@ import { Icon } from "./Icon";
 import type { CatalogOffering, Provider } from "../lib/types";
 
 export function RemoteOfferings() {
+  const { t } = useTranslation("models");
   const { canAdmin } = useSession();
   const offerings = useCatalogOfferings();
   const models = useCatalogModels();
@@ -115,7 +118,7 @@ export function RemoteOfferings() {
 
   return (
     <div>
-      <h2 style={{ fontSize: 13, fontWeight: 600, margin: "22px 0 10px" }}>Remote offerings</h2>
+      <h2 style={{ fontSize: 13, fontWeight: 600, margin: "22px 0 10px" }}>{t("remote_offerings.title")}</h2>
       {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
       {editing !== null ? (
         <OfferingForm
@@ -153,10 +156,10 @@ export function RemoteOfferings() {
               );
             })}
           </div>
-          {visible.length === 0 && <div className="empty-note">No offerings. Create one to route to a remote provider.</div>}
+          {visible.length === 0 && <div className="empty-note">{t("remote_offerings.empty")}</div>}
           {canAdmin && (
             <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); }}>
-              + New offering
+              {t("remote_offerings.new_offering")}
             </button>
           )}
         </>
@@ -192,6 +195,7 @@ function RemoteModelRow({
   onDelete: (id: number) => void;
   onToggleEnabled: (o: CatalogOffering) => void;
 }) {
+  const { t } = useTranslation("models");
   // All providers render (no "+N others" collapse — operator feedback
   // 2026-08-14). The anchor (the offering a0 actually serves, or the
   // group's own head when nothing is routable) leads; the rest follow in
@@ -221,24 +225,24 @@ function RemoteModelRow({
                 <span>{o.provider}</span>
                 <ResidencyChip provider={row} fallbackName={o.provider} />
                 {preferred && (
-                  <span className="chip" style={{ color: "var(--ok)" }} title="The offering a0 currently presents for this model">
-                    preferred
+                  <span className="chip" style={{ color: "var(--ok)" }} title={t("remote_offerings.preferred_title")}>
+                    {t("remote_offerings.preferred")}
                   </span>
                 )}
-                {!o.enabled && <span className="chip" style={{ color: "var(--warn)" }}>disabled</span>}
-                {o.enabled && providerDisabled && <span className="chip" style={{ color: "var(--warn)" }}>disabled — not routing</span>}
+                {!o.enabled && <span className="chip" style={{ color: "var(--warn)" }}>{t("remote_offerings.disabled")}</span>}
+                {o.enabled && providerDisabled && <span className="chip" style={{ color: "var(--warn)" }}>{t("remote_offerings.disabled_not_routing")}</span>}
               </div>
               <div className="ro-line3">
                 <span>
-                  {formatCurrencyPrecise(o.price_in_per_1m, o.currency)}/M in · {formatCurrencyPrecise(o.price_out_per_1m, o.currency)} out
+                  {t("remote_offerings.price_line", { priceIn: formatCurrencyPrecise(o.price_in_per_1m, o.currency), priceOut: formatCurrencyPrecise(o.price_out_per_1m, o.currency) })}
                   {(o.price_in_per_1m_peak != null || o.price_out_per_1m_peak != null) && (
-                    <> (peak {formatCurrencyPrecise(o.price_in_per_1m_peak ?? o.price_in_per_1m, o.currency)}/{formatCurrencyPrecise(o.price_out_per_1m_peak ?? o.price_out_per_1m, o.currency)})</>
+                    <>{t("remote_offerings.price_peak_suffix", { peakIn: formatCurrencyPrecise(o.price_in_per_1m_peak ?? o.price_in_per_1m, o.currency), peakOut: formatCurrencyPrecise(o.price_out_per_1m_peak ?? o.price_out_per_1m, o.currency) })}</>
                   )}
                 </span>
-                {o.context_length > 0 && <span>· {o.context_length.toLocaleString()} ctx</span>}
-                <span className="chip" style={{ color: "var(--text-mute)" }} title="Relative preference — lower is served first">priority {o.priority}</span>
+                {o.context_length > 0 && <span>{t("remote_offerings.context_suffix", { count: o.context_length.toLocaleString() })}</span>}
+                <span className="chip" style={{ color: "var(--text-mute)" }} title={t("remote_offerings.priority_title")}>{t("remote_offerings.priority", { value: o.priority })}</span>
                 {row?.peak_active_now && (
-                  <span className="chip" style={{ color: "var(--warn)" }} title="This provider's peak pricing window is active right now">peak now</span>
+                  <span className="chip" style={{ color: "var(--warn)" }} title={t("remote_offerings.peak_now_title")}>{t("remote_offerings.peak_now")}</span>
                 )}
               </div>
             </div>
@@ -250,15 +254,15 @@ function RemoteModelRow({
                   disabled={togglePending}
                   onClick={() => onToggleEnabled(o)}
                 >
-                  {o.enabled ? "Disable" : "Enable"}
+                  {o.enabled ? t("remote_offerings.disable") : t("remote_offerings.enable")}
                 </button>
-                <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => onEdit(o.id)}>Edit</button>
+                <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => onEdit(o.id)}>{t("remote_offerings.edit")}</button>
                 <ConfirmButton
                   className="btn"
                   style={{ fontSize: 11, padding: "4px 8px" }}
                   pending={deletePending}
                   onConfirm={() => onDelete(o.id)}
-                  warning={`Delete offering "${o.wire_model}"?`}
+                  warning={t("remote_offerings.delete_confirm", { model: o.wire_model })}
                 />
               </div>
             )}
@@ -274,13 +278,14 @@ function RemoteModelRow({
 // multi-provider sprint); the curated preset is a fallback for rows created
 // before those columns were surfaced.
 function ResidencyChip({ provider, fallbackName }: { provider?: Provider; fallbackName: string }) {
+  const { t } = useTranslation("common");
   const preset = presetFor(fallbackName);
   const country = provider?.country || preset?.country || "";
   const group = provider?.data_residency_group || preset?.dataResidencyGroup || "";
   if (!country && !group) return null;
   return (
     <span className="chip" style={{ marginLeft: 6, color: "var(--text-dim)" }}>
-      {country && countryFlag(country)} {country}{country && group ? " · " : ""}{group}
+      {country && countryFlag(country)} {country}{country && group ? " · " : ""}{translatedDataResidencyGroup(t, group)}
     </span>
   );
 }

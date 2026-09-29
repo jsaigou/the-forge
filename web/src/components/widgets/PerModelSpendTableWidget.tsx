@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { formatCurrency } from "../../lib/format";
 import { useUsage } from "../../lib/queries";
 
@@ -10,6 +11,7 @@ import { useUsage } from "../../lib/queries";
 // `${provider} (remote)`, which collided whenever a provider had more than
 // one usage row).
 export function PerModelSpendTableWidget({ window_ }: { window_: string }) {
+  const { t } = useTranslation("dashboard");
   const usage = useUsage(window_);
   const [showAllModels, setShowAllModels] = useState(false);
 
@@ -27,7 +29,7 @@ export function PerModelSpendTableWidget({ window_ }: { window_: string }) {
     })),
     ...(usage.data?.external ?? []).map((e) => ({
       id: `remote:${e.provider}:${e.model}`,
-      name: `${e.provider} (remote)`,
+      name: `${e.provider}${t("per_model_spend.remote_suffix")}`,
       uses: e.requests,
       tokens: e.prompt_tokens + e.completion_tokens,
       oom: null as number | null,
@@ -41,14 +43,14 @@ export function PerModelSpendTableWidget({ window_ }: { window_: string }) {
   return (
     <div className="card">
       <div className="qrow" style={{ color: "var(--text-mute)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em" }}>
-        <span style={{ width: 150 }}>Model</span>
-        <span style={{ width: 60 }}>Uses</span>
-        <span style={{ width: 80 }}>Tokens</span>
-        <span style={{ width: 50 }}>OOM</span>
-        <span style={{ width: 60 }}>Lockups</span>
-        <span className="pos">Spend</span>
+        <span style={{ width: 150 }}>{t("per_model_spend.col_model")}</span>
+        <span style={{ width: 60 }}>{t("per_model_spend.col_uses")}</span>
+        <span style={{ width: 80 }}>{t("per_model_spend.col_tokens")}</span>
+        <span style={{ width: 50 }}>{t("per_model_spend.col_oom")}</span>
+        <span style={{ width: 60 }}>{t("per_model_spend.col_lockups")}</span>
+        <span className="pos">{t("per_model_spend.col_spend")}</span>
       </div>
-      {combinedRows.length === 0 && <div className="empty-note">No usage recorded yet.</div>}
+      {combinedRows.length === 0 && <div className="empty-note">{t("per_model_spend.no_usage")}</div>}
       {visibleRows.map((r) => (
         <div className="qrow" key={r.id}>
           <span className="want" style={{ width: 150, color: r.remote ? "var(--cool)" : undefined }}>{r.name}</span>
@@ -61,7 +63,7 @@ export function PerModelSpendTableWidget({ window_ }: { window_: string }) {
       ))}
       {combinedRows.length > 3 && (
         <button className="btn" style={{ fontSize: 11, marginTop: 8 }} onClick={() => setShowAllModels((v) => !v)}>
-          {showAllModels ? "Show top 3" : `Show all (${combinedRows.length})`}
+          {showAllModels ? t("per_model_spend.show_top3") : t("per_model_spend.show_all", { count: combinedRows.length })}
         </button>
       )}
     </div>

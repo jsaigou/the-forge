@@ -285,7 +285,7 @@ func (s *Server) handleMonitorSettingsGet(w http.ResponseWriter, r *http.Request
 // poll_interval_s of the save.
 func (s *Server) handleMonitorSettingsPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings"}, "settings store not wired")
 		return
 	}
 	var body monitorSettingsBody
@@ -381,7 +381,7 @@ type serviceIconsBody struct {
 // returned by GET) with just the one entry changed, not a single-key patch.
 func (s *Server) handleServiceIconsPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings"}, "settings store not wired")
 		return
 	}
 	var body serviceIconsBody
@@ -390,12 +390,12 @@ func (s *Server) handleServiceIconsPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Icons == nil {
-		writeValidationError(w, map[string]string{"icons": "must be present"})
+		writeValidationErrorCodes(w, map[string]string{"icons": "must be present"}, map[string]string{"icons": "must_be_present"})
 		return
 	}
 	for name, slug := range body.Icons {
 		if strings.TrimSpace(name) == "" || strings.TrimSpace(slug) == "" {
-			writeValidationError(w, map[string]string{"icons": "keys and values must be non-empty"})
+			writeValidationErrorCodes(w, map[string]string{"icons": "keys and values must be non-empty"}, map[string]string{"icons": "must_not_be_empty"})
 			return
 		}
 	}
@@ -416,6 +416,104 @@ func (s *Server) handleServiceIconsPut(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, identity(r).Name, "service_icons", "infra.service_icons", string(raw))
 	writeJSON(w, http.StatusOK, s.resolvedServiceIcons(ctx))
+}
+
+// ── GET/PUT /api/v1/service-links — infra.service_links (live) ─────────────
+//
+// Per-service override for the Console services strip's ↗ "open in a new
+// window" link (ServiceChip in web/src/components/ServicesBar.tsx). Absent
+// by default — handleInfraServices leaves infraService.URL nil and the
+// frontend falls back to its own `http://<dashboard-host>:<port>` guess,
+// same as before this existed. An override is needed whenever a service is
+// only reachable through its own dedicated hostname (e.g. a service fronted
+// by its own Tailscale Serve HTTPS endpoint, distinct from the dashboard's
+// own). Keyed by the service's display Name (services[].name on the wire),
+// not a mode key or unit — some rows (STT/Embedding/Aligner/TTS/LLM Router)
+// have neither. Same live/SIGHUP-reloadable shape as service-icons above;
+// no default map, since an empty override set is a valid, common state.
+// Operator feedback 2026-09-22: the ComfyUI link was wrong (guessed
+// hostname:port, but ComfyUI is served over its own tailnet hostname) and
+// there was no way to fix it short of a source edit — this closes that gap
+// generically for any service, not just ComfyUI.
+
+type serviceLinksResponse struct {
+	Links map[string]string `json:"links"`
+}
+
+func (s *Server) resolvedServiceLinks(ctx context.Context) serviceLinksResponse {
+	var links map[string]string
+	if err := json.Unmarshal(s.getRawSetting(ctx, "infra.service_links"), &links); err != nil {
+		log.Printf("httpapi: warning: corrupt stored setting: %v", err)
+	}
+	if links == nil {
+		links = map[string]string{}
+	}
+	return serviceLinksResponse{Links: links}
+}
+
+// handleServiceLinksGet — GET /api/v1/service-links (operator).
+func (s *Server) handleServiceLinksGet(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.resolvedServiceLinks(r.Context()))
+}
+
+type serviceLinksBody struct {
+	Links map[string]string `json:"links"`
+}
+
+// handleServiceLinksPut — PUT /api/v1/service-links (admin, page.settings).
+// Whole-map replace when the body includes "links" (same semantics as
+// infra.service_icons above) — send the full current map back (as returned
+// by GET) with just the one entry changed, not a single-key patch. An
+// empty-string value is how an operator clears one override back to the
+// frontend's own guess without affecting any other entry.
+func (s *Server) handleServiceLinksPut(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Settings == nil {
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings"}, "settings store not wired")
+		return
+	}
+	var body serviceLinksBody
+	if fields := decodeJSONBody(r, &body); fields != nil {
+		writeValidationError(w, fields)
+		return
+	}
+	if body.Links == nil {
+		writeValidationErrorCodes(w, map[string]string{"links": "must be present"}, map[string]string{"links": "must_be_present"})
+		return
+	}
+	cleaned := make(map[string]string, len(body.Links))
+	for name, link := range body.Links {
+		if strings.TrimSpace(name) == "" {
+			writeValidationErrorCodes(w, map[string]string{"links": "keys must be non-empty"}, map[string]string{"links": "must_not_be_empty"})
+			return
+		}
+		link = strings.TrimSpace(link)
+		if link == "" {
+			continue // clears the override for this service
+		}
+		u, err := url.Parse(link)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			writeValidationError(w, map[string]string{"links": fmt.Sprintf("%q is not a valid absolute URL", link)})
+			return
+		}
+		cleaned[name] = link
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	raw, err := json.Marshal(cleaned)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	if err := s.deps.Settings.Set(ctx, "infra.service_links", raw); err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	if s.deps.ReloadConfig != nil {
+		s.deps.ReloadConfig()
+	}
+	s.audit(r, identity(r).Name, "service_links", "infra.service_links", string(raw))
+	writeJSON(w, http.StatusOK, s.resolvedServiceLinks(ctx))
 }
 
 // putIntField is the small manual "if the caller sent this field, marshal
@@ -550,7 +648,7 @@ type routerConfigBody struct {
 // restart, not immediately (see the "restart-required" banner this sets).
 func (s *Server) handleRouterConfigPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings"}, "settings store not wired")
 		return
 	}
 	var body routerConfigBody
@@ -651,7 +749,7 @@ type metricsSettingsBody struct {
 
 func (s *Server) handleMetricsSettingsPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings"}, "settings store not wired")
 		return
 	}
 	var body metricsSettingsBody
@@ -917,7 +1015,7 @@ func (s *Server) handleSystemPreflightPost(w http.ResponseWriter, r *http.Reques
 // by a save that only touched another.
 func (s *Server) handleSystemSettingsPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings"}, "settings store not wired")
 		return
 	}
 	var body systemSettingsBody
@@ -1056,7 +1154,7 @@ type uiSettingsBody struct{}
 // every /status build — no reload needed.
 func (s *Server) handleUISettingsPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings"}, "settings store not wired")
 		return
 	}
 	var body uiSettingsBody
@@ -1135,7 +1233,7 @@ type schedulerSeedBody struct {
 // handleSchedulerSeedPut — PUT /api/v1/scheduler/seed (admin, page.settings).
 func (s *Server) handleSchedulerSeedPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings"}, "settings store not wired")
 		return
 	}
 	var body schedulerSeedBody
@@ -1238,7 +1336,7 @@ func (s *Server) handleDashboardLayoutGet(w http.ResponseWriter, r *http.Request
 // Full-replace: the frontend sends the complete layout (all pages, all widgets).
 func (s *Server) handleDashboardLayoutPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings"}, "settings store not wired")
 		return
 	}
 	var body dashboardLayoutResponse
@@ -1248,6 +1346,7 @@ func (s *Server) handleDashboardLayoutPut(w http.ResponseWriter, r *http.Request
 	}
 
 	fields := map[string]string{}
+	codes := map[string]string{}
 	if len(body.Pages) > 50 {
 		fields["pages"] = "maximum 50 custom pages"
 	}
@@ -1255,13 +1354,16 @@ func (s *Server) handleDashboardLayoutPut(w http.ResponseWriter, r *http.Request
 	for i, page := range body.Pages {
 		if page.ID == "" {
 			fields[fmt.Sprintf("pages[%d].id", i)] = "must not be empty"
+			codes[fmt.Sprintf("pages[%d].id", i)] = "must_not_be_empty"
 		} else if seenIDs[page.ID] {
 			fields[fmt.Sprintf("pages[%d].id", i)] = "duplicate page id"
+			codes[fmt.Sprintf("pages[%d].id", i)] = "already_exists"
 		} else {
 			seenIDs[page.ID] = true
 		}
 		if page.Name == "" {
 			fields[fmt.Sprintf("pages[%d].name", i)] = "must not be empty"
+			codes[fmt.Sprintf("pages[%d].name", i)] = "must_not_be_empty"
 		}
 		if len(page.Widgets) > 50 {
 			fields[fmt.Sprintf("pages[%d].widgets", i)] = "maximum 50 widgets per page"
@@ -1269,11 +1371,12 @@ func (s *Server) handleDashboardLayoutPut(w http.ResponseWriter, r *http.Request
 		for j, widget := range page.Widgets {
 			if widget.Slug == "" {
 				fields[fmt.Sprintf("pages[%d].widgets[%d].slug", i, j)] = "must not be empty"
+				codes[fmt.Sprintf("pages[%d].widgets[%d].slug", i, j)] = "must_not_be_empty"
 			}
 		}
 	}
 	if len(fields) > 0 {
-		writeValidationError(w, fields)
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 

@@ -7,6 +7,8 @@
 // already ~hundreds, not ~10k. No external charting dependency (CSP-strict
 // PWA; the repo ships none) — see docs/dataviz conventions: one axis, color
 // follows the entity, thin non-scaling-stroke lines.
+import { appLocale } from "../../lib/format";
+
 export interface TrendSeriesDef<P> {
   key: string;
   label: string;
@@ -107,8 +109,8 @@ export function TrendChart<P extends { ts: number }>({
   const tMax = points[points.length - 1].ts;
   const tRange = tMax - tMin || 1;
 
-  const startLabel = new Date(tMin * 1000).toLocaleDateString([], { month: "short", day: "numeric" });
-  const midLabel = new Date(((tMin + tMax) / 2) * 1000).toLocaleDateString([], { month: "short", day: "numeric" });
+  const startLabel = new Date(tMin * 1000).toLocaleDateString(appLocale(), { month: "short", day: "numeric" });
+  const midLabel = new Date(((tMin + tMax) / 2) * 1000).toLocaleDateString(appLocale(), { month: "short", day: "numeric" });
 
   return (
     <>

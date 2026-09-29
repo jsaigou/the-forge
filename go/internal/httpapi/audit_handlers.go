@@ -39,7 +39,7 @@ type auditListResponse struct {
 // route in this file's neighbourhood.
 func (s *Server) handleAuditList(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Audit == nil {
-		writeError(w, http.StatusServiceUnavailable, "audit store not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "audit store"}, "audit store not available")
 		return
 	}
 	limit := 50
@@ -52,7 +52,7 @@ func (s *Server) handleAuditList(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	entries, err := s.deps.Audit.List(ctx, r.URL.Query().Get("action_prefix"), r.URL.Query().Get("target"), limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "audit query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "audit query failed")
 		return
 	}
 	resp := auditListResponse{Entries: []auditEntryJSON{}}

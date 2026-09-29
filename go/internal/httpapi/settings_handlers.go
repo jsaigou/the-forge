@@ -72,7 +72,7 @@ var currencyRE = regexp.MustCompile(`^[A-Z]{3}$`)
 // to "USD" when unset (the §0.2 default).
 func (s *Server) handleBillingSettingsGet(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings store"}, "settings store not wired")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -106,7 +106,7 @@ func (s *Server) handleBillingSettingsGet(w http.ResponseWriter, r *http.Request
 // audit-logged here.
 func (s *Server) handleBillingSettingsPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings store"}, "settings store not wired")
 		return
 	}
 	var b billingSettingsBody
@@ -115,8 +115,10 @@ func (s *Server) handleBillingSettingsPut(w http.ResponseWriter, r *http.Request
 		return
 	}
 	fields := map[string]string{}
+	codes := map[string]string{}
 	if b.DisplayCurrency == "" {
 		fields["display_currency"] = "is required"
+		codes["display_currency"] = "required"
 	} else if !currencyRE.MatchString(b.DisplayCurrency) {
 		fields["display_currency"] = "must be a 3-letter ISO 4217 code (e.g. USD)"
 	}
@@ -124,7 +126,7 @@ func (s *Server) handleBillingSettingsPut(w http.ResponseWriter, r *http.Request
 		fields["fx_refresh_min"] = "must be ≥ 1"
 	}
 	if len(fields) > 0 {
-		writeValidationError(w, fields)
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 
@@ -193,7 +195,7 @@ func (s *Server) handleBillingSettingsPut(w http.ResponseWriter, r *http.Request
 // is NOT set on create — use PUT .../key for that.
 func (s *Server) handleProviderCreate(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Routing == nil {
-		writeError(w, http.StatusServiceUnavailable, "compressor store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "compressor store"}, "compressor store not wired")
 		return
 	}
 	var b providerCreateBody
@@ -216,7 +218,7 @@ func (s *Server) handleProviderCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, p := range existing {
 		if p.Name == b.Name {
-			writeError(w, http.StatusConflict, "provider already exists")
+			writeErrorCode(w, http.StatusConflict, "already_exists", nil, "provider already exists")
 			return
 		}
 	}
@@ -295,7 +297,7 @@ func (s *Server) handleProviderCreate(w http.ResponseWriter, r *http.Request) {
 // Settings → Routing), not here.
 func (s *Server) handleProviderUpdate(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Routing == nil {
-		writeError(w, http.StatusServiceUnavailable, "compressor store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "compressor store"}, "compressor store not wired")
 		return
 	}
 	ref := r.PathValue("ref")
@@ -318,7 +320,7 @@ func (s *Server) handleProviderUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "provider not found")
+		writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "provider"}, "provider not found")
 		return
 	}
 	oldCompressorProxy := row.CompressorProxyName
@@ -412,7 +414,7 @@ func (s *Server) handleProviderUpdate(w http.ResponseWriter, r *http.Request) {
 // masked form so the UI can confirm the write.
 func (s *Server) handleProviderKey(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Routing == nil {
-		writeError(w, http.StatusServiceUnavailable, "compressor store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "compressor store"}, "compressor store not wired")
 		return
 	}
 	ref := r.PathValue("ref")
@@ -422,7 +424,7 @@ func (s *Server) handleProviderKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b.APIKey == "" {
-		writeValidationError(w, map[string]string{"api_key": "is required"})
+		writeValidationErrorCodes(w, map[string]string{"api_key": "is required"}, map[string]string{"api_key": "required"})
 		return
 	}
 
@@ -435,7 +437,7 @@ func (s *Server) handleProviderKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "provider not found")
+		writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "provider"}, "provider not found")
 		return
 	}
 	row.APIKey = b.APIKey
@@ -455,7 +457,7 @@ func (s *Server) handleProviderKey(w http.ResponseWriter, r *http.Request) {
 // store.Routing.DeleteProvider's doc comment for why.
 func (s *Server) handleProviderDelete(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Routing == nil {
-		writeError(w, http.StatusServiceUnavailable, "compressor store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "compressor store"}, "compressor store not wired")
 		return
 	}
 	ref := r.PathValue("ref")
@@ -469,7 +471,7 @@ func (s *Server) handleProviderDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "provider not found")
+		writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "provider"}, "provider not found")
 		return
 	}
 
@@ -485,7 +487,7 @@ func (s *Server) handleProviderDelete(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.deps.Routing.DeleteProvider(ctx, row.ID); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "provider not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "provider"}, "provider not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -507,7 +509,7 @@ func (s *Server) handleProviderDelete(w http.ResponseWriter, r *http.Request) {
 // nothing was saved.
 func (s *Server) handleProviderDiscoverBilling(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Routing == nil {
-		writeError(w, http.StatusServiceUnavailable, "compressor store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "compressor store"}, "compressor store not wired")
 		return
 	}
 	ref := r.PathValue("ref")
@@ -520,7 +522,7 @@ func (s *Server) handleProviderDiscoverBilling(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusNotFound, "provider not found")
+		writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "provider"}, "provider not found")
 		return
 	}
 

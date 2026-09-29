@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { ConfigBenchmarkGroup } from "../../components/benchmarks/ConfigBenchmarkGroup";
 import { ProfileRunCard, useProfileRunController } from "../../components/benchmarks/ProfileRunCard";
 import { subjectLabel, BenchmarkForm } from "../../components/catalog/BenchmarkForm";
@@ -43,6 +44,7 @@ type EditorState =
 type Filter = "all" | "profiled" | "has-benchmarks" | "stale";
 
 export function Benchmarks({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const benchmarks = useCatalogBenchmarks();
   const configs = useCatalogConfigs();
   const variants = useCatalogVariants();
@@ -98,28 +100,25 @@ export function Benchmarks({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow" id="benchmarks">Benchmarks & Profiling</div>
+      <div className="eyebrow" id="benchmarks">{t("benchmarks.page.title")}</div>
 
       <ProfileRunCard controller={profileController} />
 
       <div className="card" style={{ borderLeft: "3px solid var(--warn, var(--accent))", marginBottom: 12 }}>
         <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.55 }}>
-          Curated performance/capability scores per config, grouped with the config's own measured
-          profile. <b style={{ color: "var(--warn)" }}>Profiling is destructive</b> — if the target
-          model isn't already loaded, other running models will be evicted to make room. Mutations
-          require admin + Settings assurance.
+          <Trans i18nKey="benchmarks.page.intro" ns="settings" components={{ b: <b style={{ color: "var(--warn)" }} /> }} />
         </div>
       </div>
 
       {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
 
       {anyError ? (
-        <div className="empty-note">Catalog not available (503 — store may not be wired).</div>
+        <div className="empty-note">{t("benchmarks.page.catalog_unavailable")}</div>
       ) : (
         <>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
             <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-              {profiledCount} of {sortedGroups.length} configs profiled · {staleCount} stale · {(benchmarks.data ?? []).length} curated benchmarks
+              {t("benchmarks.page.summary", { profiled: profiledCount, total: sortedGroups.length, stale: staleCount, curated: (benchmarks.data ?? []).length })}
             </div>
             <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
               {(["all", "profiled", "has-benchmarks", "stale"] as Filter[]).map((f) => (
@@ -129,16 +128,16 @@ export function Benchmarks({ canAdmin }: { canAdmin: boolean }) {
                   style={{ fontSize: 11 }}
                   onClick={() => setFilter(f)}
                 >
-                  {f === "all" ? "All" : f === "profiled" ? "Profiled" : f === "has-benchmarks" ? "Has benchmarks" : "Stale"}
+                  {f === "all" ? t("benchmarks.page.filter_all") : f === "profiled" ? t("benchmarks.page.filter_profiled") : f === "has-benchmarks" ? t("benchmarks.page.filter_has_benchmarks") : t("benchmarks.page.filter_stale")}
                 </button>
               ))}
             </div>
           </div>
 
           {sortedGroups.length === 0 ? (
-            <div className="empty-note">No configs in the catalog — add one in Catalog → Configs.</div>
+            <div className="empty-note">{t("benchmarks.page.no_configs")}</div>
           ) : visibleGroups.length === 0 ? (
-            <div className="empty-note">No configs match this filter.</div>
+            <div className="empty-note">{t("benchmarks.page.no_match_filter")}</div>
           ) : (
             visibleGroups.map((g) => (
               <ConfigBenchmarkGroup
@@ -156,9 +155,9 @@ export function Benchmarks({ canAdmin }: { canAdmin: boolean }) {
 
           {grouped.remoteOnly.length > 0 && (
             <div style={{ marginTop: 18 }}>
-              <div className="eyebrow" style={{ fontSize: 11 }}>Remote-only models</div>
+              <div className="eyebrow" style={{ fontSize: 11 }}>{t("benchmarks.page.remote_only_title")}</div>
               <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
-                No local config — nothing to profile. Benchmarks here are model-scoped only.
+                {t("benchmarks.page.remote_only_hint")}
               </div>
               {grouped.remoteOnly.map((mg) => (
                 <div className="card" key={mg.model.id} style={{ marginBottom: 10 }}>
@@ -167,12 +166,12 @@ export function Benchmarks({ canAdmin }: { canAdmin: boolean }) {
                     <span style={{ fontWeight: 600, fontSize: 13 }}>{mg.model.name}</span>
                     {mg.offerings.length > 0 && (
                       <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
-                        served by {mg.offerings.map((o) => o.provider).join(", ")}
+                        {t("benchmarks.page.served_by", { providers: mg.offerings.map((o) => o.provider).join(", ") })}
                       </span>
                     )}
                   </div>
                   {mg.benchmarks.length === 0 ? (
-                    <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 6 }}>No benchmarks recorded.</div>
+                    <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 6 }}>{t("benchmarks.page.no_benchmarks_recorded")}</div>
                   ) : (
                     <div style={{ marginTop: 6 }}>
                       {mg.benchmarks.map((row) => (
@@ -182,13 +181,13 @@ export function Benchmarks({ canAdmin }: { canAdmin: boolean }) {
                           <span style={{ fontSize: 10.5, color: "var(--text-mute)", flex: 1 }}>{row.benchmark.notes || "—"}</span>
                           {canAdmin && (
                             <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                              <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => setEditor({ mode: "edit", benchmark: row.benchmark })}>Edit</button>
+                              <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => setEditor({ mode: "edit", benchmark: row.benchmark })}>{t("benchmarks.page.edit")}</button>
                               <ConfirmButton
                                 className="btn"
                                 style={{ fontSize: 11, padding: "4px 8px" }}
                                 pending={remove.isPending}
                                 onConfirm={() => handleDelete(row.benchmark)}
-                                warning={`Delete "${row.benchmark.metric}"?`}
+                                warning={t("benchmarks.page.delete_confirm", { metric: row.benchmark.metric })}
                               />
                             </div>
                           )}
@@ -203,10 +202,9 @@ export function Benchmarks({ canAdmin }: { canAdmin: boolean }) {
 
           {grouped.legacyOffering.length > 0 && (
             <div style={{ marginTop: 18 }}>
-              <div className="eyebrow" style={{ fontSize: 11 }}>Offering-scoped (legacy)</div>
+              <div className="eyebrow" style={{ fontSize: 11 }}>{t("benchmarks.page.legacy_offering_title")}</div>
               <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
-                These predate the config-scoped card fix and never surfaced on any card — re-scope to
-                model, variant, or config via Edit to make one visible, or leave as historical record.
+                {t("benchmarks.page.legacy_offering_hint")}
               </div>
               {grouped.legacyOffering.map((b) => (
                 <div className="qrow" key={b.id} style={{ alignItems: "flex-start" }}>
@@ -217,13 +215,13 @@ export function Benchmarks({ canAdmin }: { canAdmin: boolean }) {
                   </span>
                   {canAdmin && (
                     <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                      <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => setEditor({ mode: "edit", benchmark: b })}>Edit / re-scope</button>
+                      <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => setEditor({ mode: "edit", benchmark: b })}>{t("benchmarks.page.edit_rescope")}</button>
                       <ConfirmButton
                         className="btn"
                         style={{ fontSize: 11, padding: "4px 8px" }}
                         pending={remove.isPending}
                         onConfirm={() => handleDelete(b)}
-                        warning={`Delete "${b.metric}"?`}
+                        warning={t("benchmarks.page.delete_confirm", { metric: b.metric })}
                       />
                     </div>
                   )}
@@ -234,9 +232,9 @@ export function Benchmarks({ canAdmin }: { canAdmin: boolean }) {
 
           {grouped.orphans.length > 0 && (
             <div style={{ marginTop: 18 }}>
-              <div className="eyebrow" style={{ fontSize: 11 }}>Other</div>
+              <div className="eyebrow" style={{ fontSize: 11 }}>{t("benchmarks.page.other_title")}</div>
               <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
-                Points at a subject that no longer exists in the catalog.
+                {t("benchmarks.page.other_hint")}
               </div>
               {grouped.orphans.map((b) => (
                 <div className="qrow" key={b.id} style={{ alignItems: "flex-start" }}>
@@ -250,7 +248,7 @@ export function Benchmarks({ canAdmin }: { canAdmin: boolean }) {
                         style={{ fontSize: 11, padding: "4px 8px" }}
                         pending={remove.isPending}
                         onConfirm={() => handleDelete(b)}
-                        warning={`Delete "${b.metric}"?`}
+                        warning={t("benchmarks.page.delete_confirm", { metric: b.metric })}
                       />
                     </div>
                   )}
@@ -264,7 +262,7 @@ export function Benchmarks({ canAdmin }: { canAdmin: boolean }) {
       {editor && (
         <div className="modal-backdrop" onClick={(e) => { e.stopPropagation(); setEditor(null); clearError(); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>{editor.mode === "edit" ? `Edit "${editor.benchmark.metric}"` : "New benchmark"}</h3>
+            <h3>{editor.mode === "edit" ? t("benchmarks.page.edit_heading", { metric: editor.benchmark.metric }) : t("benchmarks.page.new_heading")}</h3>
             <BenchmarkForm
               key={editor.mode === "edit" ? editor.benchmark.id : "new"}
               existing={editor.mode === "edit" ? editor.benchmark : undefined}

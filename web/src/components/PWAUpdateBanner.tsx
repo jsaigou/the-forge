@@ -1,4 +1,5 @@
 /// <reference types="vite-plugin-pwa/react" />
+import { useTranslation } from "react-i18next";
 import { useRegisterSW } from "virtual:pwa-register/react";
 
 // PWAUpdateBanner — closes a real gap found live 2026-09-14: this app's
@@ -18,6 +19,7 @@ import { useRegisterSW } from "virtual:pwa-register/react";
 // non-blocking "reload now" prompt rather than forcing a reload — an
 // operator mid-edit in a form shouldn't lose it without warning.
 export function PWAUpdateBanner() {
+  const { t } = useTranslation("common");
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
@@ -40,12 +42,12 @@ export function PWAUpdateBanner() {
       }}
     >
       <div style={{ fontSize: 12.5, marginBottom: 10 }}>
-        A new version of this app is ready — reload to pick it up.
+        {t("pwa_update.message")}
       </div>
       <div style={{ display: "flex", gap: 8 }}>
-        <button className="btn" onClick={() => setNeedRefresh(false)}>Later</button>
+        <button className="btn" onClick={() => setNeedRefresh(false)}>{t("pwa_update.later")}</button>
         <button className="go" style={{ flex: 1 }} onClick={() => updateServiceWorker(true)}>
-          Reload now
+          {t("pwa_update.reload_now")}
         </button>
       </div>
     </div>

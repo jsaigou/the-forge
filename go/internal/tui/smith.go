@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jsaigou/the-forge/internal/cli"
+	"github.com/jsaigou/the-forge/internal/i18n"
 )
 
 // smithInputMsg focuses the smith prompt when its tab opens.
@@ -28,7 +29,7 @@ type compressorDataMsg struct{}
 
 func newCompressorPage(c *cli.Client) *compressorPage { return &compressorPage{client: c} }
 
-func (p *compressorPage) Name() string { return "Compressor" }
+func (p *compressorPage) Name() string { return i18n.T("tui.page.compressor") }
 
 func (p *compressorPage) SetSize(w, h int) { p.width = w }
 
@@ -53,20 +54,27 @@ func (p *compressorPage) fetch() tea.Cmd {
 
 func (p *compressorPage) View() string {
 	if p.summary == nil {
-		return dimStyle.Render(" loading…")
+		return dimStyle.Render(i18n.T("tui.loading_indented"))
 	}
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("window %s\n\n", p.summary.Window))
-	b.WriteString(fmt.Sprintf("%-12s %10s %10s %10s %8s %8s %8s\n",
-		"proxy", "tok in", "tok out", "saved", "reqs", "cached", "hit%"))
+	b.WriteString(i18n.T("tui.compressor.window", p.summary.Window))
+	fmt.Fprintf(&b, "%s %s %s %s %s %s %s\n",
+		i18n.PadRight(i18n.T("tui.compressor.col_proxy"), 12),
+		i18n.PadLeft(i18n.T("tui.compressor.col_tok_in"), 10),
+		i18n.PadLeft(i18n.T("tui.compressor.col_tok_out"), 10),
+		i18n.PadLeft(i18n.T("tui.compressor.col_saved"), 10),
+		i18n.PadLeft(i18n.T("tui.compressor.col_reqs"), 8),
+		i18n.PadLeft(i18n.T("tui.compressor.col_cached"), 8),
+		i18n.PadLeft(i18n.T("tui.compressor.col_hit_pct"), 8))
 	for _, px := range p.summary.Proxies {
 		hit := "-"
 		if px.CacheHitRatePct != nil {
 			hit = fmt.Sprintf("%.0f%%", *px.CacheHitRatePct)
 		}
-		fmt.Fprintf(&b, "%-12s %10s %10s %10s %8d %8d %8s\n",
-			px.Proxy, humanBytes(px.TokensIn), humanBytes(px.TokensOut),
-			humanBytes(px.TokensSaved), px.Requests, px.RequestsCached, hit)
+		fmt.Fprintf(&b, "%s %s %s %s %s %s %s\n",
+			i18n.PadRight(px.Proxy, 12), i18n.PadLeft(humanBytes(px.TokensIn), 10), i18n.PadLeft(humanBytes(px.TokensOut), 10),
+			i18n.PadLeft(humanBytes(px.TokensSaved), 10), i18n.PadLeft(fmt.Sprintf("%d", px.Requests), 8),
+			i18n.PadLeft(fmt.Sprintf("%d", px.RequestsCached), 8), i18n.PadLeft(hit, 8))
 	}
 	return b.String()
 }
@@ -85,7 +93,7 @@ type keysDataMsg struct{}
 
 func newKeysPage(c *cli.Client) *keysPage { return &keysPage{client: c} }
 
-func (p *keysPage) Name() string { return "Keys" }
+func (p *keysPage) Name() string { return i18n.T("tui.page.keys") }
 
 func (p *keysPage) SetSize(w, h int) { p.width = w }
 
@@ -110,7 +118,7 @@ func (p *keysPage) Update(msg tea.Msg) tea.Cmd {
 					if err := c.KeyRevoke(kid); err != nil {
 						return errMsg{err}
 					}
-					return infoMsg{"revoked " + kid}
+					return infoMsg{i18n.T("tui.keys.revoked", kid)}
 				}
 			}
 		}
@@ -148,22 +156,22 @@ func (p *keysPage) fetch() tea.Cmd {
 func (p *keysPage) View() string {
 	var b strings.Builder
 	if len(p.keys) == 0 {
-		b.WriteString(dimStyle.Render(" no keys visible (admin role required)") + "\n")
+		b.WriteString(dimStyle.Render(i18n.T("tui.keys.none_visible")) + "\n")
 	} else {
-		b.WriteString(dimStyle.Render(" up/down select · r revoke") + "\n")
+		b.WriteString(dimStyle.Render(i18n.T("tui.keys.help")) + "\n")
 		for i, k := range p.keys {
 			cur := " "
 			if i == p.cursor {
 				cur = ">"
 			}
-			fmt.Fprintf(&b, "%s %-8s %-24s %-9s %s\n",
-				cur, k.Kind, truncate(k.Name, 24), orDashStr(k.Role), keyTime(k.LastUsed))
+			fmt.Fprintf(&b, "%s %s %s %s %s\n",
+				cur, i18n.PadRight(k.Kind, 8), i18n.PadRight(truncate(k.Name, 24), 24), i18n.PadRight(orDashStr(k.Role), 9), keyTime(k.LastUsed))
 		}
 	}
 	if len(p.providers) > 0 {
-		b.WriteString("\nproviders:\n")
+		b.WriteString("\n" + i18n.T("tui.keys.providers_header") + "\n")
 		for _, pr := range p.providers {
-			fmt.Fprintf(&b, "  %-20s %s\n", pr.Name, dimStyle.Render(pr.APIKeyMasked))
+			fmt.Fprintf(&b, "  %s %s\n", i18n.PadRight(pr.Name, 20), dimStyle.Render(pr.APIKeyMasked))
 		}
 	}
 	return b.String()
@@ -178,7 +186,7 @@ func orDashStr(s string) string {
 
 func keyTime(t *float64) string {
 	if t == nil || *t == 0 {
-		return "never used"
+		return i18n.T("tui.keys.never_used")
 	}
 	return time.Unix(int64(*t), 0).Format("01-02 15:04")
 }
@@ -206,7 +214,7 @@ type smithPage struct {
 
 func newSmithPage(c *cli.Client) *smithPage {
 	in := textinput.New()
-	in.Placeholder = "ask smith… (enter to send)"
+	in.Placeholder = i18n.T("tui.smith.placeholder")
 	in.CharLimit = 4000
 	in.Width = 100
 	return &smithPage{client: c, input: in}
@@ -293,13 +301,13 @@ func (p *smithPage) View() string {
 	var b strings.Builder
 	for _, l := range p.transcript {
 		if l.who == "you" {
-			b.WriteString(okStyle.Render("you › ") + l.text + "\n")
+			b.WriteString(okStyle.Render(i18n.T("tui.smith.you_prefix")) + l.text + "\n")
 		} else {
-			b.WriteString(titleStyle.Render("smith › ") + l.text + "\n")
+			b.WriteString(titleStyle.Render(i18n.T("tui.smith.smith_prefix")) + l.text + "\n")
 		}
 	}
 	if p.streaming {
-		b.WriteString(dimStyle.Render("  …thinking") + "\n")
+		b.WriteString(dimStyle.Render(i18n.T("tui.smith.thinking")) + "\n")
 	}
 	b.WriteString("\n" + p.input.View())
 	return b.String()

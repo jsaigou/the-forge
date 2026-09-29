@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { formatCurrency, formatGB } from "../../lib/format";
 import { useCatalogModels, useCatalogOfferings, useConfigCards, useModelCards, useProviders } from "../../lib/queries";
 import { providerIconSlug } from "../../lib/providerPresets";
@@ -46,6 +47,8 @@ export function ModelHeroView({
   onEdit: () => void;
   onEditBenchmarks: () => void;
 }) {
+  const { t } = useTranslation("models");
+  const { t: tc } = useTranslation("common");
   const { canAdmin } = useSession();
   const modelCards = useModelCards("7d");
   const configCards = useConfigCards("7d");
@@ -97,7 +100,7 @@ export function ModelHeroView({
     return (
       <div className="mhero">
         <div className="mhero-scene" ref={sceneRef}>
-          <div className="empty-note">Loading model…</div>
+          <div className="empty-note">{t("hero.loading")}</div>
         </div>
       </div>
     );
@@ -118,9 +121,9 @@ export function ModelHeroView({
   return (
     <div className="mhero">
       {canGoBack && (
-        <button className="icon-btn mhero-backbtn" title="Back" aria-label="Back" onClick={onBack}>←</button>
+        <button className="icon-btn mhero-backbtn" title={tc("detail_modal.back")} aria-label={tc("detail_modal.back")} onClick={onBack}>←</button>
       )}
-      <button className="icon-btn mhero-close" title="Close" aria-label="Close" onClick={onClose}>✕</button>
+      <button className="icon-btn mhero-close" title={tc("detail_modal.close")} aria-label={tc("detail_modal.close")} onClick={onClose}>✕</button>
 
       <div className="mhero-scene" ref={sceneRef} onClick={(e) => e.stopPropagation()}>
         {/* Operator feedback 2026-08-14: tapping the card flips it. Clicks on
@@ -144,56 +147,56 @@ export function ModelHeroView({
               watermarkName={card.creator}
               className="hero"
               nameExtra={
-                <CopyButton text={card.name} title="Copy model name" />
+                <CopyButton text={card.name} title={t("hero.copy_name_title")} />
               }
             >
               {canAdmin && (
                 <div className="mhero-toolbar">
-                  <button className="btn primary sm" onClick={onEdit}>Edit model</button>
-                  <button className="btn sm" onClick={onEditBenchmarks}>Benchmarks</button>
+                  <button className="btn primary sm" onClick={onEdit}>{t("hero.edit_model")}</button>
+                  <button className="btn sm" onClick={onEditBenchmarks}>{t("hero.benchmarks")}</button>
                 </div>
               )}
               <div className="mhero-maker">{makerLine}</div>
               {card.description && <div className="mhero-desc">{card.description}</div>}
               <div className="spec-table">
-                {card.derived.arch && <div className="spec-row"><span className="k">Architecture</span><span className="v">{card.derived.arch}</span></div>}
+                {card.derived.arch && <div className="spec-row"><span className="k">{t("spec.architecture")}</span><span className="v">{card.derived.arch}</span></div>}
                 {card.modalities.length > 0 && (
                   <div className="spec-row">
-                    <span className="k">Modalities</span>
+                    <span className="k">{t("spec.modalities")}</span>
                     <span className="v">{card.modalities.map((m) => m[0].toUpperCase() + m.slice(1)).join(", ")}</span>
                   </div>
                 )}
                 {card.derived.trained_ctx != null && (
-                  <div className="spec-row"><span className="k">Trained context</span><span className="v">{card.derived.trained_ctx.toLocaleString()}</span></div>
+                  <div className="spec-row"><span className="k">{t("spec.trained_context")}</span><span className="v">{card.derived.trained_ctx.toLocaleString()}</span></div>
                 )}
                 {card.derived.file_size_bytes != null && (
-                  <div className="spec-row"><span className="k">File size</span><span className="v">{formatGB(card.derived.file_size_bytes)} GB</span></div>
+                  <div className="spec-row"><span className="k">{t("spec.file_size")}</span><span className="v">{formatGB(card.derived.file_size_bytes)} GB</span></div>
                 )}
                 {card.derived.memory_req_bytes != null && (
-                  <div className="spec-row"><span className="k">Memory</span><span className="v">{formatGB(card.derived.memory_req_bytes)} GB</span></div>
+                  <div className="spec-row"><span className="k">{t("spec.memory")}</span><span className="v">{formatGB(card.derived.memory_req_bytes)} GB</span></div>
                 )}
                 {powerEstPer1m != null && powerEstPer1m > 0 && (
-                  <div className="spec-row"><span className="k">Power est /1M</span><span className="v">~{formatCurrency(powerEstPer1m, displayCurrency)}</span></div>
+                  <div className="spec-row"><span className="k">{t("spec.power_est")}</span><span className="v">~{formatCurrency(powerEstPer1m, displayCurrency)}</span></div>
                 )}
                 {card.derived.reliability && (
                   <div className="spec-row">
-                    <span className="k">Reliability</span>
+                    <span className="k">{t("spec.reliability")}</span>
                     <span className="v">
-                      {card.derived.reliability.loads_ok} ok · {card.derived.reliability.load_failures} failed
-                      {card.derived.reliability.inference_hangs > 0 && ` · ${card.derived.reliability.inference_hangs} hangs`}
+                      {t("spec.reliability_value", { ok: card.derived.reliability.loads_ok, failed: card.derived.reliability.load_failures })}
+                      {card.derived.reliability.inference_hangs > 0 && t("spec.reliability_hangs_suffix", { hangs: card.derived.reliability.inference_hangs })}
                     </span>
                   </div>
                 )}
                 {card.license_name && (
                   <div className="spec-row">
-                    <span className="k">License</span>
+                    <span className="k">{t("spec.license")}</span>
                     <span className="v">
                       {card.license_url ? <a href={card.license_url} target="_blank" rel="noreferrer">{card.license_name}</a> : card.license_name}
                     </span>
                   </div>
                 )}
                 {card.hf_repo && (
-                  <div className="spec-row"><span className="k">HF repo</span><span className="v"><a href={`https://huggingface.co/${card.hf_repo}`} target="_blank" rel="noreferrer">{card.hf_repo}</a></span></div>
+                  <div className="spec-row"><span className="k">{t("spec.hf_repo")}</span><span className="v"><a href={`https://huggingface.co/${card.hf_repo}`} target="_blank" rel="noreferrer">{card.hf_repo}</a></span></div>
                 )}
               </div>
               {card.capabilities.length > 0 && (
@@ -207,7 +210,7 @@ export function ModelHeroView({
                     <span
                       key={pc.provider}
                       className={`mprov-chip${pc.enabled ? "" : " disabled"}`}
-                      title={`${pc.provider}: ${pc.enabled ? "enabled" : "disabled"}`}
+                      title={t("hero.provider_chip_title", { provider: pc.provider, state: pc.enabled ? t("hero.provider_enabled") : t("hero.provider_disabled") })}
                     >
                       <Icon slug={providerIconSlug(pc.provider)} name={pc.provider} sm />
                       <span className="mprov-name">{pc.provider}</span>
@@ -218,14 +221,14 @@ export function ModelHeroView({
               )}
               <div className="mhero-eyebrow-row">
                 <div className="eyebrow" style={{ fontSize: 11 }}>
-                  Configs {modelConfigs.length > 0 ? `(${modelConfigs.length})` : ""}
+                  {t("hero.configs_title")}{modelConfigs.length > 0 ? t("hero.configs_count_suffix", { count: modelConfigs.length }) : ""}
                 </div>
               </div>
               <div className="mhero-configs">
                 {!configCards.data ? (
-                  <div className="empty-note">Loading configs…</div>
+                  <div className="empty-note">{t("hero.loading_configs")}</div>
                 ) : modelConfigs.length === 0 ? (
-                  <div className="empty-note">{modelOfferings.length > 0 ? "Remote-only model — served via offerings." : "No configs for this model yet."}</div>
+                  <div className="empty-note">{modelOfferings.length > 0 ? t("hero.remote_only") : t("hero.no_configs")}</div>
                 ) : (
                   modelConfigs.map((c) => <ConfigRow key={c.id} card={c} status={status} />)
                 )}
@@ -244,7 +247,7 @@ export function ModelHeroView({
             >
               {card.key_features.length > 0 && (
                 <>
-                  <div className="eyebrow" style={{ fontSize: 11 }}>Key features</div>
+                  <div className="eyebrow" style={{ fontSize: 11 }}>{t("hero.key_features")}</div>
                   <ul className="mhero-features">
                     {card.key_features.map((f) => <li key={f}>{f}</li>)}
                   </ul>
@@ -253,20 +256,20 @@ export function ModelHeroView({
               {hist && (
                 <div className="mproviders">
                   {hist.last_result && (
-                    <span className="chip" title="Last load result">{hist.last_result}</span>
+                    <span className="chip" title={t("hero.last_result_title")}>{hist.last_result}</span>
                   )}
                   {hist.avg_load_time_s != null && (
-                    <span className="chip" title="Average load time">{Math.round(hist.avg_load_time_s)}s avg load</span>
+                    <span className="chip" title={t("hero.avg_load_time_title")}>{t("hero.avg_load_time_suffix", { seconds: Math.round(hist.avg_load_time_s) })}</span>
                   )}
                   {hist.ctx_reduction_rate > 0 && (
-                    <span className="chip" title="Context reduction rate">ctx −{(hist.ctx_reduction_rate * 100).toFixed(0)}%</span>
+                    <span className="chip" title={t("hero.ctx_reduction_title")}>{t("hero.ctx_reduction_value", { pct: (hist.ctx_reduction_rate * 100).toFixed(0) })}</span>
                   )}
                 </div>
               )}
               <NotesInline subjectType="model" subjectId={Number(modelId)} />
               {canAdmin && (
                 <>
-                  <div className="eyebrow" style={{ fontSize: 11 }}>Change history</div>
+                  <div className="eyebrow" style={{ fontSize: 11 }}>{t("detail.change_history")}</div>
                   <ChangeHistory actionPrefix="catalog_model_" target={card.id} />
                 </>
               )}
@@ -282,7 +285,7 @@ export function ModelHeroView({
           onClick={() => setFlipped((f) => !f)}
           aria-pressed={flipped}
         >
-          {flipped ? "↩ Flip back to the front" : "↻ Flip for history & notes"}
+          {flipped ? t("hero.flip_to_back") : t("hero.flip_to_history")}
         </button>
       </div>
     </div>

@@ -280,6 +280,10 @@ type VerifyResult struct {
 	Severity string `json:"severity"`
 	Summary  string `json:"summary"`
 	At       int64  `json:"at"`
+	// SummaryKey/Params (multilanguage plan Phase 3) mirror Finding's
+	// fields of the same name — see smith.go's Finding doc comment.
+	SummaryKey string         `json:"summary_key,omitempty"`
+	Params     map[string]any `json:"params,omitempty"`
 }
 
 // ActionDraft is a proposal before it has an ID — the shared input shape for

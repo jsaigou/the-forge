@@ -443,7 +443,8 @@ func toVerifyResults(findings []Finding, now time.Time) []VerifyResult {
 	at := now.Unix()
 	out := make([]VerifyResult, 0, len(findings))
 	for _, f := range findings {
-		out = append(out, VerifyResult{CheckID: f.CheckID, Severity: string(f.Severity), Summary: f.Summary, At: at})
+		out = append(out, VerifyResult{CheckID: f.CheckID, Severity: string(f.Severity), Summary: f.Summary, At: at,
+			SummaryKey: f.SummaryKey, Params: f.Params})
 	}
 	return out
 }

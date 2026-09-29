@@ -1,4 +1,4 @@
-import { formatTokens } from "../../lib/format";
+import { appLocale, formatTokens } from "../../lib/format";
 import type { UsageHeatmapDay } from "../../lib/types";
 
 // Callers (the Dashboard's ALL/Local/External toggle) project down to just
@@ -164,7 +164,7 @@ export function ActivityHeatmap({
             <g key={i} style={{ opacity: layer.opacity, transition: `opacity ${fadeMs}ms ease` }}>
               {cells.map((c) => {
                 const level = levelFor(c.day.tokens, maxTokens);
-                const dateLabel = c.date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+                const dateLabel = c.date.toLocaleDateString(appLocale(), { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
                 return (
                   <rect key={c.day.date} x={c.x} y={c.y} width={CELL} height={CELL} rx={2} fill={colors[level]}>
                     <title>

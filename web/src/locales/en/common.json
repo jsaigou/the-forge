@@ -1,0 +1,526 @@
+{
+  "language": {
+    "label": "Language",
+    "hint": "Stored in this browser only — not synced across devices or other operators.",
+    "toggle_title": "Switch language"
+  },
+  "app": {
+    "loading": "Loading…",
+    "toggle_theme": "Toggle theme",
+    "buy_me_a_coffee": "Buy me a coffee"
+  },
+  "restart_pip": {
+    "title_one": "Restart required — {{count}} setting changed since boot, by {{by}}. Click for detail.",
+    "title_other": "Restart required — {{count}} settings changed since boot, by {{by}}. Click for detail."
+  },
+  "profile_pip": {
+    "title": "Profiling {{mode}} — {{phase}}. Click for detail."
+  },
+  "error_boundary": {
+    "title": "Something went wrong rendering this page",
+    "hint": "The rest of the app is unaffected — you can try again or switch tabs.",
+    "try_again": "Try again"
+  },
+  "pwa_update": {
+    "message": "A new version of this app is ready — reload to pick it up.",
+    "later": "Later",
+    "reload_now": "Reload now"
+  },
+  "step_up": {
+    "title": "Re-authenticate",
+    "hint": "This action requires <b>{{factor}}</b> assurance. Please re-authenticate to continue.",
+    "password": "Password",
+    "totp_code": "TOTP code",
+    "cancel": "Cancel",
+    "verify": "Verify",
+    "verifying": "Verifying…"
+  },
+  "save_button": {
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "create": "Create"
+  },
+  "maintenance": {
+    "enter_title": "Enter maintenance mode",
+    "active_title": "Maintenance mode active — {{reason}}. Click for detail.",
+    "no_reason": "no reason given",
+    "panel_title": "Maintenance mode",
+    "active_hint": "Active — no model may load, unload, switch, or restart until this window ends.",
+    "entered_by": "Entered by {{who}}",
+    "auto_exits": "Auto-exits {{when}}",
+    "end_button": "End maintenance",
+    "end_confirm": "End it now",
+    "end_warning": "Loads/unloads/restarts become possible again immediately.",
+    "inactive_hint": "While active, nothing may load, unload, switch, or restart anywhere on this host — use this before a manual repair that needs a quiet system.",
+    "reason_label": "Reason",
+    "reason_placeholder": "e.g. rebuilding the vulkan binary",
+    "duration_label": "Duration (minutes)",
+    "enter_button": "Enter maintenance mode"
+  },
+  "ask_smith": {
+    "default_title": "Ask smith about this",
+    "label": "ask smith"
+  },
+  "carousel": {
+    "ungrouped": "Other",
+    "noun": {
+      "model": "model",
+      "model_plural": "models",
+      "config": "config",
+      "config_plural": "configs"
+    },
+    "region_label_models": "Model families",
+    "region_label_configs": "Config families",
+    "count_one": "{{count}} {{noun}}",
+    "count_other": "{{count}} {{noun}}s",
+    "tap_to_fan_out": "Tap to fan out",
+    "tap_to_center": "Tap to center",
+    "prev_family": "Previous family",
+    "next_family": "Next family",
+    "go_to_family": "Go to {{family}}",
+    "slide_aria_active": "{{family}}: {{countPhrase}}. Tap to fan out.",
+    "slide_aria_inactive": "{{family}}: {{countPhrase}}. Tap to center.",
+    "fan_stage_aria": "{{family}} {{nounPlural}} — swipe to browse, tap the front card to zoom",
+    "collapse_fan_aria": "Collapse the {{family}} fan",
+    "up_card_suffix": " — up card, tap to zoom",
+    "card_aria": "{{name}}{{suffix}}",
+    "prev_noun": "Previous {{noun}}",
+    "next_noun": "Next {{noun}}",
+    "go_to_card": "Go to {{name}}"
+  },
+  "compressor_chips": {
+    "local_label": "Local · compressor saved ({{window}})",
+    "external_label": "External · compressor saved ({{window}})",
+    "local_title_none": "No cached or compressed local requests this window",
+    "local_title_tokens_dropped": "{{tokens}} tokens dropped by compression",
+    "local_title_tokens_cached": "{{tokens}} tokens not re-prefilled (cache hit, estimated)",
+    "local_title_time_suffix": ", avoided-prefill time estimated against real prefill TPS via {{sources}}",
+    "local_title_no_tps": "No model with cached/compressed requests this window had a real measured prefill TPS — time estimate unavailable",
+    "external_title_none": "No compressed external requests this window",
+    "external_title_priced": "{{tokens}} tokens compressed, priced at each provider's blended input rate in {{currency}}",
+    "external_title_unpriced": "{{tokens}} tokens compressed, but no priced offering to value them against this window",
+    "value_unmeasured": "unmeasured",
+    "value_no_data": "no data",
+    "value_unpriced": "unpriced"
+  },
+  "routing_tree": {
+    "layout_az": "A–Z",
+    "layout_group": "Group",
+    "hold_to_toggle_title": "Hold to enable/disable this provider",
+    "off_chip": "off",
+    "model_fallback_name": "Model #{{id}}",
+    "no_offerings": "No offerings configured — nothing to map yet.",
+    "all_disabled": "All offerings are currently disabled.",
+    "legend_compressing": "compressing",
+    "legend_degraded": "compressing · degraded",
+    "legend_bypassed": "operator bypass",
+    "legend_autobypass": "auto-bypassed (compressor down)",
+    "legend_failing": "failing (compressor + upstream down)",
+    "legend_unreachable": "provider unreachable",
+    "legend_disabled": "disabled",
+    "legend_note": "thicker = higher priority",
+    "legend_note_hold_suffix": " · hold a provider node to enable/disable"
+  },
+  "detail_modal": {
+    "back": "Back",
+    "close": "Close"
+  },
+  "catalog_form": {
+    "offering": {
+      "model_label": "Model *",
+      "select_ellipsis": "— select —",
+      "variant_label": "Variant (optional)",
+      "none_option": "— none —",
+      "provider_label": "Provider *",
+      "wire_model_label": "Wire model *",
+      "wire_model_placeholder": "deepseek-chat",
+      "price_in_label": "Price in / 1M",
+      "price_out_label": "Price out / 1M",
+      "cached_price_in_label": "Cached price in / 1M (optional)",
+      "cached_price_placeholder": "unmodelled — full price applies to cache hits",
+      "peak_pricing_title": "Time-of-day pricing (optional)",
+      "fill_peak_button": "Fill: peak = 2× off-peak",
+      "no_peak_schedule_warning": "{{provider}} has no peak schedule configured (Settings → Providers) — these peak rates will never apply.",
+      "peak_lower_warning": "A peak rate is lower than its off-peak rate — unusual, but the provider's own pricing policy isn't enforced here.",
+      "price_in_peak_label": "Price in / 1M, peak",
+      "price_out_peak_label": "Price out / 1M, peak",
+      "cached_price_peak_label": "Cached price in / 1M, peak",
+      "same_as_off_peak_placeholder": "same as off-peak",
+      "currency_label": "Currency",
+      "context_length_label": "Context length",
+      "priority_label": "Priority",
+      "priority_hint": "When several providers offer this model, the LOWEST value is served via a0 (100 = no preference; ties break by provider name).",
+      "enabled_checkbox": "Enabled (route to this offering)",
+      "data_residency_label": "Data residency: {{country}}",
+      "data_residency_group_suffix": " · group: {{group}}",
+      "cancel": "Cancel"
+    },
+    "icon_picker": {
+      "light_theme_title": "Light theme",
+      "dark_theme_title": "Dark theme",
+      "light_set_to": "Light set to",
+      "light_inherits_from": "Light inherits <1>{{icon}}</1> from {{label}}",
+      "light_inherits_none": "No light icon set — inherits from {{label}}, which has none either",
+      "light_not_set": "No light icon set",
+      "uploaded_image": "(uploaded image)",
+      "dark_set_to": "dark set to",
+      "dark_same_as_light": "dark same as light",
+      "light_tab": "☀ Light",
+      "dark_tab": "☾ Dark",
+      "change_icon": "Change icon",
+      "close": "Close",
+      "editing_mark": "Editing the {{variant}} mark{{suffix}}",
+      "editing_mark_light": "light",
+      "editing_mark_dark": "dark",
+      "editing_mark_same_as_light_suffix": " (currently: same as light)",
+      "clear_dark": "Clear dark (fall back to light)",
+      "clear": "Clear",
+      "clear_inherit_suffix": " (inherit from {{label}})",
+      "upload_label": "or upload {{suffix}} (WebM/JPG/PNG/WebP/SVG, ≤1 MB)",
+      "upload_dark_suffix": "a dark-theme mark"
+    },
+    "load_options": {
+      "raw_mode_hint": "One argv token per line — a flag and its value must each be on their own line (e.g. \"--parallel\" then \"1\" on the next line), not \"--parallel 1\" together. The launcher reads this file with no shell word-splitting.",
+      "back_to_picker": "Back to picker",
+      "add_option_ellipsis": "+ Add option…",
+      "advanced_title": "Advanced",
+      "advanced_hint": "Anything not in the curated list above. Edited as raw flag/value pairs, used verbatim — not validated.",
+      "value_optional_placeholder": "(value, optional)",
+      "flag_placeholder": "--flag",
+      "malformed_hint": "Saved as one malformed argv token (a flag and its value on the same line) — will be split into two well-formed tokens when this config is saved.",
+      "remove_flag_aria": "Remove {{flag}}",
+      "add_custom_flag": "+ Add custom flag",
+      "edit_as_raw_text": "Edit as raw text"
+    }
+  },
+  "confirm_button": {
+    "delete": "Delete",
+    "confirm_question": "Confirm?",
+    "pending": "…"
+  },
+  "benchmark_form": {
+    "benchmark_label": "Benchmark",
+    "custom_ellipsis": "Custom…",
+    "frontier_ceiling": "Frontier ceiling ~{{pct}}% ({{source}}, {{asOf}}) — scores normalize against this.",
+    "custom_no_ceiling": "Custom benchmark name — no cited frontier ceiling, so the card will show the raw score unnormalized.",
+    "metric_label": "Metric *",
+    "value_label": "Value *",
+    "source_label": "Source *",
+    "subject_type_label": "Subject type *",
+    "subject_type_model": "model — capability scores, shown on model + config cards",
+    "subject_type_variant": "variant — performance metrics (decode_tps, prefill_tps, safe_memory_bytes), shown on config cards",
+    "subject_type_config": "config — capability or performance scores specific to this launch recipe, shown on this config's card",
+    "subject_type_offering": "offering — legacy, not selectable for new rows; never shown on a card",
+    "offering_scoped_hint": "Offering-scoped benchmarks predate the config-scoped card fix and never surfaced on any card — re-scope this row to model, variant, or config to make it visible, or leave it as-is to keep the historical record.",
+    "variant_metric_hint": "Known performance metric names: <code>decode_tps</code>, <code>prefill_tps</code> (both tok/s), <code>safe_memory_bytes</code> — type one exactly into Metric below. Unlike the capability preset above, these are raw measurements, not normalized against a ceiling.",
+    "subject_label": "Subject *",
+    "select_placeholder": "— select —",
+    "source_url_label": "Source URL",
+    "source_date_label": "Source date",
+    "benchmark_name_custom": "Benchmark name (custom)",
+    "notes_label": "Notes",
+    "f7_gate": "F7 gate: published benchmarks require both source URL and source date.",
+    "cancel": "Cancel"
+  },
+  "llama_flags": {
+    "--parallel": {
+      "label": "Parallel slots",
+      "why": "Splits the configured context N ways rather than multiplying it — n_ctx 131072 with --parallel 2 gives each request only 65536 usable tokens. Must be 1 for any mode meant to serve one long conversation at its full context; qwen25coder's --parallel 4 is the one deliberate exception (a short fast-worker mode for concurrent short requests). Found live 2026-07-23 on gemma4-e2b/nemotron-nano."
+    },
+    "--ctx-checkpoints": {
+      "label": "Context checkpoints",
+      "why": "Lets the engine restore a saved KV-cache checkpoint instead of reprocessing a whole conversation from scratch. Upstream llama.cpp has open, unresolved hang bugs in this exact code path as of 2026-07 (docs/investigations.md item 9) — most configs on this box use 16, swallow-32b/swallow-8b explicitly use 0 to avoid it."
+    },
+    "--cache-type-k": {
+      "label": "KV cache quant (K)",
+      "why": "Quantizes the attention key cache to shrink its memory footprint at some quality cost. Several configs already run this asymmetric with --cache-type-v (e.g. q4_0/q8_0) — a real, already-shipped tradeoff, not a hazard."
+    },
+    "--cache-type-v": {
+      "label": "KV cache quant (V)",
+      "why": "Quantizes the attention value cache. Paired with --cache-type-k; see that entry."
+    },
+    "--flash-attn": {
+      "label": "Flash attention",
+      "why": "Enables the fused flash-attention kernel — faster and lower-memory attention on supported backends. Safe to leave on; it's on for nearly every config on this box."
+    },
+    "--jinja": {
+      "label": "Jinja chat template",
+      "why": "Uses the model's own Jinja chat template (from the GGUF metadata) instead of llama.cpp's built-in template guesser. Needed for any model whose prompt format the built-in guesser doesn't already know."
+    },
+    "--mmproj": {
+      "label": "Multimodal projector",
+      "why": "Path to the vision/multimodal projector weights, required for any model that accepts image input. Set automatically from the config's linked mmproj artifact, not typed by hand."
+    },
+    "--no-mmap": {
+      "label": "Disable mmap",
+      "why": "Forces the whole weight file to be read into memory up front instead of memory-mapped on demand. Slower to start, but avoids page-fault stalls mid-generation on some filesystem/GPU-driver combinations."
+    },
+    "--threads": {
+      "label": "CPU threads",
+      "why": "CPU thread count for the parts of inference that aren't offloaded to the GPU (tokenization, sampling, any CPU-resident layers). Rarely the bottleneck on this box's GPU-bound modes."
+    },
+    "--swa-full": {
+      "label": "Full sliding-window attention cache",
+      "why": "Keeps the full sliding-window attention cache resident rather than the reduced form — needed by some hybrid/recurrent architectures to reuse cache across turns. Interacts with --ctx-checkpoints; read docs/investigations.md item 9 before changing either on a model that sets this."
+    },
+    "--spec-type": {
+      "label": "Speculative decoding",
+      "why": "Selects the speculative-decoding strategy (e.g. a draft model or MTP head) used to predict several tokens ahead and verify them in a batch — a real throughput win when the draft's acceptance rate is high, and a real slowdown when it isn't."
+    },
+    "--spec-draft-model": {
+      "label": "Draft model",
+      "why": "Path to the smaller draft model used for speculative decoding, hand-typed (there is no catalog-linked draft-model artifact, unlike --mmproj). qwen36-mtp's config sets --spec-type draft-mtp with no draft-model path at all — worth checking if that's intentional before copying it as a template."
+    },
+    "--spec-draft-n-max": {
+      "label": "Max draft tokens",
+      "why": "Upper bound on how many tokens the draft model predicts ahead before the main model verifies them in one batch. Larger values raise the potential speedup but also the cost of a rejected batch."
+    },
+    "--model-draft": {
+      "label": "Draft model",
+      "why": "Short-flag form of the draft-model path (-md), used by this box's draft-dflash configs (laguna-s-21) where --spec-draft-model is used by draft-mtp configs instead — same role, different flag name depending on which speculative-decoding path the config uses. Hand-typed, not catalog-linked — see --spec-draft-model."
+    },
+    "--n-gpu-layers": {
+      "label": "GPU-offloaded layers",
+      "why": "Number of transformer layers placed on the GPU rather than the CPU. 999 (nemotron-puzzle's value) means \"all of them\" — llama.cpp clamps to the model's real layer count. Lowering this trades inference speed for less GPU memory pressure."
+    },
+    "--batch-size": {
+      "label": "Prompt batch size",
+      "why": "Logical batch size for prompt (prefill) processing. Larger values process a prompt faster at the cost of a bigger compute buffer; several configs on this box pair it with --ubatch-size."
+    },
+    "--ubatch-size": {
+      "label": "Physical batch size",
+      "why": "The physical (GPU-kernel) batch size within each logical batch (--batch-size). Must be ≤ --batch-size; tuned alongside it for this hardware's memory/throughput tradeoff."
+    },
+    "--reasoning-budget": {
+      "label": "Reasoning token budget",
+      "why": "Caps how many tokens a reasoning model may spend inside its <think> block before it's forced to produce a final answer. Prevents a model from burning its whole context on internal reasoning and never answering."
+    },
+    "--chat-template-kwargs": {
+      "label": "Chat template kwargs",
+      "why": "Extra JSON kwargs passed into the Jinja chat template — on this box, almost always {\"preserve_thinking\":true|false} (gemma4-mtp-nothink instead uses {\"enable_thinking\":false} — the kwarg name itself is template-dependent). The two lineages disagree: Qwen 3.6 (qwen36/qwen36-mtp) must preserve prior turns' reasoning, but Ornith (Qwen 3.5 lineage) must NOT — froggeric v21.3's default true made Ornith burn its whole budget inside <think> with empty content (see docs/pitfalls.md). Get this backwards and the symptom looks like a reasoning-budget or template bug, not a one-line kwarg."
+    },
+    "--chat-template-file": {
+      "label": "Chat template override",
+      "why": "Replaces the GGUF's embedded chat template with an external file. Ornith needs this because its original embedded template unconditionally re-injects every prior turn's <think> block (a real broken-template bug, not the reprocessing issue tracked in docs/investigations.md item 9) — see docs/pitfalls.md."
+    },
+    "--repeat-penalty": {
+      "label": "Repeat penalty",
+      "why": "Penalizes tokens the model has already generated recently. llama-server's default (1.0) is effectively off, which lets reasoning-heavy MoE models degenerate into text-repetition loops — a sampling issue, not a template one. Ornith sets 1.08 to fix a real incident (docs/pitfalls.md)."
+    },
+    "--dry-multiplier": {
+      "label": "DRY sampler strength",
+      "why": "Strength of the DRY (Don't Repeat Yourself) repetition-breaking sampler, off by default (0.0). Paired with --repeat-penalty on Ornith to fix a real live text-repetition-loop incident (docs/pitfalls.md) — removing it on a model that needs it brings the loop back."
+    },
+    "--temp": {
+      "label": "Sampling temperature",
+      "why": "Standard sampling temperature. Called out here only because it's part of the same curated sampler fix as --repeat-penalty/--dry-multiplier on Ornith (0.7) — changing it in isolation can reintroduce the repetition-loop symptom that fix addressed."
+    }
+  },
+  "vllm_flags": {
+    "--trust-remote-code": {
+      "label": "Trust remote code",
+      "why": "Allows vLLM to execute custom modeling code shipped in the model repo rather than only vLLM's built-in architectures. Required for models vLLM doesn't natively recognize."
+    },
+    "--dtype": {
+      "label": "Weight dtype",
+      "why": "The compute/storage dtype vLLM loads weights as (e.g. bfloat16). Distinct from a GGUF quantization scheme — vLLM configs on this box run unquantized bf16 weights."
+    },
+    "--tensor-parallel-size": {
+      "label": "Tensor-parallel size",
+      "why": "Number of GPUs to shard each layer's weights across. 1 on this box (single-GPU Strix Halo) — only meaningful if this host ever gains a second GPU."
+    },
+    "--gpu-memory-utilization": {
+      "label": "GPU memory utilization",
+      "why": "Fraction of GPU memory vLLM is allowed to reserve for weights + KV cache (0.98 = nearly all of it). Lowering this leaves compressor for other processes but shrinks the usable KV cache."
+    }
+  },
+  "hazards": {
+    "parallel": "Context is split, not multiplied: n_ctx {{nCtx}} with {{flag}} {{n}} gives each request only {{perSlot}} usable tokens. Verify this is intentional (a deliberate concurrent-short-request tradeoff) rather than a leftover default.",
+    "ctx_checkpoints": "Open upstream llama.cpp hang bugs exist in this exact code path (docs/investigations.md item 9). Verify this is intentional before relying on it for a long-running conversation."
+  },
+  "provider_presets": {
+    "data_residency_groups": {
+      "China": "China",
+      "Japan": "Japan",
+      "United States": "United States",
+      "European Union": "European Union",
+      "Southeast Asia": "Southeast Asia",
+      "Azure region (operator-selected)": "Azure region (operator-selected)"
+    },
+    "notes": {
+      "aiand": "No balance-query API exists (confirmed against AI&'s own docs) — credits are purchased via a Stripe web checkout only. The Analytics API surfaces real period spend instead. Japan-based provider; this account bills in JPY.",
+      "openrouter": "No Statuspage feed found (status.openrouter.ai has no /api/v2/summary.json) — health falls back to a live probe of the target URL.",
+      "openai": "No usable balance API: the legacy credit_grants endpoint is deprecated and the org-costs endpoint needs an Admin API key, not this stored inference key.",
+      "anthropic": "No usable balance API: the cost/usage report lives behind the beta Admin API, not this stored inference key.",
+      "google": "Google Cloud's status feed isn't a Statuspage summary.json — health falls back to a live probe. No per-key balance API.",
+      "microsoft": "Azure OpenAI has no single base URL — replace <resource> with your own resource name before saving. No per-key balance API; cost tracking lives in Azure Cost Management.",
+      "moonshot": "No documented per-key balance API. The .ai endpoint bills in USD; swap to api.moonshot.cn (CNY billing) if routing through the China-region product instead.",
+      "fireworks": "No documented per-key balance API.",
+      "mistral": "No documented per-key balance API.",
+      "qwen": "Alibaba Cloud Model-as-a-Service (compatible-mode OpenAI API), Singapore region. Models: qwen3.8-max, qwen3.7-plus, qwen3.6-flash, glm-5.2. No documented per-key balance API."
+    }
+  },
+  "action_card": {
+    "risk_chip": {
+      "info": "info risk",
+      "low": "low risk",
+      "high": "high risk"
+    },
+    "status_chip": {
+      "pending": "pending",
+      "approved": "approved",
+      "executing": "executing",
+      "done": "done",
+      "done_unverified": "done unverified",
+      "failed": "failed",
+      "rejected": "rejected",
+      "superseded": "superseded"
+    },
+    "self_evicting_chip": "self-evicting",
+    "suggestion_notice": "nothing is broken — this is a suggestion, not a failing check.",
+    "executing_notice": "Executing… (updates live via SSE)",
+    "approve": "Approve",
+    "reject": "Reject",
+    "dismiss": "Dismiss",
+    "dismiss_confirm": "Dismiss?",
+    "reject_confirm": "Reject?",
+    "reject_warning": "This proposal will be marked rejected.",
+    "delete_confirm": "Delete these files?",
+    "delete_warning": "This will permanently delete every file listed above. This cannot be undone.",
+    "check_now": {
+      "self_review_close": "confirm resolved",
+      "with_investigation": "check now",
+      "with_check_id": "check {{id}} now",
+      "none": "nothing to check"
+    },
+    "recheck": {
+      "with_investigation": "re-check the checks",
+      "with_check_id": "re-check {{id}}",
+      "none": "no check to re-verify"
+    },
+    "no_recheck_done": "no check to re-verify — done",
+    "still_failing": "still failing: {{list}}",
+    "paused_for_review": "Paused for review",
+    "continue": "Continue",
+    "abort": "Abort",
+    "abort_confirm": "Abort this run?",
+    "abort_warning": "The procedure stops here — whatever already ran stays as it is.",
+    "step_running": "step {{n}}…",
+    "result": {
+      "done": "Done",
+      "done_unverified": "Done — unverified",
+      "failed": "Failed"
+    },
+    "why_cant_run": {
+      "requires_reboot": "requires rebooting the host — smith won't trigger that on its own",
+      "policy_defers_to_human": "a deliberate guardrail — smith reports this, but leaves the judgment call to you",
+      "risks_live_workload": "could disrupt something a live slot or service is actively using",
+      "default": "these steps need a human to run them"
+    },
+    "severity": {
+      "ok": "ok",
+      "info": "info",
+      "warn": "warn",
+      "crit": "crit"
+    }
+  },
+  "actions_tray": {
+    "awaiting_approval_title": "smith actions awaiting approval",
+    "label": "smith actions",
+    "pending_count": "{{count}} pending",
+    "loading": "Loading actions…",
+    "empty": "No actions."
+  },
+  "downtime_modal": {
+    "title": "Approve",
+    "loading": "Loading…",
+    "run_description": "This will run <b>{{title}}</b> through smith's procedure engine — approve, post-verify, and (if it hits trouble) checkpoint/rollback, instead of the bare one-shot action.",
+    "estimated_duration_label": "Estimated duration: ",
+    "duration_seconds": "{{sec}}s",
+    "duration_minutes": "{{min}}m",
+    "maintenance_window_warning": "A maintenance window will be held for the whole run — no other load/unload/switch/restart can happen until it finishes.",
+    "daemon_restart_warning": "This procedure restarts the daemon itself partway through — the run resumes automatically afterward.",
+    "affected_slots_label": "Affected slots: ",
+    "affected_services_label": "Affected services: ",
+    "cancel": "Cancel",
+    "run_through_smith": "Run through smith"
+  },
+  "delete_files_card": {
+    "file_count_reclaimable_one": "{{count}} file — {{gb}} GB reclaimable",
+    "file_count_reclaimable_other": "{{count}} files — {{gb}} GB reclaimable",
+    "irreversible_notice": "Deleting is irreversible — the risk is in approving, not in the files being listed here.",
+    "guidance_intro": "Want to keep one of these? ",
+    "guidance_instructions": "Click \"{{keepLabel}}\" on its row below (adds it to a standing exclusion list — this and any future check will skip it), or ",
+    "keep": "Keep",
+    "kept_notice": "kept — reject this proposal & recheck to drop it now",
+    "col_path": "path",
+    "col_folder": "folder",
+    "col_size": "size"
+  },
+  "runbook_card": {
+    "empty": "No runbook steps.",
+    "why_cant_run_prefix": "why smith can't run this: ",
+    "steps_done": "{{done}} of {{total}} done",
+    "copy_all_button": "Copy all",
+    "copy_all_title": "Copy all steps as a shell script",
+    "copy_command_title": "Copy command",
+    "copy_verify_command_title": "Copy verify command",
+    "verify_prefix": "verify: "
+  },
+  "handoff_panel": {
+    "title": "Handoff required — approving this evicts smith's own brain",
+    "brain_slot_label": "brain slot:",
+    "brain_model_label": "brain model:",
+    "state_chip": {
+      "not_required": "not required",
+      "required": "required",
+      "runbook_issued": "runbook issued",
+      "acknowledged": "acknowledged",
+      "remote_swapped": "remote swapped"
+    },
+    "get_runbook_button": "Get handoff runbook",
+    "issuing": "Issuing…",
+    "remote_prompt": "Or hand off to a remote brain for this operation:",
+    "via_prefix": "via ",
+    "unreachable": "(unreachable)",
+    "switch_brain_button": "Switch brain to {{model}}",
+    "switching": "Switching…",
+    "no_candidate_reachable": "No candidate is currently reachable — use the runbook path instead.",
+    "acknowledging": "…",
+    "acknowledge_button": "Acknowledge — I've read this",
+    "resolved_remote": "Brain swapped to a remote candidate",
+    "resolved_ack": "Handoff acknowledged",
+    "by_prefix": " by ",
+    "at_prefix": " at ",
+    "approval_can_proceed": ". Approval can now proceed.",
+    "swap_back_notice": " A swap-back proposal will appear once this operation finishes.",
+    "approving": "Approving…",
+    "cancel_button": "Cancel this action"
+  },
+  "evidence_block": {
+    "summary": "Evidence ({{count}})"
+  },
+  "tool_call_card": {
+    "round_summary": "Round {{round}}: {{names}}",
+    "ok": "ok",
+    "error": "error"
+  },
+  "self_context_chip": {
+    "brain_local": "brain: {{model}} on this box",
+    "brain_remote": "brain: {{model}} · remote",
+    "web_research_on": "web research on",
+    "missed_patterns_summary": "Questions smith had to think about ({{count}})"
+  },
+  "dig_deeper_chip": {
+    "button": "Dig deeper — ask a follow-up"
+  },
+  "sources_list": {
+    "summary": "Sources ({{count}})",
+    "cached_title": "Served from smith's web cache, not a fresh fetch",
+    "cached_chip": "cached"
+  },
+  "markdown": {
+    "copy_code_title": "Copy code"
+  }
+}

@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api, setCsrfToken } from "./api";
+import { currentLang } from "./i18n";
 import type { ConfigWritePayload } from "./configPayload";
 import type {
   APIKeyCreateRequest,
@@ -86,6 +87,7 @@ export const qk = {
   monitorSettings: ["monitor", "settings"] as const,
   metricsSettings: ["metrics", "settings"] as const,
   uiSettings: ["ui", "settings"] as const,
+  serviceLinks: ["service-links"] as const,
   voiceSettings: ["voice", "settings"] as const,
   voiceList: ["voice", "list"] as const,
   dashboardLayout: ["dashboard", "layout"] as const,
@@ -394,6 +396,29 @@ export function useUpdateUiSettings() {
   return useMutation({
     mutationFn: (patch: UISettingsUpdate) => api.updateUiSettings(patch),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.uiSettings }),
+  });
+}
+
+// Service links (Settings → General → Service links, infra.service_links) —
+// operator-set overrides for the Console services strip's ↗ link. Added
+// 2026-09-22 alongside InfraService.url.
+export function useServiceLinks() {
+  return useQuery({
+    queryKey: qk.serviceLinks,
+    queryFn: api.serviceLinks,
+    staleTime: SETTINGS_STALE_MS,
+    select: (d) => d.links,
+  });
+}
+
+export function useUpdateServiceLinks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (links: Record<string, string>) => api.updateServiceLinks(links).then((r) => r.links),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.serviceLinks });
+      qc.invalidateQueries({ queryKey: qk.infraServices });
+    },
   });
 }
 
@@ -1915,7 +1940,10 @@ export function useSmithConversationDelete() {
 export function useSmithChat() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: SmithChatRequest) => api.smithChat(body),
+    // lang rides along on every turn (multilanguage plan Phase 3) — the
+    // server decides whether "ja" actually takes effect yet, so the FE
+    // always sends its real current locale unconditionally.
+    mutationFn: (body: SmithChatRequest) => api.smithChat({ ...body, lang: currentLang() }),
     onSuccess: (resp) => {
       qc.invalidateQueries({ queryKey: qk.smith.conversations });
       qc.invalidateQueries({ queryKey: qk.smith.conversation(resp.conversation_id) });

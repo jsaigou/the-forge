@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useUsageHeatmap } from "../../lib/queries";
 import { ActivityHeatmap, sequentialRamp } from "../charts/ActivityHeatmap";
 import { RangeToggle } from "../RangeToggle";
@@ -6,12 +7,8 @@ import { RangeToggle } from "../RangeToggle";
 // Local/External get their own one-hue ramp (operator-specified base hexes);
 // All keeps ActivityHeatmap's default themed ramp (undefined → component
 // default), left alone per the operator's explicit call.
-const HEATMAP_SCOPES = [
-  { key: "all", label: "All" },
-  { key: "local", label: "Local" },
-  { key: "external", label: "External" },
-] as const;
-type HeatmapScopeKey = (typeof HEATMAP_SCOPES)[number]["key"];
+const HEATMAP_SCOPE_KEYS = ["all", "local", "external"] as const;
+type HeatmapScopeKey = (typeof HEATMAP_SCOPE_KEYS)[number];
 
 const HEATMAP_SCOPE_BASE_HEX: Partial<Record<HeatmapScopeKey, string>> = {
   local: "#3bf4fb",
@@ -38,13 +35,15 @@ const CYCLE_MS = PAUSE_MS + FADE_MS;
 type CycleState = { active: 0 | 1; scopes: [HeatmapScopeKey, HeatmapScopeKey] };
 
 function nextScopeAfter(scope: HeatmapScopeKey): HeatmapScopeKey {
-  const idx = HEATMAP_SCOPES.findIndex((s) => s.key === scope);
-  return HEATMAP_SCOPES[(idx + 1) % HEATMAP_SCOPES.length].key;
+  const idx = HEATMAP_SCOPE_KEYS.indexOf(scope);
+  return HEATMAP_SCOPE_KEYS[(idx + 1) % HEATMAP_SCOPE_KEYS.length];
 }
 
 // Widget "activity-heatmap" (see lib/widgetRegistry.ts). Extracted verbatim
 // from Dashboard's Overview tab, Phase 5 (2026-08-12).
 export function ActivityHeatmapWidget() {
+  const { t } = useTranslation("dashboard");
+  const heatmapScopes = HEATMAP_SCOPE_KEYS.map((key) => ({ key, label: t(`activity_heatmap.scope_${key}`) }));
   const heatmap = useUsageHeatmap("365d");
   const [cycle, setCycle] = useState<CycleState>({ active: 0, scopes: ["all", "all"] });
 
@@ -81,7 +80,7 @@ export function ActivityHeatmapWidget() {
   }
 
   const activeScope = cycle.scopes[cycle.active];
-  const activeScopeLabel = HEATMAP_SCOPES.find((sc) => sc.key === activeScope)!.label;
+  const activeScopeLabel = heatmapScopes.find((sc) => sc.key === activeScope)!.label;
   const hasData = (heatmap.data?.days.length ?? 0) > 0;
   const layers = [0, 1].map((i) => {
     const scope = cycle.scopes[i as 0 | 1];
@@ -95,16 +94,16 @@ export function ActivityHeatmapWidget() {
   return (
     <>
       <div className="eyebrow" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span>Token activity · last year</span>
-        <RangeToggle options={HEATMAP_SCOPES} value={activeScope} onChange={handleManualChange} />
+        <span>{t("activity_heatmap.title")}</span>
+        <RangeToggle options={heatmapScopes} value={activeScope} onChange={handleManualChange} />
       </div>
       <div className="card heatmap-card">
         {heatmap.isLoading ? (
-          <div className="empty-note">Loading activity…</div>
+          <div className="empty-note">{t("activity_heatmap.loading")}</div>
         ) : hasData ? (
-          <ActivityHeatmap layers={layers} stretch fadeMs={FADE_MS} ariaLabel={`Token activity by day, last year — ${activeScopeLabel}`} />
+          <ActivityHeatmap layers={layers} stretch fadeMs={FADE_MS} ariaLabel={t("activity_heatmap.aria_label", { scope: activeScopeLabel })} />
         ) : (
-          <div className="empty-note">No activity data yet.</div>
+          <div className="empty-note">{t("activity_heatmap.none")}</div>
         )}
       </div>
     </>

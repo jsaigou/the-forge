@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { ConfirmButton } from "../ConfirmButton";
 import { apiErrorMessage } from "../../lib/api";
 import { formatBytesPerSec, formatDurationShort, formatGB } from "../../lib/format";
@@ -20,6 +21,7 @@ import type { HFDownload, HFDownloadState } from "../../lib/types";
 // Progress bar reuses Console.tsx's ResourceBar track/fill idiom
 // (.rb-track/.rb-fill) rather than inventing a new one.
 export function HFDownloadTray() {
+  const { t } = useTranslation("models");
   const downloads = useHFDownloads();
   const jobs = downloads.data?.downloads ?? [];
 
@@ -28,7 +30,7 @@ export function HFDownloadTray() {
 
   return (
     <>
-      <div className="eyebrow">Downloads</div>
+      <div className="eyebrow">{t("add_model.downloads_title")}</div>
       <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {jobs.map((job) => (
           <DownloadRow key={job.id} job={job} />
@@ -54,6 +56,7 @@ function stateBadgeClass(state: HFDownloadState): string {
 }
 
 function DownloadRow({ job }: { job: HFDownload }) {
+  const { t } = useTranslation("models");
   const progress = useHFDownloadProgress(job.id);
   const approve = useHFDownloadApprove();
   const pause = useHFDownloadPause();
@@ -82,7 +85,7 @@ function DownloadRow({ job }: { job: HFDownload }) {
       </div>
 
       {job.config_name && (
-        <div style={{ fontSize: 10.5, color: "var(--text-mute)" }}>→ repointing <span style={{ fontFamily: "var(--mono)" }}>{job.config_name}</span></div>
+        <div style={{ fontSize: 10.5, color: "var(--text-mute)" }}>{t("downloads.repointing")}<span style={{ fontFamily: "var(--mono)" }}>{job.config_name}</span></div>
       )}
 
       {(isActive || job.state === "paused") && (
@@ -107,31 +110,31 @@ function DownloadRow({ job }: { job: HFDownload }) {
       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
         {job.state === "pending_approval" && (
           <button type="button" className="btn primary" disabled={busy} onClick={() => approve.mutate(job.id)}>
-            Approve
+            {t("downloads.approve")}
           </button>
         )}
         {isActive && (
           <button type="button" className="btn" disabled={busy} onClick={() => pause.mutate(job.id)}>
-            Pause
+            {t("downloads.pause")}
           </button>
         )}
         {job.state === "paused" && (
           <button type="button" className="btn primary" disabled={busy} onClick={() => resume.mutate(job.id)}>
-            Resume
+            {t("downloads.resume")}
           </button>
         )}
         {!isTerminal && (
           <ConfirmButton
-            label="Cancel"
-            confirmLabel="Cancel it?"
-            warning={isActive || job.state === "paused" ? "Deletes the partially downloaded file." : undefined}
+            label={t("downloads.cancel")}
+            confirmLabel={t("downloads.cancel_confirm")}
+            warning={isActive || job.state === "paused" ? t("downloads.cancel_warning") : undefined}
             pending={cancel.isPending}
             onConfirm={() => cancel.mutate(job.id)}
           />
         )}
         {isTerminal && (
           <button type="button" className="btn" disabled={busy} onClick={() => del.mutate(job.id)}>
-            Dismiss
+            {t("downloads.dismiss")}
           </button>
         )}
       </div>

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { formatGB } from "../../lib/format";
 import { useConfigCards, useSchedulerStatus, useStatus } from "../../lib/queries";
 
@@ -8,22 +9,23 @@ import { useConfigCards, useSchedulerStatus, useStatus } from "../../lib/queries
 // silently folding non-slot consumers into "free" (the operator complaint:
 // ~26 GB of GTT held by an idle ComfyUI read as free).
 
-function friendlyUnit(unit: string): string {
+function friendlyUnit(unit: string, t: (key: string, opts?: Record<string, unknown>) => string): string {
   const known: Record<string, string> = {
-    "ai-mode-comfyui": "ComfyUI",
-    "forge-embedding": "Embedding",
-    "forge-stt": "Speech-to-text",
-    "forge-tts": "TTS",
-    "forge-aligner": "Aligner",
-    forge: "forge",
+    "ai-mode-comfyui": t("memory_meter.unit_comfyui"),
+    "forge-embedding": t("memory_meter.unit_embedding"),
+    "forge-stt": t("memory_meter.unit_stt"),
+    "forge-tts": t("memory_meter.unit_tts"),
+    "forge-aligner": t("memory_meter.unit_aligner"),
+    forge: t("memory_meter.unit_forge"),
   };
   if (known[unit]) return known[unit];
   const compress = unit.match(/^forge-compress@(.+)$/);
-  if (compress) return `Compressor · ${compress[1]}`;
+  if (compress) return t("memory_meter.unit_compressor", { proxy: compress[1] });
   return unit;
 }
 
 export function MemoryMeterWidget() {
+  const { t } = useTranslation("dashboard");
   const status = useStatus();
   const schedulerStatus = useSchedulerStatus();
   const configCards = useConfigCards("7d");
@@ -63,7 +65,7 @@ export function MemoryMeterWidget() {
   // S2 attribution: named non-slot holders, largest first.
   const auxHolders = Object.entries(schedulerStatus.data?.unit_memory_bytes ?? {})
     .filter(([, b]) => b > 0)
-    .map(([unit, bytes]) => ({ unit, name: friendlyUnit(unit), bytes }))
+    .map(([unit, bytes]) => ({ unit, name: friendlyUnit(unit, t), bytes }))
     .sort((a, b) => b.bytes - a.bytes || a.unit.localeCompare(b.unit));
   const auxTotal = auxHolders.reduce((n, h) => n + h.bytes, 0);
 
@@ -97,7 +99,7 @@ export function MemoryMeterWidget() {
     segments.push({ cls: "aux", pct: (h.bytes / totalGtt) * 100, name: h.name, detail: `${formatGB(h.bytes)} GB` });
   }
   if (otherBytes > 0 && totalGtt > 0 && (allBytesKnown || auxHolders.length > 0)) {
-    segments.push({ cls: "other", pct: (otherBytes / totalGtt) * 100, name: "other", detail: null });
+    segments.push({ cls: "other", pct: (otherBytes / totalGtt) * 100, name: t("memory_meter.other"), detail: null });
   }
 
   const committedBytes = allBytesKnown ? slotTotal + otherBytes : usedFloor;
@@ -112,20 +114,20 @@ export function MemoryMeterWidget() {
     const s = loadedSlots[i];
     legend.push({
       color: `var(--${segClasses[i % 4]})`,
-      name: `${s.label} · ${s.mode}${s.measured ? "" : " (~est)"}`,
-      bytes: s.bytes != null ? `${formatGB(s.bytes)} GB` : "unknown",
+      name: `${s.label} · ${s.mode}${s.measured ? "" : t("memory_meter.est_suffix")}`,
+      bytes: s.bytes != null ? `${formatGB(s.bytes)} GB` : t("memory_meter.unknown_bytes"),
     });
   }
   for (const h of auxHolders) {
     legend.push({ color: "var(--m2)", name: h.name, bytes: `${formatGB(h.bytes)} GB` });
   }
   if (otherBytes > 0) {
-    legend.push({ color: "var(--text-mute)", name: "Other (kernel / driver / untracked)", bytes: `${formatGB(otherBytes)} GB` });
+    legend.push({ color: "var(--text-mute)", name: t("memory_meter.other_legend"), bytes: `${formatGB(otherBytes)} GB` });
   }
 
   return (
     <>
-      <div className="eyebrow">Memory usage · {budget ? `${formatGB(budget.total_bytes)} GB unified GTT` : "unified GTT"}</div>
+      <div className="eyebrow">{budget ? t("memory_meter.title_with_total", { total: formatGB(budget.total_bytes) }) : t("memory_meter.title_no_total")}</div>
       <div className="budget">
         {budget ? (
           <div className="meter">
@@ -140,11 +142,11 @@ export function MemoryMeterWidget() {
               );
             })}
             <div className="seg free" style={{ width: `${freePct}%` }}>
-              {freePct >= 10 ? `${formatGB(freeBytes)} GB free` : ""}
+              {freePct >= 10 ? t("memory_meter.free", { amount: formatGB(freeBytes) }) : ""}
             </div>
           </div>
         ) : (
-          <div className="empty-note">Loading memory budget…</div>
+          <div className="empty-note">{t("memory_meter.loading")}</div>
         )}
         {legend.length > 0 && (
           <div className="memlegend">

@@ -45,8 +45,9 @@ type modelAliasBody struct {
 	Reason string `json:"reason"`
 }
 
-func (s *Server) validateModelAlias(ctx context.Context, b modelAliasBody, excludeID int64) map[string]string {
+func (s *Server) validateModelAlias(ctx context.Context, b modelAliasBody, excludeID int64) (map[string]string, map[string]string) {
 	fields := map[string]string{}
+	codes := map[string]string{}
 	cat := s.deps.Catalog
 	if !modeNameRE.MatchString(b.Name) {
 		fields["name"] = "must match " + modeNamePattern
@@ -55,18 +56,21 @@ func (s *Server) validateModelAlias(ctx context.Context, b modelAliasBody, exclu
 	case "", "visible", "hidden":
 	default:
 		fields["visibility"] = "must be visible or hidden"
+		codes["visibility"] = "must_be_one_of"
 	}
 	if cat != nil {
 		if existing, err := cat.ModelAliasByName(ctx, b.Name); err == nil && existing.ID != excludeID {
 			fields["name"] = "already exists"
+			codes["name"] = "already_exists"
 		}
 		if b.ConfigID == 0 {
 			fields["config_id"] = "is required"
+			codes["config_id"] = "required"
 		} else if _, err := cat.GetConfig(ctx, b.ConfigID); err != nil {
 			fields["config_id"] = "does not exist"
 		}
 	}
-	return fields
+	return fields, codes
 }
 
 func (s *Server) handleCatalogModelAliasesList(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +83,7 @@ func (s *Server) handleCatalogModelAliasesList(w http.ResponseWriter, r *http.Re
 	defer cancel()
 	list, err := cat.ListModelAliases(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "model aliases query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "model aliases query failed")
 		return
 	}
 	out := make([]modelAliasJSON, 0, len(list))
@@ -92,12 +96,12 @@ func (s *Server) handleCatalogModelAliasesList(w http.ResponseWriter, r *http.Re
 func (s *Server) handleCatalogModelAliasGet(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -105,7 +109,7 @@ func (s *Server) handleCatalogModelAliasGet(w http.ResponseWriter, r *http.Reque
 	a, err := cat.GetModelAlias(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "model alias not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "model alias"}, "model alias not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -117,7 +121,7 @@ func (s *Server) handleCatalogModelAliasGet(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleCatalogModelAliasCreate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b modelAliasBody
@@ -127,8 +131,8 @@ func (s *Server) handleCatalogModelAliasCreate(w http.ResponseWriter, r *http.Re
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
-	if fields := s.validateModelAlias(ctx, b, 0); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateModelAlias(ctx, b, 0); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	id, err := cat.CreateModelAlias(ctx, store.ModelAlias{
@@ -146,12 +150,12 @@ func (s *Server) handleCatalogModelAliasCreate(w http.ResponseWriter, r *http.Re
 func (s *Server) handleCatalogModelAliasUpdate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	var b modelAliasBody
@@ -161,15 +165,15 @@ func (s *Server) handleCatalogModelAliasUpdate(w http.ResponseWriter, r *http.Re
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
-	if fields := s.validateModelAlias(ctx, b, id); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateModelAlias(ctx, b, id); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	if err := cat.UpdateModelAlias(ctx, store.ModelAlias{
 		ID: id, Name: b.Name, ConfigID: b.ConfigID, RequestDefaults: b.RequestDefaults, Visibility: b.Visibility,
 	}); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "model alias not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "model alias"}, "model alias not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -183,12 +187,12 @@ func (s *Server) handleCatalogModelAliasUpdate(w http.ResponseWriter, r *http.Re
 func (s *Server) handleCatalogModelAliasDelete(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -196,7 +200,7 @@ func (s *Server) handleCatalogModelAliasDelete(w http.ResponseWriter, r *http.Re
 	a, err := cat.GetModelAlias(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "model alias not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "model alias"}, "model alias not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -204,7 +208,7 @@ func (s *Server) handleCatalogModelAliasDelete(w http.ResponseWriter, r *http.Re
 	}
 	if err := cat.DeleteModelAlias(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "model alias not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "model alias"}, "model alias not found")
 			return
 		}
 		writeInternalError(w, err)

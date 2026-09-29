@@ -41,10 +41,14 @@ type virtualModelBody struct {
 	Notes            string `json:"notes"`
 }
 
-func validateVirtualModel(b virtualModelBody) map[string]string {
+// The second return value is codes' i18n Phase 2 companion (field -> stable
+// error code) — see writeValidationErrorCodes' doc comment in httpapi.go.
+func validateVirtualModel(b virtualModelBody) (map[string]string, map[string]string) {
 	fields := map[string]string{}
+	codes := map[string]string{}
 	if b.Name == "" {
 		fields["name"] = "is required"
+		codes["name"] = "required"
 	} else if len(b.Name) > 256 {
 		fields["name"] = "must be ≤256 characters"
 	}
@@ -59,13 +63,15 @@ func validateVirtualModel(b virtualModelBody) map[string]string {
 		}
 	default:
 		fields["kind"] = "must be one of: capability_tier, throughput"
+		codes["kind"] = "must_be_one_of"
 	}
 	switch b.Visibility {
 	case "", "visible", "hidden":
 	default:
 		fields["visibility"] = "must be one of: (empty), visible, hidden"
+		codes["visibility"] = "must_be_one_of"
 	}
-	return fields
+	return fields, codes
 }
 
 func (s *Server) handleCatalogVirtualModelsList(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +84,7 @@ func (s *Server) handleCatalogVirtualModelsList(w http.ResponseWriter, r *http.R
 	defer cancel()
 	list, err := cat.ListVirtualModels(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "virtual models query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "virtual models query failed")
 		return
 	}
 	out := make([]virtualModelJSON, 0, len(list))
@@ -91,12 +97,12 @@ func (s *Server) handleCatalogVirtualModelsList(w http.ResponseWriter, r *http.R
 func (s *Server) handleCatalogVirtualModelGet(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -104,7 +110,7 @@ func (s *Server) handleCatalogVirtualModelGet(w http.ResponseWriter, r *http.Req
 	m, err := cat.GetVirtualModel(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "virtual model not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "virtual model"}, "virtual model not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -116,7 +122,7 @@ func (s *Server) handleCatalogVirtualModelGet(w http.ResponseWriter, r *http.Req
 func (s *Server) handleCatalogVirtualModelCreate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b virtualModelBody
@@ -124,8 +130,8 @@ func (s *Server) handleCatalogVirtualModelCreate(w http.ResponseWriter, r *http.
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := validateVirtualModel(b); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := validateVirtualModel(b); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -147,12 +153,12 @@ func (s *Server) handleCatalogVirtualModelCreate(w http.ResponseWriter, r *http.
 func (s *Server) handleCatalogVirtualModelUpdate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	var b virtualModelBody
@@ -160,8 +166,8 @@ func (s *Server) handleCatalogVirtualModelUpdate(w http.ResponseWriter, r *http.
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := validateVirtualModel(b); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := validateVirtualModel(b); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -171,7 +177,7 @@ func (s *Server) handleCatalogVirtualModelUpdate(w http.ResponseWriter, r *http.
 		Visibility: b.Visibility, Notes: b.Notes,
 	}); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "virtual model not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "virtual model"}, "virtual model not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -186,19 +192,19 @@ func (s *Server) handleCatalogVirtualModelUpdate(w http.ResponseWriter, r *http.
 func (s *Server) handleCatalogVirtualModelDelete(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
 	if err := cat.DeleteVirtualModel(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "virtual model not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "virtual model"}, "virtual model not found")
 			return
 		}
 		writeInternalError(w, err)

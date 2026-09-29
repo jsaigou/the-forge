@@ -43,7 +43,7 @@ func (s *Server) handleCatalogServicesList(w http.ResponseWriter, r *http.Reques
 	defer cancel()
 	list, err := cat.ListServices(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "services query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "services query failed")
 		return
 	}
 	out := make([]serviceJSON, 0, len(list))
@@ -56,12 +56,12 @@ func (s *Server) handleCatalogServicesList(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleCatalogServiceGet(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -69,7 +69,7 @@ func (s *Server) handleCatalogServiceGet(w http.ResponseWriter, r *http.Request)
 	sv, err := cat.GetService(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "service not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "service"}, "service not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -81,7 +81,7 @@ func (s *Server) handleCatalogServiceGet(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleCatalogServiceCreate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b serviceBody
@@ -89,8 +89,8 @@ func (s *Server) handleCatalogServiceCreate(w http.ResponseWriter, r *http.Reque
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateService(r.Context(), b, 0); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateService(r.Context(), b, 0); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -112,12 +112,12 @@ func (s *Server) handleCatalogServiceCreate(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleCatalogServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	var b serviceBody
@@ -125,8 +125,8 @@ func (s *Server) handleCatalogServiceUpdate(w http.ResponseWriter, r *http.Reque
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateService(r.Context(), b, id); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateService(r.Context(), b, id); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -137,7 +137,7 @@ func (s *Server) handleCatalogServiceUpdate(w http.ResponseWriter, r *http.Reque
 	})
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "service not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "service"}, "service not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -152,19 +152,19 @@ func (s *Server) handleCatalogServiceUpdate(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleCatalogServiceDelete(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
 	if err := cat.DeleteService(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "service not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "service"}, "service not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -185,16 +185,20 @@ type serviceBody struct {
 	HealthCheck string `json:"health_check"`
 }
 
-// validateService checks field constraints + name uniqueness.
-func (s *Server) validateService(ctx context.Context, b serviceBody, excludeID int64) map[string]string {
+// validateService checks field constraints + name uniqueness. The second
+// return value is codes' i18n Phase 2 companion (field -> stable error
+// code) — see writeValidationErrorCodes' doc comment in httpapi.go.
+func (s *Server) validateService(ctx context.Context, b serviceBody, excludeID int64) (map[string]string, map[string]string) {
 	fields := map[string]string{}
+	codes := map[string]string{}
 	if !modeNameRE.MatchString(b.Name) {
 		fields["name"] = "must match " + modeNamePattern
 	}
 	if s.deps.Catalog != nil {
 		if existing, err := s.deps.Catalog.ServiceByName(ctx, b.Name); err == nil && existing.ID != excludeID {
 			fields["name"] = "already exists"
+			codes["name"] = "already_exists"
 		}
 	}
-	return fields
+	return fields, codes
 }

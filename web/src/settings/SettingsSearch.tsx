@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useTranslation } from "react-i18next";
+import { fieldLabel } from "./Field";
 import { SETTINGS_INDEX, type SettingRecord } from "./fields";
 import { SETTINGS_SECTIONS, type SectionKey } from "./sections";
 import { SAVE_FLASH_MS, msSinceLastSaveSuccess } from "./useSettingsGroup";
@@ -20,6 +22,11 @@ import { SAVE_FLASH_MS, msSinceLastSaveSuccess } from "./useSettingsGroup";
 
 const MAX_RESULTS = 20;
 
+// English-only, used for matching ONLY (never displayed) — a Japanese
+// operator must still be able to find a setting by its English name, and
+// SETTINGS_INDEX/SETTINGS_SECTIONS themselves stay literal English forever
+// (see fields.ts's own i18n comment). Display uses fieldLabel()/t("sections.*")
+// instead — see the render below.
 const SECTION_LABEL = Object.fromEntries(SETTINGS_SECTIONS.map((s) => [s.key, s.label])) as Record<SectionKey, string>;
 
 // Haystacks precomputed once at module scope — the index is static.
@@ -35,6 +42,7 @@ export function SettingsSearch({
 }: {
   onNavigate: (section: SectionKey, anchor: string | undefined) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const [cursor, setCursor] = useState(0);
@@ -103,8 +111,8 @@ export function SettingsSearch({
       <input
         ref={inputRef}
         type="search"
-        placeholder="Search settings…  ( / )"
-        aria-label="Search settings"
+        placeholder={t("search.placeholder")}
+        aria-label={t("search.aria_label")}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onFocus={() => setFocused(true)}
@@ -121,20 +129,20 @@ export function SettingsSearch({
               className={`search-result ${i === cursor ? "active" : ""}`}
               onClick={() => pick(rec)}
             >
-              <span>{rec.label}</span>
+              <span>{fieldLabel(t, rec)}</span>
               <span className="path">
-                {rec.kind === "field" ? `${SECTION_LABEL[rec.section]} · ${rec.storeKey}` : SECTION_LABEL[rec.section]}
+                {rec.kind === "field" ? `${t(`sections.${rec.section}`)} · ${rec.storeKey}` : t(`sections.${rec.section}`)}
               </span>
             </div>
           ))}
           {matches.length > MAX_RESULTS && (
             <div className="search-result" style={{ cursor: "default", color: "var(--text-mute)" }}>
-              {matches.length - MAX_RESULTS} more — refine the query
+              {t("search.more_results", { count: matches.length - MAX_RESULTS })}
             </div>
           )}
           {results.length === 0 && (
             <div className="search-result" style={{ cursor: "default", color: "var(--text-mute)" }}>
-              No setting matches “{query.trim()}”
+              {t("search.no_matches", { query: query.trim() })}
             </div>
           )}
         </div>

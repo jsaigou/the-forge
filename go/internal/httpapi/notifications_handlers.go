@@ -201,7 +201,7 @@ func (s *Server) handleNotificationsList(w http.ResponseWriter, r *http.Request)
 	includeDismissed := r.URL.Query().Get("include_dismissed") == "1"
 	list, err := s.deps.Notifications.List(r.Context(), includeDismissed)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list notifications")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "failed to list notifications")
 		return
 	}
 	resp := notificationsResponse{Notifications: make([]notificationJSON, len(list))}
@@ -228,16 +228,16 @@ func unixPtrOrNil(t *time.Time) *float64 {
 // handleNotificationAck acknowledges one notification (operator+).
 func (s *Server) handleNotificationAck(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Notifications == nil {
-		writeError(w, http.StatusServiceUnavailable, "notifications not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "notifications"}, "notifications not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid notification id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "notification"}, "invalid notification id")
 		return
 	}
 	if err := s.deps.Notifications.Acknowledge(r.Context(), id, time.Now()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to acknowledge notification")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "failed to acknowledge notification")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
@@ -246,16 +246,16 @@ func (s *Server) handleNotificationAck(w http.ResponseWriter, r *http.Request) {
 // handleNotificationDismiss dismisses one notification (operator+).
 func (s *Server) handleNotificationDismiss(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Notifications == nil {
-		writeError(w, http.StatusServiceUnavailable, "notifications not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "notifications"}, "notifications not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid notification id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "notification"}, "invalid notification id")
 		return
 	}
 	if err := s.deps.Notifications.Dismiss(r.Context(), id, time.Now()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to dismiss notification")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "failed to dismiss notification")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
@@ -265,11 +265,11 @@ func (s *Server) handleNotificationDismiss(w http.ResponseWriter, r *http.Reques
 // (operator+).
 func (s *Server) handleNotificationAckAll(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Notifications == nil {
-		writeError(w, http.StatusServiceUnavailable, "notifications not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "notifications"}, "notifications not wired")
 		return
 	}
 	if err := s.deps.Notifications.AcknowledgeAll(r.Context(), time.Now()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to acknowledge notifications")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "failed to acknowledge notifications")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})

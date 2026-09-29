@@ -36,7 +36,7 @@ func (s *Server) handleSmithInvestigationsList(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list investigations failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "list investigations failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, smithInvestigationsResponse{Count: len(invs), Investigations: invs})
@@ -67,13 +67,13 @@ func (s *Server) handleSmithInvestigationCreate(w http.ResponseWriter, r *http.R
 	}
 	id, err := s.deps.Smith.CreateInvestigation(r.Context(), b.Trigger, b.Summary)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "create investigation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "create investigation failed")
 		return
 	}
 	// Return the full investigation by fetching it from the store.
 	inv, _, err := s.deps.Smith.GetInvestigation(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "fetch created investigation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "fetch created investigation failed")
 		return
 	}
 	s.audit(r, identity(r).Name, "smith_investigation_create", b.Trigger, "")
@@ -95,12 +95,12 @@ func (s *Server) handleSmithInvestigationDetail(w http.ResponseWriter, r *http.R
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid investigation id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "investigation"}, "invalid investigation id")
 		return
 	}
 	inv, findings, err := s.deps.Smith.GetInvestigation(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "investigation not found")
+		writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "investigation"}, "investigation not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, smithInvestigationDetailResponse{
@@ -133,7 +133,7 @@ func (s *Server) handleSmithInvestigationChecks(w http.ResponseWriter, r *http.R
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid investigation id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "investigation"}, "invalid investigation id")
 		return
 	}
 	var b smithInvestigationChecksBody
@@ -146,13 +146,13 @@ func (s *Server) handleSmithInvestigationChecks(w http.ResponseWriter, r *http.R
 		scope = smith.ScopeQuick // a bare POST runs the quick sweep
 	}
 	if len(b.CheckIDs) == 0 && scope != smith.ScopeQuick && scope != smith.ScopeDeep {
-		writeValidationError(w, map[string]string{"scope": "must be one of quick, deep (or provide check_ids)"})
+		writeValidationErrorCodes(w, map[string]string{"scope": "must be one of quick, deep (or provide check_ids)"}, map[string]string{"scope": "must_be_one_of"})
 		return
 	}
 
 	findings, err := s.deps.Smith.RunChecksIntoInvestigation(r.Context(), id, b.CheckIDs, scope, smith.SweepManual)
 	if err == smith.ErrAlreadyRunning {
-		writeError(w, http.StatusConflict, "a smith sweep is already in progress")
+		writeErrorCode(w, http.StatusConflict, "already_in_progress", nil, "a smith sweep is already in progress")
 		return
 	}
 	if err != nil {
@@ -182,7 +182,7 @@ func (s *Server) handleSmithInvestigationResolve(w http.ResponseWriter, r *http.
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid investigation id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "investigation"}, "invalid investigation id")
 		return
 	}
 	var b smithInvestigationResolveBody
@@ -191,19 +191,19 @@ func (s *Server) handleSmithInvestigationResolve(w http.ResponseWriter, r *http.
 		return
 	}
 	if b.Status != "resolved" && b.Status != "dismissed" {
-		writeValidationError(w, map[string]string{"status": "must be resolved or dismissed"})
+		writeValidationErrorCodes(w, map[string]string{"status": "must be resolved or dismissed"}, map[string]string{"status": "must_be_one_of"})
 		return
 	}
 
 	if err := s.deps.Smith.ResolveInvestigation(r.Context(), id, b.Status); err != nil {
-		writeError(w, http.StatusInternalServerError, "resolve investigation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "resolve investigation failed")
 		return
 	}
 
 	// Return the updated investigation.
 	inv, _, err := s.deps.Smith.GetInvestigation(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "investigation not found")
+		writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "investigation"}, "investigation not found")
 		return
 	}
 	s.audit(r, identity(r).Name, "smith_investigation_resolve", b.Status, "")

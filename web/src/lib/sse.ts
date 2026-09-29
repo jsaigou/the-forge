@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import i18next from "i18next";
 import { useEffect } from "react";
 import { qk } from "./queries";
 import type { HFDownloadDeletedEvent, HFDownloadDoneEvent, HFDownloadFailedEvent, HFDownloadProgressEvent, HFDownloadStateChangedEvent, ProfileDoneEvent, ProfileFailedEvent, ProfileProgressEvent, SmithActionUpdateEvent, SmithMessageDoneEvent, SmithProcedureStepEvent, SmithStatusEvent, SmithTierChangedEvent, SmithToolActivityEvent, SmithTokenEvent, Status } from "./types";
@@ -169,8 +170,13 @@ export function useLiveEvents(): void {
     // at all. Same client-only cache-slot pattern as smith:token above.
     source.addEventListener("smith:status", (ev) => {
       try {
-        const { message_id, status } = JSON.parse((ev as MessageEvent).data) as SmithStatusEvent;
-        qc.setQueryData<string>(qk.smith.turnStatus(message_id), status);
+        const { message_id, status, status_key, params } = JSON.parse((ev as MessageEvent).data) as SmithStatusEvent;
+        // status_key (multilanguage plan Phase 3) is additive — same
+        // exists()-gated translate-with-English-fallback pattern as
+        // apiErrorMessage (lib/api.ts), so a key with no catalog entry yet
+        // degrades to the raw (always-English) status text.
+        const text = status_key && i18next.exists(`smith:${status_key}`) ? i18next.t(`smith:${status_key}`, params ?? {}) : status;
+        qc.setQueryData<string>(qk.smith.turnStatus(message_id), text);
       } catch {
         // malformed payload — cosmetic, the turn proceeds regardless
       }

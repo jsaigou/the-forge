@@ -443,6 +443,11 @@ type infraService struct {
 	// yet.
 	CompressorRSSBytes *int64 `json:"compressor_rss_bytes,omitempty"`
 	CompressorRestarts *int64 `json:"compressor_restarts,omitempty"`
+	// URL is an operator-set override (infra.service_links) for the
+	// Console services strip's ↗ "open in a new window" link, keyed by
+	// Name. nil when unset — the frontend falls back to guessing
+	// `http://<dashboard-host>:<port>`. Added 2026-09-22.
+	URL *string `json:"url"`
 }
 
 // compressorConfigResponse mirrors web/src/lib/types.ts CompressorConfig.

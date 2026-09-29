@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../../lib/api";
 import {
   useCatalogBenchmarks,
@@ -32,9 +33,10 @@ function useErrorState() {
 // to subject_type="model" — the scope card-building actually reads
 // (registry.go's benchesFor union, the Sprint D subject_type-trap fix).
 export function ModelBenchmarksView({ modelId }: { modelId: string }) {
+  const { t } = useTranslation("models");
   const numericModelId = Number(modelId);
   const modelCards = useModelCards("7d");
-  const modelName = modelCards.data?.cards.find((c) => c.id === modelId)?.name ?? `Model #${modelId}`;
+  const modelName = modelCards.data?.cards.find((c) => c.id === modelId)?.name ?? t("benchmarks_view.model_fallback_name", { id: modelId });
 
   const benchmarks = useCatalogBenchmarks("model", numericModelId);
   const models = useCatalogModels();
@@ -68,7 +70,7 @@ export function ModelBenchmarksView({ modelId }: { modelId: string }) {
 
   return (
     <div className="detail-view">
-      <h3 style={{ marginBottom: 2 }}>Capability benchmarks</h3>
+      <h3 style={{ marginBottom: 2 }}>{t("benchmarks_view.title")}</h3>
       <div className="mmaker" style={{ marginBottom: 16 }}>{modelName}</div>
 
       {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
@@ -90,9 +92,9 @@ export function ModelBenchmarksView({ modelId }: { modelId: string }) {
       ) : (
         <>
           {benchmarks.isError ? (
-            <div className="empty-note">Catalog not available (503 — store may not be wired).</div>
+            <div className="empty-note">{t("benchmarks_view.unavailable")}</div>
           ) : list.length === 0 ? (
-            <div className="empty-note">No capability benchmarks recorded for this model yet.</div>
+            <div className="empty-note">{t("benchmarks_view.empty")}</div>
           ) : (
             list.map((b) => (
               <div className="qrow" key={b.id} style={{ alignItems: "flex-start" }}>
@@ -100,23 +102,23 @@ export function ModelBenchmarksView({ modelId }: { modelId: string }) {
                 <span style={{ width: 70, fontFamily: "var(--mono)", fontSize: 12 }}>{b.value}</span>
                 <span style={{ width: 140, fontSize: 11, color: "var(--text-dim)" }}>{b.notes || "—"}</span>
                 <span style={{ fontSize: 10.5, color: "var(--text-mute)", flex: 1, fontFamily: "var(--mono)" }}>
-                  {b.source_url ? <a href={b.source_url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--cool)" }}>{b.source_date || "link"}</a> : b.source_date || "—"}
+                  {b.source_url ? <a href={b.source_url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--cool)" }}>{b.source_date || t("benchmarks_view.link_fallback")}</a> : b.source_date || "—"}
                 </span>
                 <div className="actions" style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                  <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(b.id); clearError(); }}>Edit</button>
+                  <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(b.id); clearError(); }}>{t("benchmarks_view.edit")}</button>
                   <ConfirmButton
                     className="btn"
                     style={{ fontSize: 11, padding: "4px 8px" }}
                     pending={remove.isPending}
                     onConfirm={() => handleDelete(b.id)}
-                    warning={`Delete benchmark "${b.metric}"?`}
+                    warning={t("benchmarks_view.delete_confirm", { metric: b.metric })}
                   />
                 </div>
               </div>
             ))
           )}
           <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); }}>
-            + Add benchmark
+            {t("benchmarks_view.add")}
           </button>
         </>
       )}

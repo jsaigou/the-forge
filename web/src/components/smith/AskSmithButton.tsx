@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useAskSmithAffordance } from "../../lib/queries";
 import type { SmithChatContext } from "../../lib/types";
 import { HammerIcon } from "../icons/HammerIcon";
@@ -17,17 +18,19 @@ import { HammerIcon } from "../icons/HammerIcon";
 // classifier can resolve it — see classifyContextItems in intents.go).
 export function AskSmithButton({
   context,
-  title = "Ask smith about this",
+  title,
 }: {
   context: SmithChatContext[];
   title?: string;
 }) {
+  const { t } = useTranslation("common");
   const askSmith = useAskSmithAffordance();
+  const resolvedTitle = title ?? t("ask_smith.default_title");
   return (
     <button
       className="tab"
-      title={title}
-      aria-label={title}
+      title={resolvedTitle}
+      aria-label={resolvedTitle}
       style={{
         fontSize: 10,
         padding: "2px 7px",
@@ -39,7 +42,7 @@ export function AskSmithButton({
       onClick={() => askSmith(context)}
     >
       <HammerIcon size={12} />
-      ask smith
+      {t("ask_smith.label")}
     </button>
   );
 }

@@ -46,7 +46,7 @@ func (s *Server) handleSmithConversationsList(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list conversations failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "list conversations failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, smithConversationsResponse{Count: len(convs), Conversations: convs})
@@ -68,13 +68,13 @@ func (s *Server) handleSmithConversationCreate(w http.ResponseWriter, r *http.Re
 	}
 	id, err := s.deps.Smith.CreateConversation(r.Context(), b.Title)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "create conversation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "create conversation failed")
 		return
 	}
 	s.audit(r, identity(r).Name, "smith_conversation_create", "", "")
 	conv, _, err := s.deps.Smith.GetConversation(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "fetch created conversation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "fetch created conversation failed")
 		return
 	}
 	writeJSON(w, http.StatusCreated, conv)
@@ -93,12 +93,12 @@ func (s *Server) handleSmithConversationDetail(w http.ResponseWriter, r *http.Re
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid conversation id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "conversation"}, "invalid conversation id")
 		return
 	}
 	conv, msgs, err := s.deps.Smith.GetConversation(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "conversation not found")
+		writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "conversation"}, "conversation not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, smithConversationDetailResponse{Conversation: *conv, Messages: msgs})
@@ -111,11 +111,11 @@ func (s *Server) handleSmithConversationDelete(w http.ResponseWriter, r *http.Re
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid conversation id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "conversation"}, "invalid conversation id")
 		return
 	}
 	if err := s.deps.Smith.DeleteConversation(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "delete conversation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "delete conversation failed")
 		return
 	}
 	s.audit(r, identity(r).Name, "smith_conversation_delete", fmt.Sprintf("%d", id), "")
@@ -131,13 +131,18 @@ func (s *Server) handleSmithConversationDelete(w http.ResponseWriter, r *http.Re
 // operator ticks a box. Context (S3, §3.4) carries attached error context
 // so the server composes the seed message itself (the FE never
 // string-formats evidence). When context is present and text is empty, the
-// server composes the seed user message from the context array.
+// server composes the seed user message from the context array. Lang (Phase
+// 3, docs/adr/0016-localization.md) is the FE's current locale — "en"/"ja",
+// empty treated as "en". It rides through to smith.ChatOptions unvalidated
+// beyond the enum check below; Chat() itself decides whether "ja" actually
+// takes effect (see smith.SettingJapaneseEnabled).
 type smithChatBody struct {
 	ConversationID int64               `json:"conversation_id"`
 	Text           string              `json:"text"`
 	Escalate       bool                `json:"escalate"`
 	Web            bool                `json:"web"`
 	Context        []smith.ChatContext `json:"context,omitempty"`
+	Lang           string              `json:"lang,omitempty"`
 }
 
 type smithChatResponse struct {
@@ -164,10 +169,14 @@ func (s *Server) handleSmithChat(w http.ResponseWriter, r *http.Request) {
 		// no FE ever string-formats evidence. The composed text is a
 		// canonical one-line format quoting the error.
 		if len(b.Context) == 0 {
-			writeValidationError(w, map[string]string{"text": "must not be empty"})
+			writeValidationErrorCodes(w, map[string]string{"text": "must not be empty"}, map[string]string{"text": "must_not_be_empty"})
 			return
 		}
 		b.Text = composeContextSeedMessage(b.Context)
+	}
+	if b.Lang != "" && b.Lang != "en" && b.Lang != "ja" {
+		writeValidationErrorCodes(w, map[string]string{"lang": "must be one of en, ja"}, map[string]string{"lang": "must_be_one_of"})
+		return
 	}
 
 	ctx := r.Context()
@@ -175,13 +184,13 @@ func (s *Server) handleSmithChat(w http.ResponseWriter, r *http.Request) {
 	if convID == 0 {
 		id, err := s.deps.Smith.CreateConversation(ctx, "")
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "create conversation failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "create conversation failed")
 			return
 		}
 		convID = id
 	}
 
-	msgID, err := s.deps.Smith.Chat(ctx, convID, b.Text, smith.ChatOptions{Escalate: b.Escalate, Web: b.Web, Context: b.Context})
+	msgID, err := s.deps.Smith.Chat(ctx, convID, b.Text, smith.ChatOptions{Escalate: b.Escalate, Web: b.Web, Context: b.Context, Lang: b.Lang})
 	if err != nil {
 		writeInternalError(w, fmt.Errorf("chat failed: %w", err))
 		return
@@ -363,7 +372,7 @@ func (s *Server) handleSmithSettingsPut(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings store"}, "settings store not wired")
 		return
 	}
 	var b smithSettingsBody
@@ -450,7 +459,11 @@ func (s *Server) handleSmithSettingsPut(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if len(fieldErrs) > 0 {
-		writeValidationError(w, fieldErrs)
+		codes := map[string]string{}
+		if fieldErrs["tools.mode"] == "must be one of auto|native|fenced|off" {
+			codes["tools.mode"] = "must_be_one_of"
+		}
+		writeValidationErrorCodes(w, fieldErrs, codes)
 		return
 	}
 
@@ -606,7 +619,7 @@ func (s *Server) handleSmithInvestigationAnalyze(w http.ResponseWriter, r *http.
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid investigation id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "investigation"}, "invalid investigation id")
 		return
 	}
 	convID, msgID, err := s.deps.Smith.AnalyzeInvestigation(r.Context(), id)

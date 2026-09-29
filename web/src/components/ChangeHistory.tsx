@@ -1,3 +1,4 @@
+import { appLocale } from "../lib/format";
 import { useAuditLog } from "../lib/queries";
 
 // ChangeHistory (Sprint C) — the read side of audit_log's new "why this
@@ -21,7 +22,7 @@ export function ChangeHistory({ actionPrefix, target }: { actionPrefix: string; 
         <div className="change-entry" key={e.id}>
           <div className="change-meta">
             <span className="who">{e.actor}</span>
-            <span className="when">{new Date(e.ts).toLocaleString()}</span>
+            <span className="when">{new Date(e.ts).toLocaleString(appLocale())}</span>
             <span className="what">{e.action.replace(/^catalog_(config|model)_/, "")}</span>
           </div>
           {e.detail && <div className="change-detail">{e.detail}</div>}

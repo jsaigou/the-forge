@@ -1,0 +1,69 @@
+{
+  "calendar": {
+    "title": "Reservations · 7-day view",
+    "cancel_confirm": "Cancel reservation \"{{label}}\"?",
+    "cancel_title": "Click to cancel",
+    "bay_hold_suffix": "{{slot}} · bay hold",
+    "new_reservation": "+ New reservation"
+  },
+  "scheduled_jobs_title": "Scheduled jobs",
+  "smart_queue": {
+    "title": "Smart queue · MCP",
+    "heading": "Live queue — one scheduler, many consumers",
+    "empty": "Queue is empty.",
+    "note": "Idle bays auto-unload after the configured timeout when a queued request needs the memory. Reservations take precedence over interactive loads."
+  },
+  "settings_title": "Settings",
+  "reservation_modal": {
+    "heading": "New reservation",
+    "label": "Label",
+    "label_placeholder": "nightly eval",
+    "model": "Model",
+    "select_ellipsis": "select…",
+    "start": "Start",
+    "end": "End",
+    "scope": "Scope",
+    "scope_bay": "Bay hold",
+    "scope_whole_box": "Whole box",
+    "scope_comfyui": "ComfyUI",
+    "bay": "Bay",
+    "cancel": "Cancel",
+    "create": "Create",
+    "creating": "Creating…",
+    "validation_error": "Label, model, start, and end are required."
+  },
+  "jobs": {
+    "title": "Scheduled jobs — forced loads at fixed times",
+    "role_required": "Operator role required to view scheduled jobs.",
+    "validation_error": "Name, cron expression, and config are required.",
+    "no_jobs": "No scheduled jobs defined.",
+    "last_next": "last {{last}} · next {{next}}",
+    "toggle_title": "Toggle enabled",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "run_now": "Run now",
+    "run_now_confirm": "Run \"{{name}}\" now?",
+    "delete": "Delete",
+    "delete_confirm": "Delete job \"{{name}}\"?",
+    "new_job_title": "New job",
+    "name": "Name",
+    "name_placeholder": "nightly-batch",
+    "cron": "Cron",
+    "config": "Config",
+    "slot": "Slot",
+    "slot_any": "any (scheduler chooses)",
+    "add_job": "+ Add job",
+    "creating": "Creating…",
+    "cron_help": "5 fields: min hour day-of-month month day-of-week — e.g. \"0 3 * * *\" = daily 03:00, \"*/30 * * * *\" = every half hour, \"0 9-17 * * 1-5\" = hourly 09:00–17:00 weekdays."
+  },
+  "tunables": {
+    "role_required": "Operator role required to view scheduler settings.",
+    "loading": "Loading scheduler settings…",
+    "heading": "Scheduler tunables",
+    "field_idle_unload": "Idle unload (s)",
+    "field_small_job_threshold": "Small-job token threshold",
+    "field_priority_jump_cap": "Priority jump cap",
+    "field_reservation_soon": "Reservation-soon window (min)",
+    "reset": "Reset"
+  }
+}

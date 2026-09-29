@@ -95,19 +95,19 @@ func (s *Server) handleCatalogConfigsList(w http.ResponseWriter, r *http.Request
 	if vid := r.URL.Query().Get("variant_id"); vid != "" {
 		id, err := strconv.ParseInt(vid, 10, 64)
 		if err != nil {
-			writeValidationError(w, map[string]string{"variant_id": "must be an integer"})
+			writeValidationErrorCodes(w, map[string]string{"variant_id": "must be an integer"}, map[string]string{"variant_id": "must_be_integer"})
 			return
 		}
 		list, err = cat.ListConfigsForVariant(ctx, id)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "configs query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "configs query failed")
 			return
 		}
 	} else {
 		var err error
 		list, err = cat.ListConfigs(ctx)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "configs query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "configs query failed")
 			return
 		}
 	}
@@ -121,12 +121,12 @@ func (s *Server) handleCatalogConfigsList(w http.ResponseWriter, r *http.Request
 func (s *Server) handleCatalogConfigGet(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -134,7 +134,7 @@ func (s *Server) handleCatalogConfigGet(w http.ResponseWriter, r *http.Request) 
 	c, err := cat.GetConfig(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "config not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "config"}, "config not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -146,7 +146,7 @@ func (s *Server) handleCatalogConfigGet(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleCatalogConfigCreate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b configBody
@@ -154,8 +154,8 @@ func (s *Server) handleCatalogConfigCreate(w http.ResponseWriter, r *http.Reques
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateConfig(r.Context(), b, 0); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateConfig(r.Context(), b, 0); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -183,12 +183,12 @@ func (s *Server) handleCatalogConfigCreate(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleCatalogConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	var b configBody
@@ -196,8 +196,8 @@ func (s *Server) handleCatalogConfigUpdate(w http.ResponseWriter, r *http.Reques
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateConfig(r.Context(), b, id); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateConfig(r.Context(), b, id); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -214,7 +214,7 @@ func (s *Server) handleCatalogConfigUpdate(w http.ResponseWriter, r *http.Reques
 	})
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "config not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "config"}, "config not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -229,12 +229,12 @@ func (s *Server) handleCatalogConfigUpdate(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleCatalogConfigDelete(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -242,7 +242,7 @@ func (s *Server) handleCatalogConfigDelete(w http.ResponseWriter, r *http.Reques
 	c, err := cat.GetConfig(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "config not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "config"}, "config not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -259,7 +259,7 @@ func (s *Server) handleCatalogConfigDelete(w http.ResponseWriter, r *http.Reques
 	}
 	if err := cat.DeleteConfig(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "config not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "config"}, "config not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -273,7 +273,7 @@ func (s *Server) handleCatalogConfigDelete(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleCatalogConfigValidate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b configBody
@@ -281,8 +281,8 @@ func (s *Server) handleCatalogConfigValidate(w http.ResponseWriter, r *http.Requ
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateConfig(r.Context(), b, 0); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateConfig(r.Context(), b, 0); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"valid": true})
@@ -341,9 +341,19 @@ type configBody struct {
 	Reason string `json:"reason"`
 }
 
-// validateConfig checks field constraints + referential integrity + name uniqueness.
-func (s *Server) validateConfig(ctx context.Context, b configBody, excludeID int64) map[string]string {
+// validateConfig checks field constraints + referential integrity + name
+// uniqueness. The second return value is codes' i18n Phase 2 companion
+// (field -> stable error code). must_be_one_of is deliberately NOT used
+// anywhere in this function for the status/visibility/reasoning_effort_default
+// enum checks below: writeValidationErrorCodes' codes map is field -> single
+// code string with no way to carry a per-field {{allowed}} param, so a
+// must_be_one_of code here would render the frontend's raw, unresolved
+// "This must be one of: {{allowed}}." template — worse than the untouched
+// English text. Those three fields keep their plain English message with no
+// code until a params-carrying mechanism exists for field-level codes.
+func (s *Server) validateConfig(ctx context.Context, b configBody, excludeID int64) (map[string]string, map[string]string) {
 	fields := map[string]string{}
+	codes := map[string]string{}
 	cat := s.deps.Catalog
 
 	if !modeNameRE.MatchString(b.Name) {
@@ -358,16 +368,19 @@ func (s *Server) validateConfig(ctx context.Context, b configBody, excludeID int
 		// Name uniqueness (unless updating the same config).
 		if existing, err := cat.ConfigByName(ctx, b.Name); err == nil && existing.ID != excludeID {
 			fields["name"] = "already exists"
+			codes["name"] = "already_exists"
 		}
 		// Variant existence.
 		if b.VariantID == 0 {
 			fields["variant_id"] = "is required"
+			codes["variant_id"] = "required"
 		} else if _, err := cat.GetVariant(ctx, b.VariantID); err != nil {
 			fields["variant_id"] = "does not exist"
 		}
 		// Weight artifact existence + type check.
 		if b.WeightArtifactID == 0 {
 			fields["weight_artifact_id"] = "is required"
+			codes["weight_artifact_id"] = "required"
 		} else if a, err := cat.GetArtifact(ctx, b.WeightArtifactID); err != nil {
 			fields["weight_artifact_id"] = "does not exist"
 		} else if a.ArtifactType != "weight" {
@@ -376,6 +389,7 @@ func (s *Server) validateConfig(ctx context.Context, b configBody, excludeID int
 		// Engine existence.
 		if b.EngineID == 0 {
 			fields["engine_id"] = "is required"
+			codes["engine_id"] = "required"
 		} else {
 			engines, _ := cat.ListEngines(ctx)
 			found := false
@@ -396,6 +410,7 @@ func (s *Server) validateConfig(ctx context.Context, b configBody, excludeID int
 		// Config must reference a real Build explicitly.
 		if b.BuildID == 0 {
 			fields["build_id"] = "is required"
+			codes["build_id"] = "required"
 		} else {
 			builds, _ := cat.ListBuilds(ctx)
 			found := false
@@ -426,9 +441,11 @@ func (s *Server) validateConfig(ctx context.Context, b configBody, excludeID int
 	}
 	if b.NCtx < 0 {
 		fields["n_ctx"] = "must be ≥ 0"
+		codes["n_ctx"] = "must_be_non_negative_integer"
 	}
 	if b.Parallel < 0 {
 		fields["parallel"] = "must be ≥ 0"
+		codes["parallel"] = "must_be_non_negative_integer"
 	}
 	switch b.Status {
 	case "", "unverified", "verified":
@@ -445,5 +462,5 @@ func (s *Server) validateConfig(ctx context.Context, b configBody, excludeID int
 	default:
 		fields["reasoning_effort_default"] = "must be none, low, medium, or high"
 	}
-	return fields
+	return fields, codes
 }

@@ -225,6 +225,17 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
+/* Found live in the Phase 5 i18n QA pass: Japanese has no spaces, so the
+   browser's default line-breaking treats every character boundary as a
+   valid wrap point — inside a narrow fixed-width container (a sidebar nav
+   item, a status chip) this splits a single word mid-character (e.g.
+   "プロファイリング" wrapping as "プロファイリン" + "グ", "アイドル" as
+   "アイ" + "ドル"), which never happens in English (it only wraps at
+   spaces). :lang(ja) keeps this scoped to the Japanese locale — English
+   text is completely unaffected. Placed early so any later, more specific
+   `word-break: break-word`/`break-all` rule for genuinely free-form text
+   (e.g. .smith-missed-text) still wins via normal cascade order. */
+:lang(ja) { word-break: keep-all; }
 body {
   margin: 0;
   background: var(--stripe-gradient),

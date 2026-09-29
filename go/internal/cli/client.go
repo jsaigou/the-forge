@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jsaigou/the-forge/internal/i18n"
 )
 
 // Client is a minimal typed client for the dashboard API.
@@ -99,13 +101,41 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 		return nil, err
 	}
 	if resp.StatusCode >= 300 {
-		msg := strings.TrimSpace(string(data))
-		if len(msg) > 300 {
-			msg = msg[:300] + "…"
-		}
-		return data, fmt.Errorf("%s %s: HTTP %d: %s", method, path, resp.StatusCode, msg)
+		return data, fmt.Errorf("%s %s: HTTP %d: %s", method, path, resp.StatusCode, apiErrorMessage(data))
 	}
 	return data, nil
+}
+
+// apiErrorMessage renders an API error response body for a human reading
+// the CLI/TUI (Phase 4, multilanguage plan). Prefers a translated
+// "errors.<code>" lookup when the body carries a `code` (writeErrorCode's
+// JSON shape, go/internal/httpapi/httpapi.go) AND the Go i18n catalog has
+// that code (Exists — only a subset of the backend's codes is mirrored
+// here, same posture as web/src/lib/api.ts's apiErrorMessage), falling back
+// to the body's own (always-English) `error` field, and finally to the raw
+// truncated body when it isn't valid JSON at all (a proxy error page, a
+// panic dump, etc.) — never showing an empty message.
+func apiErrorMessage(data []byte) string {
+	var body struct {
+		Error  string         `json:"error"`
+		Code   string         `json:"code"`
+		Params map[string]any `json:"params"`
+	}
+	if err := json.Unmarshal(data, &body); err == nil {
+		if body.Code != "" {
+			if key := "errors." + body.Code; i18n.Exists(key) {
+				return i18n.TParams(key, body.Params)
+			}
+		}
+		if body.Error != "" {
+			return body.Error
+		}
+	}
+	msg := strings.TrimSpace(string(data))
+	if len(msg) > 300 {
+		msg = msg[:300] + "…"
+	}
+	return msg
 }
 
 // GetJSON fetches and decodes into v.

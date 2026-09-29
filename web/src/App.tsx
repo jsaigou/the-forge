@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { MaintenanceBanner } from "./components/MaintenanceBanner";
 import { PWAUpdateBanner } from "./components/PWAUpdateBanner";
+import { type Lang, setLang } from "./lib/i18n";
 import { useProfileProgress, useProfileRunTracker, useStatus } from "./lib/queries";
 import { useLiveEvents } from "./lib/sse";
 import { useSession } from "./lib/session";
@@ -24,14 +26,16 @@ const Help = lazy(() => import("./pages/Help").then((m) => ({ default: m.Help })
 // Attributions only — it stays routable (isTabKey/parseHash/#attributions
 // deep links keep working unchanged) but is excluded from the pill row
 // below and rendered as a footer link instead, per operator feedback.
+// Labels come from the "nav" translation namespace (tabs.<key>), not from
+// this table — see App()'s tNav.
 const TABS = [
-  { key: "console", label: "Console", Component: Console },
-  { key: "dashboard", label: "Dashboard", Component: Dashboard },
-  { key: "models", label: "Models", Component: Models },
-  { key: "scheduling", label: "Scheduling", Component: Scheduling },
-  { key: "settings", label: "Settings", Component: Settings },
-  { key: "help", label: "Help", Component: Help },
-  { key: "attributions", label: "Attributions", Component: Attributions },
+  { key: "console", Component: Console },
+  { key: "dashboard", Component: Dashboard },
+  { key: "models", Component: Models },
+  { key: "scheduling", Component: Scheduling },
+  { key: "settings", Component: Settings },
+  { key: "help", Component: Help },
+  { key: "attributions", Component: Attributions },
 ] as const;
 
 const NAV_TABS = TABS.filter((t) => t.key !== "attributions");
@@ -223,6 +227,9 @@ export function App() {
   const { tab, sub, setTab, setSub } = useTabRouter();
   const { username, role } = useSession();
   const toggleTheme = useThemeToggle();
+  const { t, i18n } = useTranslation("common");
+  const { t: tNav } = useTranslation("nav");
+  const lang = (i18n.language === "ja" ? "ja" : "en") as Lang;
   useLiveEvents();
   useProfileRunTracker(); // single global poll+finalize driver — see queries.ts
   const profileProgress = useProfileProgress();
@@ -250,7 +257,7 @@ export function App() {
         {restartRequired && (
           <button
             className="icon-btn"
-            title={`Restart required — ${restartRequired.keys.length} setting(s) changed since boot, by ${restartRequired.by}. Click for detail.`}
+            title={t("restart_pip.title", { count: restartRequired.keys.length, by: restartRequired.by })}
             onClick={() => setTab("settings", "general")}
             style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 0, marginRight: 6 }}
           >
@@ -271,7 +278,7 @@ export function App() {
         {profileProgress?.running && (
           <button
             className="icon-btn"
-            title={`Profiling ${profileProgress.mode ?? ""} — ${profileProgress.phase}. Click for detail.`}
+            title={t("profile_pip.title", { mode: profileProgress.mode ?? "", phase: profileProgress.phase })}
             onClick={() => setTab("settings", "benchmarks")}
             style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 0, marginRight: 10 }}
           >
@@ -286,17 +293,28 @@ export function App() {
           </button>
         )}
         <nav className="tabs">
-          {NAV_TABS.map((t) => (
-            <button key={t.key} className={`tab ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)}>
-              {t.label}
+          {NAV_TABS.map((navTab) => (
+            <button key={navTab.key} className={`tab ${tab === navTab.key ? "active" : ""}`} onClick={() => setTab(navTab.key)}>
+              {tNav(`tabs.${navTab.key}`)}
             </button>
           ))}
         </nav>
         <span className="username" title={`role: ${role}`}>{username}</span>
-        <button className="icon-btn" title="Toggle theme" onClick={toggleTheme}>◐</button>
+        {/* Fixed 34×34 .icon-btn square (theme.css) — "日本語" wraps and clips
+            inside it at this font-size, so both directions use a 2-letter
+            code rather than the target language's native name (live browser
+            check, i18n Phase 0). */}
+        <button
+          className="icon-btn"
+          title={t("language.toggle_title")}
+          onClick={() => setLang(lang === "ja" ? "en" : "ja")}
+        >
+          {lang === "ja" ? "EN" : "JA"}
+        </button>
+        <button className="icon-btn" title={t("app.toggle_theme")} onClick={toggleTheme}>◐</button>
       </div>
       <ErrorBoundary>
-        <Suspense fallback={<div className="empty-note">Loading…</div>}>
+        <Suspense fallback={<div className="empty-note">{t("app.loading")}</div>}>
           {tab === "settings" ? <Settings sub={sub} onSubChange={setSub} /> : tab === "help" ? <Help sub={sub} onSubChange={setSub} /> : <Active />}
         </Suspense>
       </ErrorBoundary>
@@ -306,16 +324,16 @@ export function App() {
       <OnboardingTour />
       <div className="foot">
         <span><b>{role}</b> · {username}</span>
-        <a href="#attributions" className={tab === "attributions" ? "active" : undefined}>Attributions</a>
+        <a href="#attributions" className={tab === "attributions" ? "active" : undefined}>{tNav("tabs.attributions")}</a>
         <a
           className="bmc"
           href="https://www.buymeacoffee.com/jsaigou"
           target="_blank"
           rel="noreferrer noopener"
-          aria-label="Buy me a coffee"
+          aria-label={t("app.buy_me_a_coffee")}
         >
           <span className="bmc-emoji">☕</span>
-          <span>Buy me a coffee</span>
+          <span>{t("app.buy_me_a_coffee")}</span>
         </a>
       </div>
     </div>

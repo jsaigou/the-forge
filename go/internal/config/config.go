@@ -30,6 +30,18 @@ type Config struct {
 	Slots        map[string]Slot
 	Ports        map[string]int // auxiliary services: embedding, stt, ...
 	ServiceIcons map[string]string
+	// ServiceLinks overrides the Console services strip's ↗ "open in a new
+	// window" link (web/src/components/ServicesBar.tsx's ServiceChip) for a
+	// service by its display Name. Empty/absent by default — the frontend
+	// falls back to guessing `http://<dashboard-host>:<port>`, which is
+	// wrong for any service reachable only through its own dedicated
+	// Tailscale Serve HTTPS hostname (e.g. ComfyUI at
+	// comfy-forge.example.ts.net, distinct from the dashboard's own
+	// ops.example.ts.net). Store-backed (infra.service_links) and
+	// SIGHUP-reloadable, same pattern as ServiceIcons above. Operator
+	// feedback 2026-09-22: the ComfyUI link was wrong and there was no way
+	// to fix it without a source edit.
+	ServiceLinks map[string]string
 	Modes        map[string]Mode
 	Scheduler    SchedulerDefault
 	Monitor      Monitor
@@ -373,6 +385,7 @@ func LoadFromStore(ctx context.Context, st store.Store) (*Config, error) {
 		"infra.paths":         &cfg.Paths,
 		"infra.ports":         &cfg.Ports,
 		"infra.service_icons": &cfg.ServiceIcons,
+		"infra.service_links": &cfg.ServiceLinks,
 		"infra.scheduler":     &cfg.Scheduler,
 		"infra.monitor":       &cfg.Monitor,
 		"infra.tailscale":     &cfg.Tailscale,
@@ -487,6 +500,9 @@ func (c *Config) applyDefaults() {
 		if _, ok := c.ServiceIcons[name]; !ok {
 			c.ServiceIcons[name] = icon
 		}
+	}
+	if c.ServiceLinks == nil {
+		c.ServiceLinks = map[string]string{}
 	}
 	for name, svc := range c.allServices() {
 		if svc.Backend == "" {

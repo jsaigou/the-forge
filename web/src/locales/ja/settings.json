@@ -1,0 +1,1273 @@
+{
+  "shell": {
+    "sections_aria": "設定セクション"
+  },
+  "sections": {
+    "general": "一般",
+    "providers": "プロバイダー",
+    "billing": "請求",
+    "routing": "ルーティングと圧縮",
+    "scheduling": "スケジューリング",
+    "monitoring": "モニタリング",
+    "smith": "smith",
+    "voice": "音声",
+    "catalog": "カタログ",
+    "benchmarks": "ベンチマークとプロファイリング",
+    "security": "セキュリティ",
+    "danger": "危険ゾーン"
+  },
+  "groups": {
+    "general": "一般",
+    "money": "料金",
+    "traffic": "トラフィック",
+    "workload": "ワークロード",
+    "catalog": "カタログ",
+    "access": "アクセス",
+    "danger": "危険"
+  },
+  "search": {
+    "placeholder": "設定を検索…  ( / )",
+    "aria_label": "設定を検索",
+    "more_results": "他 {{count}} 件 — 検索語を絞り込んでください",
+    "no_matches": "「{{query}}」に一致する設定はありません"
+  },
+  "shared": {
+    "role_required": "{{resource}}の設定を表示するには運用者権限が必要です。",
+    "loading": "{{resource}}の設定を読み込み中…",
+    "reset": "リセット"
+  },
+  "general": {
+    "restart_banner": {
+      "title": "再起動が必要です",
+      "body_other": "<b>{{by}}</b>が起動時から{{when}}までの間に、{{count}}件の再起動が必要な設定を変更しました: {{keys}}。",
+      "apply_prefix": "この設定は該当セクションが公開され次第、設定 → 危険ゾーンから適用するか、手動で以下を実行してください"
+    },
+    "daemon": {
+      "title": "デーモン",
+      "version": "バージョン",
+      "hostname": "ホスト名",
+      "dashboard_listen": "ダッシュボードリッスン",
+      "a0_listen": "a0ルーターリッスン",
+      "mcp_listen": "MCPリッスン",
+      "readonly_note": "透明性のためここでは読み取り専用です — 同じフィールドは危険ゾーンで、アーム+ステップアップ+事前確認を経て編集できます。"
+    },
+    "service_links": {
+      "title": "サービスリンク",
+      "description_before": "コンソールの各サービスチップの↗リンクはデフォルトで",
+      "description_after": "と推測されます。独自のホスト名でのみアクセス可能なサービス(例: 独自のTailscale Serveエンドポイントで提供されるもの)については、ここで上書き設定してください — 空欄のままにするとデフォルトの推測値が使われます。",
+      "role_required": "サービスリンクを表示するには運用者権限が必要です。",
+      "loading": "読み込み中…",
+      "no_services": "まだサービスが報告されていません。",
+      "placeholder": "https://…"
+    }
+  },
+  "monitoring": {
+    "monitor_title": "モニター",
+    "monitor_resource": "モニター",
+    "metrics_title": "メトリクス",
+    "metrics_resource": "メトリクス"
+  },
+  "billing": {
+    "currency_title": "通貨",
+    "resource_billing": "請求",
+    "display_currency_label": "表示通貨(ISO 4217)",
+    "fx_source_label": "為替レート取得元URL(任意)",
+    "fx_refresh_label": "為替更新間隔(分、任意)",
+    "cost_title": "コストと電力",
+    "resource_cost": "コスト",
+    "electricity_rate_label": "電気料金(kWhあたり)",
+    "rate_currency_label": "料金通貨(ISO 4217)",
+    "use_locale_title": "ブラウザのロケールから設定",
+    "use_locale_button": "{{code}} を使用",
+    "overhead_label": "システムその他のオーバーヘッド(W)",
+    "overhead_title": "実測パッケージ電力に加算した後、PSU効率で割って壁面電力を算出します。",
+    "psu_label": "PSU効率(0–1]",
+    "psu_title": "壁面電力 = (パッケージ電力 + オーバーヘッド) ÷ PSU効率。プラグ式電力計で検証するまでは未校正の推定値です。",
+    "ceiling_label": "概要画面の電力チャート上限(W、パッケージ最大消費電力)",
+    "ceiling_title": "概要画面の電力チャート/タイルを実際のハードウェア上限に合わせてスケーリングするだけで、コスト計算には使用されません。",
+    "power_kw_label": "モデルカードごとの定数(kW、仮定値)",
+    "power_kw_title": "「このモデル単体をフル稼働させた場合」という仮定のレートで、モデル/コンフィグカードの電力見積もりにのみ使用され、実測エネルギー値には反映されません。"
+  },
+  "voice": {
+    "speech_services_title": "音声サービス",
+    "loading_status": "サービス状態を読み込み中…",
+    "service_stt": "STT",
+    "service_embedding": "Embedding",
+    "service_aligner": "アライナー",
+    "status_active": "稼働中",
+    "status_stopped": "停止中",
+    "status_not_configured": "未設定",
+    "stop": "停止",
+    "start": "開始",
+    "hide_details": "詳細を隠す ▴",
+    "show_details": "詳細 ▾",
+    "engines_title": "音声エンジン",
+    "list_all_voices": "すべての音声を表示",
+    "engine_kokoro": "Kokoro(高速ティア)",
+    "engine_customvoice": "カスタム音声",
+    "engine_voicedesign": "音声デザイン",
+    "engine_base": "ベース / クローン",
+    "resource_voice_engine": "音声エンジン"
+  },
+  "voice_list_modal": {
+    "title": "エンジン別の音声一覧",
+    "loading": "音声を読み込み中…",
+    "error": "forge-ttsの音声レジストリに接続できませんでした。",
+    "no_voices": "このエンジンに登録された音声はありません。",
+    "builtin": "組み込み",
+    "close": "閉じる"
+  },
+  "scheduling": {
+    "live_tunables_title": "ライブ調整値",
+    "seed_title": "起動時デフォルト",
+    "seed_role_required": "スケジューラーの起動時デフォルトを表示するには運用者権限が必要です。",
+    "seed_description": "これらは、<b>scheduler.config</b>(上記の調整値)が起動時に一度も設定されていない場合にのみ、スケジューラーがフォールバックするデフォルト値です。この設定を変更しても、稼働中のデーモンには影響しません。"
+  },
+  "danger": {
+    "ports_editor": {
+      "name_col": "補助ポート名",
+      "port_col": "ポート",
+      "remove": "削除",
+      "add": "追加",
+      "name_placeholder": "名前",
+      "port_placeholder": "ポート",
+      "no_ports": "補助ポートは設定されていません。"
+    },
+    "system_title": "システム",
+    "system_blurb": "起動時に必須の設定です: リッスンアドレス、パス、ポート、Tailscaleホスト名。ここのすべてのフィールドはデーモンの再起動が必要です。すべてのチェックはあなた自身ではなくデーモン自身のユーザーとして実行されます — 自分で<code>ls</code>できるパスで「permission denied」となる場合、通常はUIのバグではなくデーモンのuidがそこにアクセスできないことが原因です。",
+    "restart_overlay_title": "forge-daemonを再起動しています…",
+    "restart_overlay_body": "デーモンの復帰を待っています。これは読み込み済みのモデルを解放<b0>しません</b0>(A1–A4は別のsystemdユニットです)。進行中のすべてのa0リクエストとSSE購読は切断<b1>されます</b1>。",
+    "give_up": "待機を中止",
+    "restart_title": "再起動",
+    "restart_zone_title": "forge-daemonを再起動",
+    "restart_blurb": "自然な再起動を待たずに、上記のすべての再起動モードの変更を即座に適用します。モデルは解放されません(A1–A4は別ユニットです)。進行中のa0リクエストとすべてのSSE購読は切断されます。自分で実行する場合の等価なコマンド:",
+    "requesting": "リクエスト中…",
+    "restart_button": "デーモンを再起動",
+    "restart_timeout_error": "60秒以内に再起動が完了しませんでした — デーモンの状態を手動で確認してください(systemctl status forge-daemon)。"
+  },
+  "danger_zone": {
+    "role_required": "このセクションを表示するには管理者権限が必要です。",
+    "loading": "読み込み中…",
+    "unlocked": "ロック解除済み — 編集可能",
+    "locked": "ロック中",
+    "lock": "ロック",
+    "unlock": "ロック解除",
+    "unlock_confirm": "確認しますか?",
+    "unlock_warning": "これは起動に関わる重要なインフラ設定です — 誤った保存はデーモンを停止させる可能性があります。",
+    "check": "チェック",
+    "checking": "チェック中…",
+    "apply": "適用",
+    "applying": "適用中…",
+    "applied": "✓ 適用済み",
+    "check_failed_note": "何も保存されませんでした。上記の失敗したフィールドを修正して再度チェックするか、検証を完全にバイパスする必要がある場合は<code>forge config set</code>を直接使用してください。"
+  },
+  "routing": {
+    "behavior_title": "ルーターの動作",
+    "resource_router": "ルーター",
+    "discard_title": "未保存の変更を破棄",
+    "discard": "破棄",
+    "config_title": "ルーター設定",
+    "config_role_required": "ルーター設定を表示するには運用者権限が必要です。",
+    "config_loading": "ルーター設定を読み込み中…",
+    "config_note": "変更はサービスが再起動されるまで反映されません。",
+    "saving": "保存中…",
+    "save_and_restart": "保存して再起動",
+    "restart_button": "再起動",
+    "model_routing_title": "モデル → プロバイダー ルーティング",
+    "catalog_unavailable": "カタログを利用できません(ストアが接続されていない可能性があります)。",
+    "routing_description_before": "各モデルに対してa0が提示するプロバイダーと、フェイルオーバーがたどる優先順位です。有効/優先度のみ — 価格、ワイヤーモデル、コンテキスト長、バリアントは",
+    "catalog_offerings_link": "カタログ → オファリング",
+    "no_offerings": "オファリングが設定されていません — リモートプロバイダーへのルートがまだありません。",
+    "preferred_chip": "優先",
+    "preferred_title": "このモデルに対してa0が現在提示しているオファリング",
+    "provider_off_chip": "プロバイダー無効",
+    "priority_label": "優先度",
+    "disable_route_title": "このオファリングへのルーティングを停止",
+    "enable_route_title": "このオファリングへのルーティングを再開",
+    "disable_button": "無効化",
+    "enable_button": "有効化",
+    "status_enabled": "有効",
+    "status_disabled": "無効",
+    "priority_status": "優先度 {{priority}} · {{status}}"
+  },
+  "compression": {
+    "mode_title": "圧縮 · ルーティングモード",
+    "role_required": "圧縮設定を表示するには運用者権限が必要です。",
+    "bypass_title_operator": "すべてのプロキシで圧縮をバイパス — ライブで即時反映、解体なし",
+    "bypass_title_no_role": "運用者権限が必要です",
+    "global_passthrough_label": "グローバルバイパス",
+    "on": "オン",
+    "off": "オフ",
+    "global_note": "オンにすると、すべての利用元がアップストリームへ直接ルーティングされ、すべてのプロキシで圧縮がライブでバイパスされます — 解体は発生しません。圧縮品質のA/Bテストやプロバイダーのデバッグ時に使用してください。",
+    "proxies_title": "圧縮 · 圧縮プロキシ",
+    "loading_proxies": "プロキシを読み込み中…",
+    "mode_label": "モード",
+    "mode_link_provider": "プロバイダーにリンク",
+    "mode_standalone": "スタンドアロン(プロバイダーなし)",
+    "provider_label": "プロバイダー",
+    "all_providers_linked": "すべてのプロバイダーに既にプロキシがリンクされています。代わりにスタンドアロンプロキシを作成するか、先に新しいプロバイダーを追加してください。",
+    "select_provider_ellipsis": "プロバイダーを選択…",
+    "label_label": "ラベル",
+    "service_name_label": "サービス名",
+    "service_taken": "このサービス名のプロキシは既に存在します。",
+    "service_becomes_unit": "systemdユニット forge-compress@{{service}}.service になります",
+    "service_invalid": "^[a-z][a-z0-9_-]+$ に一致する必要があります — 小文字で、文字から始めてください。",
+    "target_url_label": "ターゲットURL",
+    "cancel": "キャンセル",
+    "creating": "作成中…",
+    "create_proxy": "プロキシを作成",
+    "add_proxy_button": "+ プロキシを追加",
+    "overridden_by_global": "グローバルバイパスにより上書きされています",
+    "compression_on_title": "圧縮オン — クリックしてこのプロキシをバイパス",
+    "bypassed_title": "バイパス中 — クリックして圧縮を再有効化",
+    "orphaned_suffix": " · 孤立(残り{{days}}日)",
+    "bypassed_word": "バイパス中",
+    "compressed_word": "圧縮中",
+    "saved_label": "{{state}} · 7日間の削減トークン数",
+    "restarting": "再起動中…",
+    "removing": "削除中…",
+    "remove_button": "削除",
+    "remove_warning": "プロキシ「{{label}}」を削除しますか? systemdユニットが解体され、プロキシ行は孤立します。",
+    "footer_note": "削減トークン数は圧縮機能自身が保持する累積カウンターで、各プロキシの<code>/metrics</code>からスクレイピングしたものです — 圧縮機能自身の報告であり、独立した検証は行われていません。"
+  },
+  "provider_keys": {
+    "title": "プロバイダー",
+    "intro": "A0経由でルーティングされる外部プロバイダー。キーはサーバー側の<code>router_providers</code>に保存されます。以下のマスク表示がAPIから返される唯一の形式で、新しいキーは書き込み専用です。",
+    "role_required": "プロバイダーを表示するには運用者権限が必要です。",
+    "loading": "プロバイダーを読み込み中…",
+    "no_providers": "プロバイダーが設定されていません。",
+    "disabled_chip": "無効 — ルーティングされていません",
+    "models_count_other": "{{count}} モデル",
+    "show_models_title": "このプロバイダー経由でルーティングされているモデルを表示",
+    "no_key_set": "キー未設定",
+    "balance_value": " · 残高 {{balance}}{{currency}}",
+    "balance_unavailable": " · 残高取得不可",
+    "no_balance_api": " · 残高APIなし",
+    "disable_provider_title": "このプロバイダーのモデルへのルーティングを停止(キーとオファリングは保持されます)",
+    "enable_provider_title": "このプロバイダーのモデルへのルーティングを再開",
+    "edit_button": "編集",
+    "set_key_button": "キーを設定",
+    "discover_billing_button": "請求先を検出",
+    "discover_billing_title": "このプロバイダーの候補となる請求APIのURLを調査",
+    "discovering": "検出中…",
+    "delete_warning": "プロバイダー「{{name}}」を削除しますか? そのオファリングも一緒に削除されます。すべてを保持したままルーティングだけ停止したい場合は、代わりに無効化を使用してください。",
+    "discover_found_saved": "検出して保存しました: {{url}}",
+    "discover_found_not_saved": "{{url}} を検出しましたが、credits_urlは既に設定されていたため上書きされませんでした",
+    "discover_not_found": "候補の中に請求エンドポイントが見つかりませんでした",
+    "no_offerings_for_provider": "このプロバイダー経由のオファリングはありません。",
+    "model_disabled_chip": "無効",
+    "edit_routing_link": "設定 → ルーティングで、ルーティング/価格を編集 →",
+    "name_label": "名前",
+    "name_hint": "上のアイコンはライブでプレビューされます — 認識済みのベンダースラッグ(例: 「deepseek」「qwen」)から変更すると、ベンダーのマークが外れます。",
+    "name_invalid_chars": "名前は文字または数字で始まり、文字・数字・スペース・&・.-_ のみを含める必要があります — それ以外の文字はサーバーに拒否されます。",
+    "bill_currency_label": "請求通貨",
+    "status_url_label": "ステータスURL",
+    "status_url_hint_edit": "人間向けのステータスページではなく、機械可読なStatuspageの/api/v2/summary.jsonフィードが必要です。",
+    "status_url_hint_create": "人間向けのステータスページではなく、機械可読なStatuspageの/api/v2/summary.jsonフィードが必要です — 認識できない形式の場合はターゲットURLへのライブ調査にフォールバックします。",
+    "credits_url_label": "残高URL",
+    "org_id_label": "組織ID",
+    "billing_console_url_label": "請求コンソールURL",
+    "billing_api_enabled": "請求APIを有効化",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "new_api_key_label": "新しいAPIキー(書き込み専用 — 表示されることはありません)",
+    "save_key": "キーを保存",
+    "preset_label": "プリセット",
+    "preset_custom": "カスタム…",
+    "no_balance_api_note": "このプロバイダーには残高APIがありません — 請求ポーリングはオフのままです(請求コンソールURLは人間向けのリンクとして残ります)。",
+    "name_required_label": "名前 *",
+    "target_url_template_hint": "<resource>を自分の値に置き換えてください — {{preset}} には単一の固定エンドポイントがありません。",
+    "org_id_required_suffix": " *",
+    "create_proxy_checkbox": "このプロバイダー用の圧縮プロキシを作成する(推奨)",
+    "create_button": "作成",
+    "add_provider_button": "+ プロバイダーを追加",
+    "peak_windows": {
+      "timezone_label": "タイムゾーン",
+      "custom_ellipsis": "カスタム…",
+      "timezone_hint": "以下の時間帯が属するタイムゾーンです — サーバーがリクエストごとに実際のUTCへ自動変換します(夏時間対応)。既にUTCの時間の場合はUTCのままにしてください。",
+      "timezone_placeholder": "例: America/Los_Angeles — PSTのような略称ではなく完全なIANA名で入力してください",
+      "windows_label": "ピーク価格ウィンドウ(JSON、上のタイムゾーンに準拠)",
+      "windows_hint": "空欄 = このプロバイダーにピーク/オフピークの概念なし。形式: {{format}}",
+      "parse_error": "有効なJSONではありません — 正しく解析できるまでサーバーに拒否されます。",
+      "peak_now_chip": "現在ピーク中",
+      "weekday_sun": "日",
+      "weekday_mon": "月",
+      "weekday_tue": "火",
+      "weekday_wed": "水",
+      "weekday_thu": "木",
+      "weekday_fri": "金",
+      "weekday_sat": "土",
+      "no_windows": "(ウィンドウなし)"
+    }
+  },
+  "smith": {
+    "eyebrow": {
+      "reasoning": "smith → 推論",
+      "schedule": "smith → スケジュール",
+      "thresholds": "smith → しきい値",
+      "watchlist": "smith → ビルド更新監視リスト",
+      "web_research": "smith → Web調査",
+      "tools": "smith → ツール",
+      "retention": "smith → 保持設定",
+      "self_review": "smith → 自己点検",
+      "brain_residency": "smith → ブレインの常駐",
+      "autonomy": "smith → 標準自律ポリシー",
+      "sourcing": "smith → モデル調達"
+    },
+    "reasoning": {
+      "none_model": "— なし(モデルなしで応答) —",
+      "local_configs": "ローカルコンフィグ",
+      "remote_offerings": "リモートオファリング",
+      "add_label": "追加:",
+      "remove": "削除",
+      "chain_empty": "空 — smithは上のsmith.modelへ直接エスカレーションします(チェーンなし)。",
+      "no_offerings": "選択できる有効なリモートオファリングがありません。",
+      "no_configs": "選択できるローカルコンフィグがありません。"
+    },
+    "watchlist": {
+      "empty": "空 — コミット件名の照合は行われません。",
+      "remove_aria": "{{keyword}} を削除",
+      "placeholder": "例: CVE, breaking, security",
+      "add": "+ 追加"
+    },
+    "web": {
+      "direct_note": "(順序に関わらず常に最後に試行)",
+      "customsearch_note": "(SearxNG互換のGET ?q=エンドポイント)",
+      "customfetch_note": "(GET ?url=テキストプロキシ)",
+      "enabled_label": "有効",
+      "url_placeholder": "https://…",
+      "key_placeholder": "APIキー(変更しない場合はそのまま)",
+      "probing": "確認中…",
+      "reprobe": "今すぐ再確認",
+      "reachable": "到達可能",
+      "unreachable": "到達不可",
+      "never_probed": "未確認",
+      "unknown": "不明",
+      "no_detail": "詳細なし",
+      "status_detail": "{{state}} — {{detail}}"
+    },
+    "tools": {
+      "readonly_loop": "読み取り専用ツールループ",
+      "description": "推論ブレインが会話中にsmith自身のチェック、検出結果、ナレッジベース、カタログ、(Web調査が有効な場合は)Web検索/取得を呼び出せるようにします。コンテキストのスナップショットのみで答える代わりに使用されます。何も変更しません — すべてのツールは読み取り専用です。",
+      "mode_label": "モード",
+      "mode_auto": "auto — ブレインごとに自動検出(推奨)",
+      "mode_native": "native — OpenAI形式のtool_callsを強制",
+      "mode_fenced": "fenced — ```tool_call形式のフォールバックを強制",
+      "mode_off": "off",
+      "max_rounds_label": "最大ラウンド数"
+    },
+    "retention": {
+      "prune_label": "古い検出結果とWebキャッシュを自動的に削除",
+      "description": "オープンまたはクローズ済みの調査に紐づく検出結果は、経過期間に関わらずこの設定では削除されません — 単独のスイープ検出結果のみが期限切れになります。0を指定するとその区分は無期限に保持されます。",
+      "last_run": "前回実行 {{when}} — 検出結果 {{findings}} 件、Webキャッシュ {{cache}} 件を削除しました。",
+      "never_run": "まだプルーニングは実行されていません — smith起動後、6時間ごとに自動実行されます。",
+      "ok_days": "「ok」検出結果、日数",
+      "info_hours": "「info」検出結果、時間数",
+      "warn_crit_days": "「warn」/「crit」検出結果、日数",
+      "web_cache_days": "Webキャッシュ、日数",
+      "web_cache_max_rows": "Webキャッシュ、最大件数"
+    },
+    "self_review": {
+      "toggle_label": "オープンな調査と保留中のアクションを定期的に再確認",
+      "description": "チェックが正常と判定された調査は、保留トレイにクローズ提案が表示されます — 承認すると実際に調査がクローズされます。「完了(未検証)」のまま止まっているアクションは、そのチェックが再検証されて正常になると自動的に「完了」へ昇格します(これは新しいアクションではなく、記録が実態に追いつくだけです)。smithが自ら提案した保留中の提案は、その対象の状況が解消されると自動的に取り下げられます。",
+      "last_run": "前回実行 {{when}} — {{promoted}} 件のアクションを昇格、{{superseded}} 件を取り下げ、{{proposed}} 件の調査クローズを提案しました。",
+      "never_run": "まだ自己点検スイープは実行されていません — smith起動後、2時間ごとに自動実行されます。",
+      "grace_minutes": "猶予期間(分)"
+    },
+    "brain_residency": {
+      "toggle_label": "smithのブレインを常時読み込んだままにする",
+      "description": "オフ(デフォルト): smithのブレインは、質問が実際に推論ティアを必要とする場合にのみオンデマンドで読み込まれ、その後は通常のアイドルポリシーに従って解放されます — 常時のVRAM消費はありませんが、アイドル期間後の最初のエスカレーション質問には実際の読み込み遅延が発生します。オン: smithはブレインを常駐させ、質問ごとの読み込み遅延をなくす代わりにVRAM容量を恒久的に消費します。いずれの場合も、ブレインは特定のスロットに固定されません — スケジューラーが空いているスロットを選択します。",
+      "last_attempt": "前回の読み込み試行 {{when}} — {{result}}。",
+      "succeeded": "成功(スロット {{slot}})",
+      "failed": "失敗({{error}})",
+      "unknown_error": "不明なエラー",
+      "never_attempted": "まだ読み込み試行はありません。"
+    },
+    "autonomy": {
+      "intro": "デフォルトではオフです。ここで有効にすると、smithは問題を検出した瞬間に、特定のオプトインされた修正をクリックや承認なしに実行できるようになります(人間への提案のみに留まりません)。自律実行であっても、手動承認と同じ手続きエンジン(チェックポイント、事後検証、完全な監査ログ)を経由し、手続きごとのクールダウンと1日あたりの上限で制限されます。低リスクと判定された手続きのみが対象となり、この画面から対象を広げることはできません。",
+      "global_switch": "グローバルスイッチ — smithがオプトインされた修正を無人で実行できるようにする",
+      "global_switch_note": "これがキルスイッチです。オフの場合、以下の手続きごとの切り替えに関わらず、自律実行は一切行われません。",
+      "none_eligible": "現在、標準自律実行の対象となる手続きはありません。",
+      "cooldown_label": "クールダウン(秒)",
+      "max_per_day_label": "1日あたりの最大実行回数",
+      "save_policy": "ポリシーを保存"
+    },
+    "sourcing": {
+      "description": "HuggingFaceリポジトリの実際のGGUFファイルをメモリ予算と照合して評価します — 定義済みの1.2倍VRAMルールと量子化の優先順位に基づいてランク付けされます(modelselection.md参照)。読み取り専用であり、ダウンロードやカタログへの追加は行われません。",
+      "repo_placeholder": "org/repo (例: Qwen/Qwen2.5-Coder-7B-Instruct-GGUF)",
+      "budget_placeholder": "予算 GB (自動)",
+      "evaluating": "評価中…",
+      "evaluate": "評価",
+      "result_summary": "{{repo}} — 予算 {{budget}} GB",
+      "cached_suffix": " (キャッシュ済み)",
+      "no_gguf": "このリポジトリにGGUFファイルが見つかりませんでした。",
+      "col_file": "ファイル",
+      "col_quant": "量子化",
+      "col_size": "サイズ",
+      "col_vram": "推定VRAM",
+      "col_fits": "収まるか",
+      "recommended_title": "推奨",
+      "fits_yes": "はい",
+      "fits_no": "いいえ",
+      "download_heading": "推奨ファイルをダウンロード"
+    }
+  },
+  "catalog": {
+    "title": "カタログ",
+    "intro": "モデルデータベース — コンフィグ(ローカルの起動レシピ)、オファリング(リモート、プロバイダー別)、モデルファミリー、メモ、管理対象サービス。読み取り専用のモード表示に代わるものです。変更には管理者権限と設定の権限確認が必要です。",
+    "tabs": {
+      "configs": "コンフィグ",
+      "offerings": "オファリング",
+      "models": "モデル",
+      "taxonomy": "モデルファミリー",
+      "notes": "メモ",
+      "services": "サービス"
+    },
+    "catalog_unavailable": "カタログを利用できません(503 — ストアが未接続の可能性があります)。",
+    "configs": {
+      "count_other": "{{count}} 件のコンフィグ",
+      "empty": "コンフィグがありません。作成して始めましょう。",
+      "new_button": "+ 新しいコンフィグ",
+      "edit": "編集",
+      "delete_confirm": "コンフィグ「{{name}}」を削除しますか?"
+    },
+    "config_form": {
+      "name_label": "名前 *",
+      "variant_label": "バリアント *",
+      "select_ellipsis": "— 選択 —",
+      "weight_artifact_label": "重みアーティファクト *",
+      "no_weight_artifacts": "このバリアントの重みアーティファクトがありません",
+      "hide_files": "ファイルを非表示",
+      "browse_files": "ファイルを参照",
+      "engine_label": "エンジン *",
+      "build_label": "ビルド",
+      "none_option": "— なし —",
+      "mmproj_label": "mmprojアーティファクト",
+      "modalities_label": "モダリティ",
+      "inherit_from_model": "モデルから継承",
+      "override": "上書き",
+      "inherited_prefix": "継承: {{modalities}}",
+      "no_mmproj_suffix": " (mmproj未リンク)",
+      "text_always": "テキスト(常時)",
+      "vision": "画像",
+      "audio": "音声",
+      "capability_tier_label": "能力ティア",
+      "none_never_substitutes": "— なし(代替されない) —",
+      "rank_label": "クラス内ランク",
+      "rank_hint": "低いほど能力が高いことを示します。同ランクは自由に交換可能です。",
+      "reasoning_effort_label": "デフォルトの推論の強さ",
+      "reasoning_effort_none_build_default": "— なし(ビルドのデフォルト) —",
+      "reasoning_effort_hint": "リクエスト自体にreasoning_effortが指定されていない場合に適用されます。このコンフィグのビルドに応じて変換されます — 下のチャットテンプレートの上書きを参照してください。",
+      "context_label": "コンテキスト (n_ctx)",
+      "parallel_label": "並列数",
+      "status_label": "ステータス",
+      "visibility_label": "表示設定",
+      "extra_args_label": "追加引数(1行につき1つのARGVトークン — フラグと値を1行にまとめない)",
+      "extra_args_hint": "ランチャーはこのファイルを1行につき1つのargvトークンとして読み込みます — フラグとその値はそれぞれ別の行に記述してください(例: 「--parallel」の次の行に「1」)。「--parallel 1」を1行にまとめないでください。",
+      "default_checkbox": "このバリアントのデフォルトコンフィグ",
+      "icon_label": "アイコン(上書き — 未設定の場合はモデル/ファミリー/系統チェーンから継承)",
+      "model_files_heading": "ディスク上のモデルファイル ({{count}})",
+      "no_gguf_files": "モデルディレクトリにGGUFファイルが見つかりません。",
+      "create_artifacts_hint": "これらのファイルのアーティファクトはバリアントセクションで作成してください(バリアント #{{id}} を選択)。",
+      "cancel": "キャンセル",
+      "shard_set_suffix": " (シャードセット)",
+      "shard_set_chip": "シャードセット"
+    },
+    "offerings": {
+      "col_provider": "プロバイダー",
+      "col_wire_model": "ワイヤーモデル",
+      "col_model": "モデル",
+      "col_price": "入力/出力価格",
+      "col_priority": "優先度",
+      "col_currency": "通貨",
+      "col_context": "コンテキスト",
+      "col_enabled": "有効",
+      "empty": "オファリングがありません。作成してリモートプロバイダーへルーティングしましょう。",
+      "preferred_chip": "優先",
+      "preferred_title": "a0がこのモデルに提示するプロバイダー(有効なプロバイダーの有効なオファリングの中で最も低い優先度値)",
+      "provider_off_chip": "無効",
+      "cached_suffix": " (キャッシュ {{price}})",
+      "peak_suffix": " (ピーク {{in}}/{{out}})",
+      "peak_now_chip": "現在ピーク中",
+      "peak_now_title": "このプロバイダーのピーク時間帯が現在適用されています",
+      "priority_title": "低い方が優先 — このモデルの有効なオファリングの中で最も低い値がa0経由で提供されます",
+      "enabled_chip": "有効",
+      "disabled_chip": "無効",
+      "edit": "編集",
+      "delete_confirm": "オファリング「{{name}}」を削除しますか?",
+      "new_button": "+ 新しいオファリング"
+    },
+    "models": {
+      "col_model": "モデル",
+      "col_family": "ファミリー",
+      "col_architecture": "アーキテクチャ",
+      "col_params": "パラメータ数",
+      "col_variants": "バリアント",
+      "col_description": "説明",
+      "empty": "モデルがありません。作成してカタログの階層を開始しましょう。",
+      "hidden_chip": "非表示",
+      "variant_count_other": "{{count}} バリアント",
+      "edit": "編集",
+      "delete_confirm": "モデル「{{name}}」を削除しますか? 先にそのバリアントとコンフィグを削除する必要があります。",
+      "new_button": "+ 新しいモデル"
+    },
+    "model_form": {
+      "name_label": "名前 *",
+      "family_label": "ファミリー",
+      "none_option": "— なし —",
+      "architecture_label": "アーキテクチャ",
+      "param_count_label": "パラメータ数",
+      "description_label": "説明",
+      "creator_label": "開発元",
+      "hf_repo_label": "HFリポジトリ",
+      "license_name_label": "ライセンス名",
+      "license_url_label": "ライセンスURL",
+      "key_features_label": "主な特徴(1行に1つ)",
+      "modalities_label": "モダリティ",
+      "text_always": "テキスト(常時)",
+      "vision": "画像",
+      "audio": "音声",
+      "visibility_label": "表示設定",
+      "icon_label": "アイコン",
+      "cancel": "キャンセル"
+    },
+    "variants": {
+      "empty": "バリアントがありません。",
+      "delete_confirm": "バリアント「{{name}}」を削除しますか? 先にそのコンフィグとアーティファクトを削除する必要があります。",
+      "abliterated_chip": "アブレーション済み",
+      "missing_label": "見つかりません",
+      "name_label": "名前 *",
+      "name_placeholder": "base instruct",
+      "derivation_label": "派生タイプ",
+      "source_variant_label": "元のバリアント",
+      "trained_ctx_label": "学習時コンテキスト",
+      "abliterated_checkbox": "アブレーション済み",
+      "abliteration_quality_label": "アブレーション品質",
+      "abliteration_quality_placeholder": "high",
+      "cancel": "キャンセル",
+      "create": "作成",
+      "add_button": "+ バリアントを追加"
+    },
+    "taxonomy": {
+      "genealogies_title": "系統",
+      "genealogies_intro": "ベンダー自身のリリース系統(Qwen、Gemma、Nemotronなど)。ここで設定するアイコンは継承チェーンの最上位です — 配下のファミリー/モデル/コンフィグは独自に設定しない限りこれを継承します。",
+      "families_title": "ファミリー",
+      "families_intro": "系統内の1世代(Gemma 4、Qwen 3.6など)。上位の系統に任意で再割り当てできます。"
+    },
+    "genealogies": {
+      "duplicate_name": "系統「{{name}}」は既に存在します — 複製を作成せず編集してください。",
+      "empty": "まだ系統がありません。",
+      "family_count_other": "{{count}} ファミリー",
+      "delete_confirm_simple": "系統「{{name}}」を削除しますか?",
+      "delete_confirm_dependents_other": "系統「{{name}}」を削除しますか? {{count}} 件のファミリーがこの系統(および継承しているアイコン)を失いますが、削除はされず親なしになるだけです。",
+      "edit": "編集",
+      "new_button": "+ 新しい系統",
+      "name_label": "名前 *",
+      "name_placeholder": "Qwen",
+      "icon_label": "アイコン",
+      "cancel": "キャンセル"
+    },
+    "families": {
+      "duplicate_name": "ファミリー「{{name}}」は既に存在します — 複製を作成せず編集してください。",
+      "empty": "まだファミリーがありません。",
+      "no_genealogy": "—",
+      "model_count_other": "{{count}} モデル",
+      "delete_confirm_simple": "ファミリー「{{name}}」を削除しますか?",
+      "delete_confirm_dependents_other": "ファミリー「{{name}}」を削除しますか? {{count}} 件のモデルがこのファミリー(および継承しているアイコン)を失いますが、削除はされず親なしになるだけです。",
+      "edit": "編集",
+      "new_button": "+ 新しいファミリー",
+      "name_label": "名前 *",
+      "name_placeholder": "Gemma 4",
+      "genealogy_label": "系統",
+      "none_option": "— なし —",
+      "icon_label": "アイコン",
+      "cancel": "キャンセル"
+    },
+    "notes": {
+      "col_subject": "対象",
+      "col_author": "作成者",
+      "col_body": "本文",
+      "empty": "記録されたメモがありません。",
+      "subject_prefix": "{{type}}: {{subject}}",
+      "delete_confirm": "このメモを削除しますか?",
+      "add_button": "+ メモを追加",
+      "subject_type_label": "対象タイプ *",
+      "subject_label": "対象 *",
+      "author_label": "作成者 *",
+      "author_placeholder": "operator",
+      "body_label": "本文 *",
+      "cancel": "キャンセル",
+      "create": "作成"
+    },
+    "services": {
+      "col_name": "名前",
+      "col_label": "ラベル",
+      "col_unit": "ユニット",
+      "col_description": "説明",
+      "empty": "サービスが定義されていません。",
+      "edit": "編集",
+      "delete_confirm": "サービス「{{name}}」を削除しますか?",
+      "new_button": "+ 新しいサービス",
+      "name_label": "名前 *",
+      "label_label": "ラベル *",
+      "description_label": "説明",
+      "description_placeholder": "スタンドアロンの画像生成サービス",
+      "icon_label": "アイコン(スラグまたは絵文字)",
+      "color_label": "カラー",
+      "unit_label": "ユニット",
+      "unit_placeholder": "port",
+      "health_check_label": "ヘルスチェック (JSON)",
+      "cancel": "キャンセル"
+    }
+  },
+  "behavior": {
+    "heading": "モデルの挙動",
+    "intro": "リクエストのモデル名は、そのモデル名へのすべての呼び出しに独自のデフォルト値を強制する<b>エイリアス</b>経由で解決される場合があります。能力ティア代替(上のトグル)は、読み込み待ちを避けるために同じ能力ティア内の既に読み込み済みのコンフィグに<b>代替</b>することがあります。また<code>reasoning_effort</code>は、そのコンフィグのビルドに応じて<b>変換</b>されます — ビルドが直接対応していればネイティブにそのまま渡し、それがない場合のみ<code>enable_thinking</code>kwargを注入し、どちらもなければ何もしません。変更には管理者権限と設定の権限確認が必要です。",
+    "configs_heading": "コンフィグ",
+    "configs_note": "コンフィグごとに1行表示します。「思考」列の「native」は、このビルドが<code>reasoning_effort</code>を直接サポートしており、オーバーライドが未使用であることを意味します。それ以外はすべて、<code>enable_thinking</code>チャットテンプレートkwarg(またはそれすら)にしか対応していないビルドです — <code>reasoning_effort: none</code>を実際に機能させるには「Force on」に設定してください。",
+    "tiers_heading": "能力ティア",
+    "tiers_note": "能力ティア代替の下で互いに代替できるコンフィグのグループです — 読み込み待ちを避けるため、またはより高性能な常駐モデルを優先するために、既に読み込み済みのモデルがリクエストされたモデルの代わりを務めます。これは自動導出ではなく、キュレーションによるものです — 上の表またはコンフィグ自身の編集フォームでクラスとランク(値が小さいほど高性能)を割り当ててください。全体のオン/オフは上のルーター挙動カードにある能力ティア代替トグルで制御します。",
+    "aliases_heading": "モデルエイリアス",
+    "aliases_note": "そのモデル名へのすべてのリクエストに対して設定を強制する、コンフィグの別名です — 呼び出し元が要求した内容さえも上書きします。独自のパラメータを送信できない利用元(1つのモデル名にしか対応できない固定の統合など)向けに、2つ目の重複したコンフィグを用意することなく必要な挙動を保証します。",
+    "virtual_models_heading": "仮想モデル",
+    "virtual_models_note": "どの実際のコンフィグが処理するかを気にせず、一般的な特性さえ満たせばよい呼び出し元向けのモデル名です — 上のエイリアスのような固定先ではなく、リクエストのたびに実際のコンフィグへ新しく解決されます。<b>能力ティア</b>種別はティア自身のキュレーションされたメンバーをランク付けし、<b>スループット</b>種別はティアを一切無視して実測トークン/秒でランク付けするため、推測になることはありません。いずれの場合も、既に読み込まれている候補があればそれが優先され、なければ最上位ランクのものが他のリクエストと同様に新規に読み込まれます。",
+    "matrix": {
+      "catalog_unavailable": "カタログを利用できません(503 — ストアが未接続の可能性があります)。",
+      "no_configs": "まだコンフィグがありません — まずカタログ→コンフィグで追加してください。",
+      "col_config": "コンフィグ",
+      "col_tier": "能力ティア",
+      "col_reasoning": "デフォルトの推論",
+      "col_thinking": "思考(enable_thinking)",
+      "col_aliases": "エイリアス",
+      "tier_none": "— なし —",
+      "tier_rank_suffix": " (ランク {{rank}})",
+      "reasoning_build_default": "— ビルドのデフォルト —",
+      "thinking_native_title": "このビルドはreasoning_effortにネイティブ対応しています — 以下のenable_thinkingオーバーライドは未使用です。",
+      "thinking_native": "native",
+      "thinking_auto": "自動(非対応)",
+      "thinking_force_on": "強制オン",
+      "thinking_force_off": "強制オフ",
+      "thinking_forced_on": "強制オン中",
+      "thinking_forced_off": "強制オフ中",
+      "rank_title": "クラス内のランク — 値が小さいほど高性能"
+    },
+    "tiers": {
+      "catalog_unavailable": "カタログを利用できません(503 — ストアが未接続の可能性があります)。",
+      "none_yet": "まだ能力ティアがありません。",
+      "configs_count_other": "{{count}} 件のコンフィグ",
+      "edit": "編集",
+      "new_tier": "+ 新しい能力ティア",
+      "delete_confirm_simple": "能力ティア「{{name}}」を削除しますか?",
+      "delete_confirm_dependents_other": "能力ティア「{{name}}」を削除しますか? {{count}} 件のコンフィグがこのクラスを失います(代替も被代替も行われなくなります) — 削除はされず、所属のみ解除されます。",
+      "form": {
+        "name_label": "名前 *",
+        "name_placeholder": "flagship-chat",
+        "mode_label": "モードのオーバーライド",
+        "mode_inherit": "グローバル設定を継承",
+        "mode_off": "オフ",
+        "mode_fallback_only": "フォールバックのみ",
+        "mode_prefer_smarter": "より高性能を優先",
+        "notes_label": "メモ",
+        "cancel": "キャンセル"
+      }
+    },
+    "aliases": {
+      "catalog_unavailable": "カタログを利用できません(503 — ストアが未接続の可能性があります)。",
+      "none_yet": "まだモデルエイリアスがありません。",
+      "config_fallback": "コンフィグ #{{id}}",
+      "forces_reasoning": "推論を強制: {{effort}}",
+      "hidden_chip": "非表示",
+      "edit": "編集",
+      "new_alias": "+ 新しいモデルエイリアス",
+      "delete_confirm": "エイリアス「{{name}}」を削除しますか? このモデル名を引き続き要求する呼び出し元は、以後「model not found」となります。",
+      "form": {
+        "name_label": "エイリアス名 *",
+        "name_placeholder": "gemma4-26b-a4b-nothink",
+        "name_hint": "呼び出し元が送信するモデル名です。実在のコンフィグやオファリング名と重複してはいけません。",
+        "routes_to_label": "転送先コンフィグ *",
+        "select_placeholder": "— 選択 —",
+        "force_effort_label": "推論の強さを強制",
+        "dont_force": "何も強制しない",
+        "effort_none": "none(思考オフ)",
+        "effort_low": "low",
+        "effort_medium": "medium",
+        "effort_high": "high",
+        "force_effort_hint": "このエイリアス経由のすべてのリクエストに適用され、別の値を要求するリクエストにも適用されます — この設定を自ら送信できない呼び出し元向けです。対象コンフィグ自身のデフォルトと同様に、そのビルドに応じて変換されます。",
+        "hidden_label": "非表示(/v1/modelsには一覧表示されませんが、直接指定すれば引き続き解決できます)",
+        "cancel": "キャンセル"
+      }
+    },
+    "virtual_models": {
+      "catalog_unavailable": "カタログを利用できません(503 — ストアが未接続の可能性があります)。",
+      "none_yet": "まだ仮想モデルがありません。",
+      "tier_fallback": "ティア #{{id}}",
+      "resolves_tier": "→ {{tier}} (最良の読み込み済みモデル)",
+      "resolves_throughput": "→ ティアを問わず実測最速",
+      "hidden_chip": "非表示",
+      "edit": "編集",
+      "new_virtual_model": "+ 新しい仮想モデル",
+      "delete_confirm": "仮想モデル「{{name}}」を削除しますか? このモデル名を引き続き要求する呼び出し元は、以後「model not found」となります。",
+      "form": {
+        "name_label": "仮想モデル名 *",
+        "name_placeholder": "local-smart",
+        "name_hint": "呼び出し元が送信するモデル名です。実在のコンフィグ、エイリアス、オファリング名と重複してはいけません。",
+        "resolves_by_label": "解決方法",
+        "kind_tier": "能力ティア(キュレーション)",
+        "kind_throughput": "実測スループット(ティア不問)",
+        "tier_label": "能力ティア *",
+        "select_placeholder": "— 選択 —",
+        "notes_label": "メモ",
+        "hidden_label": "非表示(/v1/modelsには一覧表示されませんが、直接指定すれば引き続き解決できます)",
+        "cancel": "キャンセル"
+      }
+    }
+  },
+  "benchmarks": {
+    "page": {
+      "title": "ベンチマークとプロファイリング",
+      "intro": "コンフィグごとのキュレーションされたパフォーマンス/能力スコアを、そのコンフィグ自身の実測プロファイルとまとめて表示します。<b>プロファイリングは破壊的操作です</b> — 対象モデルがまだ読み込まれていない場合、空きを作るために他の実行中のモデルが解放されます。変更には管理者権限と設定の権限確認が必要です。",
+      "catalog_unavailable": "カタログを利用できません(503 — ストアが未接続の可能性があります)。",
+      "summary": "{{total}} 件中 {{profiled}} 件のコンフィグをプロファイリング済み · 古いもの {{stale}} 件 · キュレーション済みベンチマーク {{curated}} 件",
+      "filter_all": "すべて",
+      "filter_profiled": "プロファイリング済み",
+      "filter_has_benchmarks": "ベンチマークあり",
+      "filter_stale": "古い",
+      "no_configs": "カタログにコンフィグがありません — カタログ → コンフィグから追加してください。",
+      "no_match_filter": "このフィルターに一致するコンフィグはありません。",
+      "remote_only_title": "リモート専用モデル",
+      "remote_only_hint": "ローカルコンフィグがないため、プロファイリング対象がありません。ここでのベンチマークはモデル単位のみです。",
+      "served_by": "提供元: {{providers}}",
+      "no_benchmarks_recorded": "記録されたベンチマークはありません。",
+      "edit": "編集",
+      "delete_confirm": "「{{metric}}」を削除しますか?",
+      "legacy_offering_title": "オファリング単位(レガシー)",
+      "legacy_offering_hint": "これらはコンフィグ単位のカード修正より前のもので、どのカードにも表示されたことがありません — 編集からモデル・バリアント・コンフィグのいずれかに再割り当てすると表示されるようになります。または履歴としてそのまま残すこともできます。",
+      "edit_rescope": "編集 / 再割り当て",
+      "other_title": "その他",
+      "other_hint": "カタログにもう存在しない対象を指しています。",
+      "edit_heading": "「{{metric}}」を編集",
+      "new_heading": "新しいベンチマーク"
+    },
+    "group": {
+      "default_chip": "デフォルト",
+      "hidden_chip": "非表示",
+      "no_mode_chip": "モードなし",
+      "no_mode_title": "このコンフィグは実行可能なモードに変換されませんでした(通常はビルドバックエンドの欠落が原因です) — サーバーログを確認してください。",
+      "stale_chip": "古い",
+      "profiled_chip": "プロファイリング済み",
+      "unprofiled_chip": "未プロファイリング",
+      "show_less": "表示を減らす",
+      "show_curve": "カーブを表示",
+      "add_benchmark": "+ ベンチマーク",
+      "profiling_ellipsis": "プロファイリング中…",
+      "profile_ellipsis": "プロファイリング…",
+      "someone_else_running": "すでに別のプロファイル実行が進行中です({{mode}}) — 同時に実行できるのは1つだけです。",
+      "variant_fallback": "バリアント #{{id}}",
+      "typical": "標準",
+      "worst": "最悪",
+      "measured": "測定日 {{date}}",
+      "not_profiled": "未プロファイリング — メモリ・スループットの測定値はありません。",
+      "depth_col": "深度",
+      "prefill_col": "プリフィル T/s",
+      "decode_col": "デコード T/s",
+      "no_curated": "キュレーションされたベンチマークはありません — モデル側にもありません。",
+      "delete_confirm_inherited": "「{{metric}}」を削除しますか? これは{{scope}} {{owner}}に紐づいているため、ここだけでなくそのスコープが表示されるすべての場所から削除されます。",
+      "delete_confirm_own": "このコンフィグから「{{metric}}」を削除しますか?"
+    },
+    "profile_run": {
+      "in_progress_title": "プロファイル実行中",
+      "starting": "プロファイル実行を開始しています…",
+      "failed_banner": "プロファイル実行が失敗しました",
+      "complete_banner": "プロファイリング完了",
+      "in_progress_banner": "プロファイル実行中",
+      "sending_request": "全スロットの解放リクエストを送信中…",
+      "mode_label": "モード:",
+      "actual_n_ctx_label": "実際の n_ctx: {{value}}",
+      "silently_reduced": "(要求値 {{target}} — 自動的に縮小されました)",
+      "peak_safe": "ピーク {{peak}} バイト → 安全値 {{safe}} バイト",
+      "prefill_decode": "プリフィル {{prefill}} t/s · デコード {{decode}} t/s",
+      "dismiss": "閉じる",
+      "evicting_label": "解放中: {{list}}",
+      "slots_label": "スロット: {{list}}",
+      "slots_loading": "読み込み中…",
+      "slot_empty": "空き",
+      "confirm_heading": "{{mode}} をプロファイリングしますか?",
+      "warning_prefix": "警告:",
+      "already_loaded_reused": "{{mode}} はすでに読み込まれており、解放されずに再利用されます。",
+      "loads_alone": "測定のため、<b>{{mode}}</b> のみを単独で読み込みます。",
+      "will_unload": "空きを作るため<b>{{total}} スロット中 {{count}} スロット</b>を解放します。",
+      "no_other_slots": "他に解放が必要なスロットはありません。",
+      "slots_evicted_note": " 解放されたスロットはプロファイリング完了後も未読み込みのままです — 再読み込みは運用者またはスケジューラーが行う必要があります。",
+      "will_be_evicted": "解放対象:",
+      "slot_suffix": " (スロット {{slot}})",
+      "run_duration_note": "この実行には1〜3分かかります: 解放 → 対象を読み込み(必要な場合) → コンテキストを充填 → メモリを測定 → 4段階の深度でT/sをベンチマーク → 記録 → 解放。進捗はこのパネルにライブ表示されます。",
+      "cancel": "キャンセル",
+      "starting_ellipsis": "開始中…",
+      "evict_and_profile": "解放してプロファイリング",
+      "phase": {
+        "evicting_reusing": "{{mode}} はすでに {{slot}} に読み込まれています — これを再利用し、残りを解放しています…",
+        "evicting_all": "全スロット(A1〜A4)を解放中…",
+        "loading": "{{slot}} にモデルを単独で読み込み中…",
+        "verifying": "実際の n_ctx を確認中…",
+        "filling": "コンテキストを {{target}} トークンまで充填中{{suffix}}…",
+        "filling_heterogeneous": "多様なデータでコンテキストを充填中…",
+        "measuring": "ピークメモリを測定中…",
+        "benchmarking": "ベンチマーク中{{depthSuffix}}{{tpsSuffix}}",
+        "benchmarking_default": "プリフィル/デコード T/s をベンチマーク中…",
+        "done": "完了 — プロファイルを記録しました。",
+        "failed": "失敗しました。",
+        "target_fallback": "対象",
+        "slot_fallback": "いずれかのスロット",
+        "at_depth_paren": " ({{depth}})",
+        "at_depth": " {{depth}}時点",
+        "at_tokens": " {{tokens}} トークン時点",
+        "tps_suffix": " — pp {{pp}} t/s、tg {{tg}} t/s"
+      }
+    },
+    "depth_label": {
+      "empty": "空",
+      "pct": "コンテキストの約{{pct}}%",
+      "tokens": "{{tokens}} トークン"
+    },
+    "stale_explanation": "測定後にコンフィグが変更されています(コンテキスト・バックエンド・モデルファイルのいずれかが異なります)"
+  },
+  "fields": {
+    "danger.cookie_secure": {
+      "label": "セキュアクッキー",
+      "help": "セッションおよびWebAuthnチャレンジクッキーのSecure属性です。同一ホスト上のTLS終端リバースプロキシ経由の平文HTTPのみでこのプロセスに到達する構成(tailscale serveのみのデプロイモデル)でない限り、オンのままにしてください — オフにすると、攻撃者がブラウザに送らせた平文接続でセッションクッキーが再利用されうる状態になります。このセクションの他の項目と異なり、この設定は保存時に即座に反映され、再起動は不要です。"
+    },
+    "danger.db_path": {
+      "label": "状態データベースパス",
+      "help": "デーモンがすべての状態を読み書きするSQLiteファイルです。親ディレクトリの書き込み可否と(すでにファイルが存在する場合は)実際のSQLiteヘッダーを確認します — 稼働中のデータベースに対する二重書き込みを避けるため、直接開くことはありません。"
+    },
+    "danger.hostname": {
+      "label": "Tailscaleホスト名",
+      "help": "このノードのtailnetホスト名です。見た目のチェック(DNS名らしくない場合)のみで警告を出しますが、保存を止めるものではありません。"
+    },
+    "danger.icons_dir": {
+      "label": "アイコンディレクトリ",
+      "help": "アップロードされたモデル/ベンダーアイコン素材のディレクトリです。任意項目です — 未設定でもエラーではなく警告になります。"
+    },
+    "danger.listen": {
+      "label": "ダッシュボード待受アドレス",
+      "help": "ダッシュボードとAPIがバインドするhost:portです。変更時には実際にバインドを試すチェックが行われます(変更がない場合はスキップされます。デーモンがすでにそのアドレスにバインド済みのためです)。"
+    },
+    "danger.mcp_listen": {
+      "label": "MCP待受アドレス",
+      "help": "MCPサーバーがバインドするhost:portです。"
+    },
+    "danger.models_dir": {
+      "label": "モデルディレクトリ",
+      "help": "GGUFモデルの重みファイルを格納するディレクトリです。"
+    },
+    "danger.rocm_bin": {
+      "label": "ROCm版llama-serverバイナリ",
+      "help": "ROCmバックエンドのllama-server実行ファイルへのパスです(統合メモリを使う約63GB超のモデルに使用されます)。"
+    },
+    "danger.router_listen": {
+      "label": "a0ルーター待受アドレス",
+      "help": "a0ルーターがバインドするhost:portです。"
+    },
+    "danger.state_dir": {
+      "label": "状態ディレクトリ",
+      "help": "デーモンが実行時の状態を書き込むディレクトリです。存在確認だけでなく、実際に書き込みテスト(作成してから削除)を行います — 「デーモンから書き込み可能か」に正直に答えられる唯一の方法です。"
+    },
+    "danger.sysconfig_dir": {
+      "label": "Sysconfigディレクトリ",
+      "help": "スロットごとのsystemd環境変数/引数ファイル(例: forge-a1-env)を格納するディレクトリです。"
+    },
+    "danger.tts_unit": {
+      "label": "TTS systemdユニット名",
+      "help": "forgeが起動/停止するTTS systemdユニットのベース名です(.serviceの拡張子は含めません)。"
+    },
+    "danger.vulkan_bin": {
+      "label": "Vulkan版llama-serverバイナリ",
+      "help": "Vulkanバックエンドのllama-server実行ファイルへのパスです。"
+    },
+    "landmark.behavior.aliases": {
+      "label": "モデルの挙動 · モデルエイリアス",
+      "help": "呼び出されるたびに独自のリクエストデフォルトを強制する、モデルの別名です。"
+    },
+    "landmark.behavior.capability-tiers": {
+      "label": "モデルの挙動 · 能力ティア",
+      "help": "能力ティア置き換えの対象として、互いに代替可能なコンフィグのグループです。"
+    },
+    "landmark.behavior.configs": {
+      "label": "モデルの挙動 · コンフィグ",
+      "help": "コンフィグごとの一覧です:能力ティアとランク、デフォルトの推論強度、enable_thinkingの上書き、エイリアスを1つの表にまとめています。"
+    },
+    "landmark.behavior.virtual-models": {
+      "label": "モデルの挙動 · 仮想モデル",
+      "help": "リクエストごとに能力ティアまたは実測スループットに基づいて実際のコンフィグへ動的に解決されるモデル名です。どのモデルが応答するか気にしない呼び出し元向けです。"
+    },
+    "landmark.benchmarks.index": {
+      "label": "ベンチマークとプロファイリング",
+      "help": "コンフィグ別にまとめた性能・能力スコア — SWE-bench、GPQA、HLE、AIME、デコード/プリフィルのTPS — に加え、各コンフィグ自身の実測プロファイルを表示します。"
+    },
+    "landmark.billing.cost": {
+      "label": "コストと電力",
+      "help": "電気料金、オーバーヘッド、電源ユニット効率、電力グラフの上限値 — ダッシュボードのコスト表示に使われます。"
+    },
+    "landmark.billing.currency": {
+      "label": "通貨",
+      "help": "PWA内のすべての金額表示に使う通貨と、サーバー側の為替レート取得元です。"
+    },
+    "landmark.catalog.configs": {
+      "label": "カタログ · コンフィグ",
+      "help": "ローカルの起動レシピ — モデル + バリアント + llama.cppのフラグ(extra_args、ctx、parallelなど)。"
+    },
+    "landmark.catalog.models": {
+      "label": "カタログ · モデル",
+      "help": "親モデル — 重み、能力、モダリティ、ロゴ。"
+    },
+    "landmark.catalog.notes": {
+      "label": "カタログ · メモ",
+      "help": "カタログの各エントリに付けられる自由記述のメモです。"
+    },
+    "landmark.catalog.offerings": {
+      "label": "カタログ · オファリング",
+      "help": "プロバイダーごとのリモートモデルオファリング。"
+    },
+    "landmark.catalog.services": {
+      "label": "カタログ · サービス",
+      "help": "常時稼働の管理対象サービス(埋め込み、STT、TTS)とそのユニット状態。"
+    },
+    "landmark.catalog.taxonomy": {
+      "label": "カタログ · モデルファミリー",
+      "help": "系統/ファミリーの分類 — 名前とアイコン継承の階層構造。"
+    },
+    "landmark.compressor.mode": {
+      "label": "コンプレッサーのルーティングモード",
+      "help": "グローバルなパススルー切り替えです — 稼働中のまま、すべてのプロキシでCompressorの圧縮をバイパスします(プロキシの停止は不要)。"
+    },
+    "landmark.compressor.proxies": {
+      "label": "Compressor圧縮プロキシ",
+      "help": "プロキシごとの圧縮のオン/オフ、再起動/停止、削減トークン数。"
+    },
+    "landmark.danger.restart": {
+      "label": "デーモンの再起動",
+      "help": "D-Bus経由で再起動が必要な変更をすべて即座に適用します — モデルはアンロードされませんが、処理中のa0リクエストとSSE購読は切断されます。"
+    },
+    "landmark.general.daemon_strip": {
+      "label": "デーモンステータスバー(読み取り専用)",
+      "help": "バージョン、リッスンアドレス、再起動が必要な場合のバナーを表示します。情報表示のみで編集はできません。"
+    },
+    "landmark.profiling.index": {
+      "label": "プロファイリング",
+      "help": "破壊的なライブプロファイリング実行です — 実際のスロット上でコンテキストサイズを変えながら計測し、ロード中のモデルは退避されます。"
+    },
+    "landmark.providers.index": {
+      "label": "プロバイダーとAPIキー",
+      "help": "a0経由でルーティングされる外部プロバイダー — エンドポイント、書き込み専用キー、プリセット、稼働状況。"
+    },
+    "landmark.routing.models": {
+      "label": "モデル → プロバイダー ルーティング",
+      "help": "各モデルに対してa0がどのプロバイダーを使うか、フェイルオーバー時に辿る優先順位です。"
+    },
+    "landmark.routing.preview": {
+      "label": "ルーティングマップ",
+      "help": "プロバイダー→モデルの樹形図(読み取り専用) — 線の太さが優先度、色が有効/無効を表します。"
+    },
+    "landmark.scheduling.live": {
+      "label": "スケジューラーの調整項目(ライブ)",
+      "help": "実行中のscheduler.config — アイドル時アンロード、小規模ジョブの閾値、優先度割り込みの上限、予約ウィンドウ。Schedulingページにも同じ内容が表示されます。"
+    },
+    "landmark.security.api_keys": {
+      "label": "APIキー",
+      "help": "ダッシュボードのベアラートークン(sk-forge-*)の発行/失効。"
+    },
+    "landmark.security.auth_config": {
+      "label": "認証設定",
+      "help": "ネットワークプロバイダーの選択(tailscale / forward-authヘッダー)と、組み込みのforward-auth危険ゾーンです。"
+    },
+    "landmark.security.identity_links": {
+      "label": "ID連携",
+      "help": "ネットワークID → ダッシュボードアカウントの紐付けです。"
+    },
+    "landmark.security.policy": {
+      "label": "アクセスポリシー",
+      "help": "リソース → 必要最低認証要素のマトリクスです — どの操作にパスワード、TOTP、パスキーによる保証が必要かを定めます。"
+    },
+    "landmark.security.recovery": {
+      "label": "リカバリーコード",
+      "help": "ロックアウト時に使うワンタイムのリカバリーコードです — 表示/再生成できます。"
+    },
+    "landmark.security.totp": {
+      "label": "TOTP登録",
+      "help": "認証アプリ(時間ベースのワンタイムパスワード)の登録です。"
+    },
+    "landmark.security.webauthn": {
+      "label": "パスキー(WebAuthn)",
+      "help": "パスキー/ハードウェアキーの登録 — L2保証要素です。"
+    },
+    "monitoring.gtt_warn_pct": {
+      "label": "GTT警告しきい値",
+      "help": "メモリひっ迫の警告が発報するGTTプール使用率(%)です。"
+    },
+    "monitoring.hang_sustain_s": {
+      "label": "ハング継続判定時間",
+      "help": "ハングアラートが発報するまで、TPSしきい値を下回り続けなければならない時間です。"
+    },
+    "monitoring.hang_tps_thousandth": {
+      "label": "ハングTPSしきい値",
+      "help": "これを下回るとリクエストがハングしたとみなされるトークン/秒×1000の値です(デフォルト100 = 0.1 TPS)。"
+    },
+    "monitoring.poll_interval_s": {
+      "label": "コレクターのポーリング間隔",
+      "help": "コレクターが読み込み済みの各スロットの/metricsを収集する頻度です。"
+    },
+    "monitoring.retention_days": {
+      "label": "メトリクス保持期間",
+      "help": "store.RunRetentionによって削除されるまでメトリクスサンプルを保持する期間です。ライブ設定 — 次回のプルーニング時に反映されます。"
+    },
+    "monitoring.sample_interval_s": {
+      "label": "メトリクスサンプル間隔",
+      "help": "メトリクスサンプルを記録する頻度です。再起動が必要 — 上の項目と異なり、デーモン起動時に一度だけタイマーへ組み込まれます。"
+    },
+    "monitoring.switch_cooldown_s": {
+      "label": "切り替えクールダウン",
+      "help": "同一スロットで連続してモードを切り替える際の最小間隔です。"
+    },
+    "routing.busy_mode": {
+      "label": "ビジーモード",
+      "help": "対象のスロットが読み込み/切り替え中でビジーな場合にa0がどう動作するか: 待つか、即座に失敗させるかです。",
+      "options": {
+        "wait": "待つ",
+        "fail_fast": "即座に失敗"
+      }
+    },
+    "routing.capability_substitution": {
+      "label": "能力ティア代替",
+      "help": "すでに読み込まれている、運用者がランク付けしたコンフィグを、要求されたコンフィグの代わりに使わせます — 「フォールバックのみ」は要求されたコンフィグが今まさに読み込み不可能な場合にのみ代替します。「より賢いものを優先」は、読み込み自体は可能であっても、すでに読み込まれているコンフィグが要求されたものより上位ランクであれば常に代替します。能力ティア自体の上書き設定(下部のModel Behaviorにある能力ティアカード)がこのデフォルトより優先されます。デフォルトはオフで、代替候補がないリクエストはどちらの設定でも同じ挙動になります。",
+      "options": {
+        "off": "オフ",
+        "fallback_only": "フォールバックのみ",
+        "prefer_smarter": "より賢いものを優先"
+      }
+    },
+    "routing.compressor_local_enabled": {
+      "label": "ローカルスロット向けコンプレッサー",
+      "help": "ローカルのA1〜A4トラフィックを共有のforge-compress@local圧縮プロキシ経由でルーティングします。リモートプロバイダーのコンプレッサープロキシは、コンプレッサーのセクションで別途制御します。"
+    },
+    "routing.connect_timeout_s": {
+      "label": "接続タイムアウト",
+      "help": "a0がバックエンドへのTCP接続確立を試み、あきらめるまでの待機時間です。"
+    },
+    "routing.embedding_url": {
+      "label": "エンベディングURL",
+      "help": "a0がプロキシするエンベディングバックエンドの絶対http(s) URLです。"
+    },
+    "routing.ensure_loaded_timeout_s": {
+      "label": "読み込み保証タイムアウト",
+      "help": "オンデマンドのモデル読み込みが完了するのをa0が待つ時間です。この時間を超えると、読み込みを引き起こしたリクエストは失敗します。"
+    },
+    "routing.health_ttl_s": {
+      "label": "ヘルスキャッシュTTL",
+      "help": "バックエンドのヘルスチェック結果をa0が再確認するまでキャッシュしておく時間です。"
+    },
+    "routing.inject_stream_usage": {
+      "label": "stream_options.include_usageを注入",
+      "help": "ストリーミングリクエストの末尾に使用量チャンクを付けるようリモートプロバイダーに要求し、実際のAPI支出を記録できるようにします(BE-4 Phase 4)。ローカルバックエンドには影響しません。"
+    },
+    "routing.max_retries_per_backend": {
+      "label": "バックエンドごとの最大リトライ回数",
+      "help": "フェイルオーバーまたは断念する前に、a0が単一のバックエンドを再試行する回数です。"
+    },
+    "routing.provider_failover": {
+      "label": "プロバイダーフェイルオーバー",
+      "help": "モデルの優先プロバイダーがエラーになった場合(通信障害または5xx)、同じモデルを提供する次のプロバイダーを優先順位順に再試行します。オフにすると、次のプロバイダーへ黙って課金する代わりにエラーがそのまま表示されます。4xxレスポンスはフェイルオーバーされません。"
+    },
+    "routing.request_timeout_s": {
+      "label": "リクエストタイムアウト",
+      "help": "0は無制限を意味します — laguna-s-21の修正(2026-07-30)以降、意図的にこの値をデフォルトにしています。一律の非ゼロタイムアウトは、投機的デコーディングによる長時間のレスポンスを生成途中で切断してしまっていました。応答不能なクライアント/アップストリームは、切断時のコンテキストキャンセルによって引き続き検出されます。"
+    },
+    "routing.tts_url": {
+      "label": "TTS URL",
+      "help": "a0が/v1/audio/speechと/v1/voicesをプロキシするforge-ttsバックエンドの絶対http(s) URLです(Tier 1 Sprint 3)。"
+    },
+    "scheduling.seed.idle_unload_s": {
+      "label": "アイドル時アンロード(起動時デフォルト)",
+      "help": "scheduler.configが一度も設定されていない場合にsched.Configがフォールバックする初期値です。この値を書き換えても稼働中のデーモンには何も変化がなく、次回の新規起動時の開始値のみが変わります。"
+    },
+    "scheduling.seed.priority_jump_cap": {
+      "label": "優先度ジャンプ上限(起動時デフォルト)",
+      "help": "優先度ジャンプ上限の初期値です — 「起動時デフォルト」の意味は上のアイドル時アンロードの説明を参照してください。"
+    },
+    "scheduling.seed.reservation_soon_min": {
+      "label": "予約間近ウィンドウ(起動時デフォルト)",
+      "help": "予約間近ウィンドウの初期値です — 「起動時デフォルト」の意味は上のアイドル時アンロードの説明を参照してください。"
+    },
+    "scheduling.seed.small_job_token_threshold": {
+      "label": "小規模ジョブのトークンしきい値(起動時デフォルト)",
+      "help": "小規模ジョブのトークンしきい値の初期値です — 「起動時デフォルト」の意味は上のアイドル時アンロードの説明を参照してください。"
+    },
+    "security.forward_auth.header_name": {
+      "label": "Forward-authヘッダー名",
+      "help": "network_providerがforward_auth_headerの場合に、リバースプロキシが認証済みユーザー名を設定するHTTPヘッダー名です。"
+    },
+    "security.forward_auth.trusted_cidrs": {
+      "label": "信頼するCIDR",
+      "help": "forward-authヘッダーの設定を許可するCIDR範囲をカンマ区切りで指定します。このアプリで最も重要なチェックです — 自分自身のアドレスを除外してしまう保存は、警告だけでなく完全に拒否されます。完全なロックアウトはデータベースへの直接アクセスなしには復旧できません。"
+    },
+    "smith.brain_chain": {
+      "label": "smithの頭脳フォールバックチェーン",
+      "help": "smithが頭脳へエスカレーションする必要がある際に順に試すローカルコンフィグの並び順です — 読み込み済みでアイドル状態のメンバーは読み込み待ちなしで応答し、それ以外の場合はsmith.modelに向かってチェーンを下っていきます。"
+    },
+    "smith.build_refresh_watchlist": {
+      "label": "build-refresh監視リスト",
+      "help": "追跡対象のビルドに乖離が生じた際、取得したアップストリームのコミット件名に対してsmithが照合するキーワードです — ヒットした場合は乖離しきい値に関わらず表示されます。"
+    },
+    "smith.handoff_offerings": {
+      "label": "smithのハンドオフ用オファリング順序",
+      "help": "smithの頭脳のスロットを解放する必要がある際に、自己退避のハンドオフが順に試すリモートオファリングの並び順です。"
+    },
+    "smith.model": {
+      "label": "smithの頭脳モデル",
+      "help": "smithが思考する必要がある際にa0経由で呼び出すコンフィグまたはオファリングです。空欄または解決不能な場合、smithはモデルなしで回答します。"
+    },
+    "smith.schedule.deep": {
+      "label": "ディープスイープ間隔",
+      "help": "低速なネットワークプローブを含む、smithのチェック一式全体を実行する頻度です。"
+    },
+    "smith.schedule.quick": {
+      "label": "クイックスイープ間隔",
+      "help": "smithがクイックチェックを実行する頻度です(Goのduration文字列、例: 60m)。"
+    },
+    "smith.thresholds.build_refresh_behind_n": {
+      "label": "Build-refresh乖離しきい値",
+      "help": "smithが再ビルドを提案するまでに、追跡対象のビルドがアップストリームより何コミット遅れている必要があるかです。しきい値未満の乖離でも情報として検出結果には表示されますが、再ビルドは提案されません。"
+    },
+    "smith.thresholds.compressor_failopen_warn_pct": {
+      "label": "コンプレッサーfail-open警告率",
+      "help": "fail-open発生率のしきい値(%)です — 直近1時間の発生率がこの値を超えると、smithはコンプレッサーのfail-open予算引き上げを提案します。"
+    },
+    "smith.thresholds.device_lost_window_minutes": {
+      "label": "デバイスロスト検出ウィンドウ",
+      "help": "GPUのデバイスロストイベントが解決済みとみなされるまで、smithがどれだけ過去まで遡って探すかの時間です。"
+    },
+    "smith.thresholds.disk_crit_pct": {
+      "label": "ディスク危険しきい値",
+      "help": "smithのdisk_spaceチェックがcritを報告するディスク使用率(%)です。"
+    },
+    "smith.thresholds.disk_warn_pct": {
+      "label": "ディスク警告しきい値",
+      "help": "smithのdisk_spaceチェックがwarnを報告するディスク使用率(%)です。"
+    },
+    "smith.thresholds.gtt_crit_pct": {
+      "label": "GTT危険しきい値",
+      "help": "smithのgtt_ceilingチェックがcritを報告するGTTプール使用率(%)です。"
+    },
+    "smith.thresholds.gtt_warn_pct": {
+      "label": "GTT警告しきい値",
+      "help": "smithのgtt_ceilingチェックがwarnを報告するGTTプール使用率(%)です。"
+    },
+    "smith.web.api_keys": {
+      "label": "ウェブプロバイダーのURLとAPIキー",
+      "help": "searxngとfirecrawlのベースURLと(任意の)APIキーです。"
+    },
+    "smith.web.cache_ttl": {
+      "label": "ウェブキャッシュTTL",
+      "help": "検索または取得結果をsmithが再取得するまで再利用する時間です(Goのduration文字列、例: 6h)。"
+    },
+    "smith.web.enabled": {
+      "label": "ウェブ調査を有効化",
+      "help": "ウェブ調査(検索+取得)全体の切り替えです。デフォルトはオン — オフにするとsmithはローカルの根拠のみを使用します。"
+    },
+    "smith.web.provider_order": {
+      "label": "ウェブプロバイダーの順序",
+      "help": "取得(fetch)に対応したアダプター間の優先順位です(searxngは検索のみ対応。directはこの順序に関わらず常に最後に試されます)。"
+    },
+    "voice.base.enabled": {
+      "label": "ベース / クローン: 有効",
+      "help": "ベース / クローンエンジンをそもそも使用するかどうかです。無効にすると、黙ってフォールバックする代わりにこのエンジンへのリクエストをすべて拒否します。"
+    },
+    "voice.base.mode": {
+      "label": "ベース / クローン: モード",
+      "help": "「常駐」はエンジンのsystemdユニットを常時起動し続けます(高速ですがGPUメモリを常時占有します)。「利用可能」は常駐プロセスなしでリクエストに応答します(既存のCLI呼び出しごとの再読み込みによるフォールバック — kokoroにはこのフォールバック階層がないため、kokoroでは「利用可能」は「常駐」と同じ挙動になります)。「無効」はエンジンへのリクエストをすべて拒否します。",
+      "options": {
+        "resident": "常駐",
+        "available": "利用可能",
+        "disabled": "無効"
+      }
+    },
+    "voice.base.unit": {
+      "label": "ベース / クローン: systemdユニット",
+      "help": "このエンジンの常駐プロセスが動作するsystemdユニット名です(例: forge-tts-custom, kokoro)。空欄の場合、デーモンはこのエンジンのプロセスを管理しません — 「常駐」モードでも起動対象がなく、「利用可能」と同じ結果になります。",
+      "placeholder": "専用サービスなし"
+    },
+    "voice.base.url": {
+      "label": "ベース / クローン: バックエンドURL",
+      "help": "forge-ttsがこのエンジンの常駐バックエンドに到達するアドレスです(例: http://127.0.0.1:8091)。空欄は未設定を意味します — Qwen系の3種はCLI経由にフォールバックし、kokoroは単に到達不能になります。",
+      "placeholder": "未設定"
+    },
+    "voice.customvoice.enabled": {
+      "label": "カスタムボイス: 有効",
+      "help": "カスタムボイスエンジンをそもそも使用するかどうかです。無効にすると、黙ってフォールバックする代わりにこのエンジンへのリクエストをすべて拒否します。"
+    },
+    "voice.customvoice.mode": {
+      "label": "カスタムボイス: モード",
+      "help": "「常駐」はエンジンのsystemdユニットを常時起動し続けます(高速ですがGPUメモリを常時占有します)。「利用可能」は常駐プロセスなしでリクエストに応答します(既存のCLI呼び出しごとの再読み込みによるフォールバック — kokoroにはこのフォールバック階層がないため、kokoroでは「利用可能」は「常駐」と同じ挙動になります)。「無効」はエンジンへのリクエストをすべて拒否します。",
+      "options": {
+        "resident": "常駐",
+        "available": "利用可能",
+        "disabled": "無効"
+      }
+    },
+    "voice.customvoice.unit": {
+      "label": "カスタムボイス: systemdユニット",
+      "help": "このエンジンの常駐プロセスが動作するsystemdユニット名です(例: forge-tts-custom, kokoro)。空欄の場合、デーモンはこのエンジンのプロセスを管理しません — 「常駐」モードでも起動対象がなく、「利用可能」と同じ結果になります。",
+      "placeholder": "専用サービスなし"
+    },
+    "voice.customvoice.url": {
+      "label": "カスタムボイス: バックエンドURL",
+      "help": "forge-ttsがこのエンジンの常駐バックエンドに到達するアドレスです(例: http://127.0.0.1:8091)。空欄は未設定を意味します — Qwen系の3種はCLI経由にフォールバックし、kokoroは単に到達不能になります。",
+      "placeholder": "未設定"
+    },
+    "voice.kokoro.enabled": {
+      "label": "Kokoro(高速ティア): 有効",
+      "help": "Kokoro(高速ティア)エンジンをそもそも使用するかどうかです。無効にすると、黙ってフォールバックする代わりにこのエンジンへのリクエストをすべて拒否します。"
+    },
+    "voice.kokoro.mode": {
+      "label": "Kokoro(高速ティア): モード",
+      "help": "「常駐」はエンジンのsystemdユニットを常時起動し続けます(高速ですがGPUメモリを常時占有します)。「利用可能」は常駐プロセスなしでリクエストに応答します(既存のCLI呼び出しごとの再読み込みによるフォールバック — kokoroにはこのフォールバック階層がないため、kokoroでは「利用可能」は「常駐」と同じ挙動になります)。「無効」はエンジンへのリクエストをすべて拒否します。",
+      "options": {
+        "resident": "常駐",
+        "available": "利用可能",
+        "disabled": "無効"
+      }
+    },
+    "voice.kokoro.unit": {
+      "label": "Kokoro(高速ティア): systemdユニット",
+      "help": "このエンジンの常駐プロセスが動作するsystemdユニット名です(例: forge-tts-custom, kokoro)。空欄の場合、デーモンはこのエンジンのプロセスを管理しません — 「常駐」モードでも起動対象がなく、「利用可能」と同じ結果になります。",
+      "placeholder": "専用サービスなし"
+    },
+    "voice.kokoro.url": {
+      "label": "Kokoro(高速ティア): バックエンドURL",
+      "help": "forge-ttsがこのエンジンの常駐バックエンドに到達するアドレスです(例: http://127.0.0.1:8091)。空欄は未設定を意味します — Qwen系の3種はCLI経由にフォールバックし、kokoroは単に到達不能になります。",
+      "placeholder": "未設定"
+    },
+    "voice.voicedesign.enabled": {
+      "label": "ボイスデザイン: 有効",
+      "help": "ボイスデザインエンジンをそもそも使用するかどうかです。無効にすると、黙ってフォールバックする代わりにこのエンジンへのリクエストをすべて拒否します。"
+    },
+    "voice.voicedesign.mode": {
+      "label": "ボイスデザイン: モード",
+      "help": "「常駐」はエンジンのsystemdユニットを常時起動し続けます(高速ですがGPUメモリを常時占有します)。「利用可能」は常駐プロセスなしでリクエストに応答します(既存のCLI呼び出しごとの再読み込みによるフォールバック — kokoroにはこのフォールバック階層がないため、kokoroでは「利用可能」は「常駐」と同じ挙動になります)。「無効」はエンジンへのリクエストをすべて拒否します。",
+      "options": {
+        "resident": "常駐",
+        "available": "利用可能",
+        "disabled": "無効"
+      }
+    },
+    "voice.voicedesign.unit": {
+      "label": "ボイスデザイン: systemdユニット",
+      "help": "このエンジンの常駐プロセスが動作するsystemdユニット名です(例: forge-tts-custom, kokoro)。空欄の場合、デーモンはこのエンジンのプロセスを管理しません — 「常駐」モードでも起動対象がなく、「利用可能」と同じ結果になります。",
+      "placeholder": "専用サービスなし"
+    },
+    "voice.voicedesign.url": {
+      "label": "ボイスデザイン: バックエンドURL",
+      "help": "forge-ttsがこのエンジンの常駐バックエンドに到達するアドレスです(例: http://127.0.0.1:8091)。空欄は未設定を意味します — Qwen系の3種はCLI経由にフォールバックし、kokoroは単に到達不能になります。",
+      "placeholder": "未設定"
+    }
+  }
+}

@@ -101,27 +101,32 @@ type schedulerJobBody struct {
 
 var validSlots = map[string]bool{"a1": true, "a2": true, "a3": true, "a4": true}
 
-func (b schedulerJobBody) validate(cfg *configView) map[string]string {
+func (b schedulerJobBody) validate(cfg *configView) (map[string]string, map[string]string) {
 	fields := map[string]string{}
+	codes := map[string]string{}
 	if strings.TrimSpace(b.Name) == "" {
 		fields["name"] = "is required"
+		codes["name"] = "required"
 	} else if len(b.Name) > 64 {
 		fields["name"] = "must be at most 64 characters"
 	}
 	if strings.TrimSpace(b.Cron) == "" {
 		fields["cron"] = "is required"
+		codes["cron"] = "required"
 	} else if _, err := cron.Parse(b.Cron); err != nil {
 		fields["cron"] = err.Error()
 	}
 	if strings.TrimSpace(b.ConfigName) == "" {
 		fields["config_name"] = "is required"
+		codes["config_name"] = "required"
 	} else if cfg != nil && !cfg.hasConfig(b.ConfigName) {
 		fields["config_name"] = fmt.Sprintf("unknown config %q", b.ConfigName)
 	}
 	if b.Slot != "" && !validSlots[b.Slot] {
 		fields["slot"] = "must be one of: a1, a2, a3, a4 (empty = scheduler chooses)"
+		codes["slot"] = "must_be_one_of"
 	}
-	return fields
+	return fields, codes
 }
 
 // configView is the minimal read seam over Deps.Config for validation.
@@ -164,12 +169,12 @@ func (s *Server) handleSchedulerJobCreate(w http.ResponseWriter, r *http.Request
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := b.validate(s.configNamesView()); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := b.validate(s.configNamesView()); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	if s.deps.SchedulerJobs == nil {
-		writeError(w, http.StatusServiceUnavailable, "scheduler-jobs store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "scheduler-jobs"}, "scheduler-jobs store not wired")
 		return
 	}
 
@@ -185,7 +190,7 @@ func (s *Server) handleSchedulerJobCreate(w http.ResponseWriter, r *http.Request
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
-			writeValidationError(w, map[string]string{"name": "already exists"})
+			writeValidationErrorCodes(w, map[string]string{"name": "already exists"}, map[string]string{"name": "already_exists"})
 			return
 		}
 		writeInternalError(w, err)
@@ -217,12 +222,12 @@ func (s *Server) handleSchedulerJobUpdate(w http.ResponseWriter, r *http.Request
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := b.validate(s.configNamesView()); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := b.validate(s.configNamesView()); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	if s.deps.SchedulerJobs == nil {
-		writeError(w, http.StatusServiceUnavailable, "scheduler-jobs store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "scheduler-jobs"}, "scheduler-jobs store not wired")
 		return
 	}
 	ctx := r.Context()
@@ -238,7 +243,7 @@ func (s *Server) handleSchedulerJobUpdate(w http.ResponseWriter, r *http.Request
 	existing.Enabled = derefBool(b.Enabled, true)
 	if err := s.deps.SchedulerJobs.Update(ctx, existing); err != nil {
 		if isUniqueViolation(err) {
-			writeValidationError(w, map[string]string{"name": "already exists"})
+			writeValidationErrorCodes(w, map[string]string{"name": "already exists"}, map[string]string{"name": "already_exists"})
 			return
 		}
 		writeInternalError(w, err)
@@ -259,7 +264,7 @@ func (s *Server) handleSchedulerJobDelete(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if s.deps.SchedulerJobs == nil {
-		writeError(w, http.StatusServiceUnavailable, "scheduler-jobs store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "scheduler-jobs"}, "scheduler-jobs store not wired")
 		return
 	}
 	if err := s.deps.SchedulerJobs.Delete(r.Context(), id); err != nil {
@@ -281,7 +286,7 @@ func (s *Server) handleSchedulerJobRunNow(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if s.deps.SchedulerJobs == nil || s.deps.Sched == nil {
-		writeError(w, http.StatusServiceUnavailable, "scheduler not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "scheduler"}, "scheduler not wired")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -320,7 +325,7 @@ func (s *Server) handleSchedulerJobRunNow(w http.ResponseWriter, r *http.Request
 func jobIDOf(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid job id")
+		writeErrorCode(w, http.StatusBadRequest, "invalid_id", map[string]any{"resource": "job"}, "invalid job id")
 		return 0, false
 	}
 	return id, true

@@ -1,11 +1,12 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Bay } from "../components/Bay";
 import { Icon } from "../components/Icon";
 import { ServiceChip } from "../components/ServicesBar";
 import { UnifiedModelCarousel } from "../components/UnifiedModelCarousel";
 import { AskSmithButton } from "../components/smith/AskSmithButton";
 import { SmithChatTray } from "../components/smith/SmithChatTray";
-import { formatCurrency } from "../lib/format";
+import { appLocale, formatCurrency } from "../lib/format";
 import { sortConfigCards, type ConfigSortMode } from "../lib/modelSort";
 import { providerIconSlug } from "../lib/providerPresets";
 import { useConfigCards, useFavorites, useInfraServices, useMetrics, useProviders, useReservations, useSchedulerStatus, useStatus, useUpdateProvider } from "../lib/queries";
@@ -46,19 +47,20 @@ import type { Provider, ProviderHealth } from "../lib/types";
 // billing_console_url link, BALANCE/SPEND tagging). Usability pass #2
 // (2026-07-29): moved from the services strip to a fixed column on the
 // right of the Load Bays section.
-function healthTitle(h: ProviderHealth): string {
+function healthTitle(h: ProviderHealth, t: (key: string, opts?: Record<string, unknown>) => string): string {
   const parts: string[] = [h.state];
-  if (h.source && h.source !== "none") parts.push(`source: ${h.source.replace(/_/g, " ")}`);
+  if (h.source && h.source !== "none") parts.push(t("provider.source", { source: h.source.replace(/_/g, " ") }));
   if (h.detail) parts.push(h.detail);
   return parts.join(" · ");
 }
 
 function formatCreditsAsOf(epochSec: number): string {
   const d = new Date(epochSec * 1000);
-  return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  return d.toLocaleString(appLocale(), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 function ProviderCreditTile({ p }: { p: Provider }) {
+  const { t } = useTranslation("console");
   const { canAdmin } = useSession();
   const update = useUpdateProvider();
   const disabled = !p.enabled;
@@ -70,22 +72,24 @@ function ProviderCreditTile({ p }: { p: Provider }) {
   const text = !p.billing_enabled
     ? ""
     : !supported
-      ? "no API" // was "no balance API" — clipped in a 1-col-width tile (caught live 2026-07-29)
+      ? t("provider.no_api") // was "no balance API" — clipped in a 1-col-width tile (caught live 2026-07-29)
       : value != null
         ? formatCurrency(value, currency)
         : "—";
   const kindLabel =
     balance != null
-      ? `BALANCE${p.credits.as_of != null ? ` · as of ${formatCreditsAsOf(p.credits.as_of)}` : ""}`
+      ? p.credits.as_of != null
+        ? t("provider.balance_as_of", { when: formatCreditsAsOf(p.credits.as_of) })
+        : t("provider.balance")
       : spend != null
-        ? `SPEND · ${p.credits.spend_period_label ?? "period spend"}`
+        ? t("provider.spend_period", { period: p.credits.spend_period_label ?? t("provider.spend_period_fallback") })
         : null;
   const hasAmount = p.billing_enabled && supported && value != null;
   // 2026-08-14: the light is gone — the chip's border glow carries health
   // (same language as the service chips).
   const glow = disabled ? "off" : ({ reachable: "on", degraded: "warn", down: "crit", unknown: "off" } as const)[p.health.state];
   return (
-    <div className={`cchip cchip-provider cchip-${glow}`} title={[disabled ? "disabled" : null, healthTitle(p.health), kindLabel].filter(Boolean).join(" — ")}>
+    <div className={`cchip cchip-provider cchip-${glow}`} title={[disabled ? t("provider.disabled") : null, healthTitle(p.health, t), kindLabel].filter(Boolean).join(" — ")}>
       <Icon slug={providerIconSlug(p.name)} name={p.name} sm />
       <div className="nm">{p.name}</div>
       <span className="pu" style={{ marginLeft: "auto", fontSize: 11, color: hasAmount ? "var(--ok)" : "var(--text-dim)", fontWeight: hasAmount ? 700 : 400 }}>
@@ -96,7 +100,7 @@ function ProviderCreditTile({ p }: { p: Provider }) {
           className="icon-btn action"
           style={{ width: 20, height: 20, fontSize: 10, flex: "0 0 auto" }}
           disabled={update.isPending}
-          title={p.enabled ? "Stop routing this provider (keys and offerings are kept)" : "Resume routing this provider"}
+          title={p.enabled ? t("provider.stop_routing_title") : t("provider.resume_routing_title")}
           onClick={(e) => {
             e.stopPropagation();
             update.mutate({ id: p.id, req: { enabled: !p.enabled } });
@@ -110,7 +114,7 @@ function ProviderCreditTile({ p }: { p: Provider }) {
           href={p.billing_console_url}
           target="_blank"
           rel="noreferrer"
-          title={`Open ${p.name}'s billing page`}
+          title={t("provider.billing_page_title", { name: p.name })}
           style={{ color: "var(--text-mute)", fontSize: 11, flex: "0 0 auto" }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -128,6 +132,7 @@ function ProviderCreditTile({ p }: { p: Provider }) {
 // GTT allocation (Strix Halo unified memory — same figure ResourceTrendWidget
 // labels "Memory (GTT)"), not system RAM.
 function ResourceBar() {
+  const { t } = useTranslation("console");
   const metrics = useMetrics();
   const m = metrics.data;
 
@@ -136,7 +141,7 @@ function ResourceBar() {
   const vramPct = vramUsed != null && vramTotal ? (vramUsed / vramTotal) * 100 : null;
 
   const items = [
-    { key: "vram", label: "VRAM", pct: vramPct, fill: "#FF006E" },
+    { key: "vram", label: t("resource_bar.vram"), pct: vramPct, fill: "#FF006E" },
   ];
 
   return (
@@ -157,6 +162,7 @@ function ResourceBar() {
 }
 
 export function Console() {
+  const { t } = useTranslation("console");
   const status = useStatus();
   const schedulerStatus = useSchedulerStatus();
   const infraServices = useInfraServices();
@@ -197,13 +203,13 @@ export function Console() {
               <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{a.msg}</span>
               <AskSmithButton
                 context={[{ code: a.code, message: a.msg, source: "console", at: Math.floor(Date.now() / 1000), unit: a.unit }]}
-                title={`Ask smith about ${a.code}`}
+                title={t("alerts.ask_smith_title", { code: a.code })}
               />
               <a
                 href="#help/smith"
                 style={{ marginLeft: "auto", fontSize: 10, color: "var(--text-mute)" }}
               >
-                investigate →
+                {t("alerts.investigate")}
               </a>
             </div>
           ))}
@@ -229,7 +235,7 @@ export function Console() {
             ))}
           </div>
         ) : (
-          <div className="empty-note">Loading slot status…</div>
+          <div className="empty-note">{t("bays.loading_status")}</div>
         )}
         {(providerList.length > 0 || comfyServices.length > 0) && (
           <div className="provider-col">
@@ -247,7 +253,7 @@ export function Console() {
           flat deck, one slide per config, with the pre-carousel sort
           toggle retained (operator follow-up same day). */}
       <div className="eyebrow" id="model-gallery" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <span>Choose a config</span>
+        <span>{t("gallery.title")}</span>
         <div className="sort-toggle" style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
           {(["alpha", "use", "new"] as const).map((m) => (
             <button
@@ -256,7 +262,7 @@ export function Console() {
               style={{ fontSize: 11, padding: "3px 10px" }}
               onClick={() => setSortMode(m)}
             >
-              {m === "alpha" ? "A–Z" : m === "use" ? "most used" : "newest"}
+              {m === "alpha" ? t("gallery.sort_alpha") : m === "use" ? t("gallery.sort_most_used") : t("gallery.sort_newest")}
             </button>
           ))}
         </div>
@@ -269,7 +275,7 @@ export function Console() {
           variant="config"
         />
       ) : (
-        <div className="empty-note">Loading config registry…</div>
+        <div className="empty-note">{t("gallery.loading")}</div>
       )}
     </section>
   );

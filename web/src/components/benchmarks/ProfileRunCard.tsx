@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Trans, useTranslation } from "react-i18next";
 import { ApiError, apiErrorMessage } from "../../lib/api";
 import { depthLabel } from "../../lib/profileFormat";
 import { qk, useProfileActive, useProfileProgress, useProfileRun, useStatus, type ProfileProgressState } from "../../lib/queries";
@@ -89,42 +90,44 @@ export type ProfileRunController = ReturnType<typeof useProfileRunController>;
 // publishProgress calls) — this used to be a flat Record<string,string>
 // showing the same static text regardless of what the run had actually
 // measured so far. Now a function reading ProfileProgressEvent's fields.
-function phaseLabel(p: ProfileProgressState | null): string {
+function phaseLabel(p: ProfileProgressState | null, t: (key: string, opts?: Record<string, unknown>) => string): string {
   if (!p) return "";
+  const tp = (key: string, opts?: Record<string, unknown>) => t(`benchmarks.profile_run.phase.${key}`, opts);
   switch (p.phase) {
     case "evicting":
       return p.already_loaded
-        ? `${p.mode ?? "Target"} already loaded in ${p.target_slot ?? "a slot"} — reusing it, evicting the rest…`
-        : "Evicting all slots (A1–A4)…";
+        ? tp("evicting_reusing", { mode: p.mode ?? tp("target_fallback"), slot: p.target_slot ?? tp("slot_fallback") })
+        : tp("evicting_all");
     case "loading":
-      return `Loading model alone in ${p.slot ?? "a slot"}…`;
+      return tp("loading", { slot: p.slot ?? tp("slot_fallback") });
     case "verifying":
-      return "Verifying actual n_ctx…";
+      return tp("verifying");
     case "filling":
       return p.depth_target != null
-        ? `Filling context to ${p.depth_target.toLocaleString()} tokens${p.actual_n_ctx ? ` (${depthLabel(p.depth_target, p.actual_n_ctx)})` : ""}…`
-        : "Filling context with heterogeneous data…";
+        ? tp("filling", { target: p.depth_target.toLocaleString(), suffix: p.actual_n_ctx ? tp("at_depth_paren", { depth: depthLabel(p.depth_target, p.actual_n_ctx, t) }) : "" })
+        : tp("filling_heterogeneous");
     case "measuring":
-      return "Measuring peak memory…";
+      return tp("measuring");
     case "benchmarking":
       if (p.depth_tokens != null) {
-        const depth = p.actual_n_ctx ? ` at ${depthLabel(p.depth_tokens, p.actual_n_ctx)}` : ` at ${p.depth_tokens.toLocaleString()} tokens`;
-        const tps = p.pp2048_tps != null || p.tg128_tps != null
-          ? ` — pp ${p.pp2048_tps?.toFixed(1) ?? "…"} t/s, tg ${p.tg128_tps?.toFixed(1) ?? "…"} t/s`
+        const depthSuffix = p.actual_n_ctx ? tp("at_depth", { depth: depthLabel(p.depth_tokens, p.actual_n_ctx, t) }) : tp("at_tokens", { tokens: p.depth_tokens.toLocaleString() });
+        const tpsSuffix = p.pp2048_tps != null || p.tg128_tps != null
+          ? tp("tps_suffix", { pp: p.pp2048_tps?.toFixed(1) ?? "…", tg: p.tg128_tps?.toFixed(1) ?? "…" })
           : "";
-        return `Benchmarking${depth}${tps}`;
+        return tp("benchmarking", { depthSuffix, tpsSuffix });
       }
-      return "Benchmarking prefill/decode T/s…";
+      return tp("benchmarking_default");
     case "done":
-      return "Done — profile recorded.";
+      return tp("done");
     case "failed":
-      return "Failed.";
+      return tp("failed");
     default:
       return "";
   }
 }
 
 export function ProfileRunCard({ controller }: { controller: ProfileRunController }) {
+  const { t } = useTranslation("settings");
   const status = useStatus();
   const qc = useQueryClient();
   const {
@@ -159,46 +162,46 @@ export function ProfileRunCard({ controller }: { controller: ProfileRunControlle
           borderLeft: `3px solid ${progress?.phase === "failed" ? "var(--crit)" : "var(--warn)"}`,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            {polling && <ScanFrame title="Profile run in progress" />}
+            {polling && <ScanFrame title={t("benchmarks.profile_run.in_progress_title")} />}
             <span style={{
               fontSize: 12, fontWeight: 600,
               color: progress?.phase === "failed" ? "var(--crit)" : "var(--warn)",
             }}>
               {submitting
-                ? "Starting profile run…"
+                ? t("benchmarks.profile_run.starting")
                 : progress?.phase === "failed"
-                  ? "Profile run FAILED"
+                  ? t("benchmarks.profile_run.failed_banner")
                   : progress?.phase === "done"
-                    ? "Profile complete"
-                    : "Profile run in progress"}
+                    ? t("benchmarks.profile_run.complete_banner")
+                    : t("benchmarks.profile_run.in_progress_banner")}
             </span>
           </div>
           <div style={{ fontSize: 13, marginBottom: 4 }}>
             {submitting
-              ? "Sending request to evict all slots…"
-              : phaseLabel(progress) || progress?.phase}
+              ? t("benchmarks.profile_run.sending_request")
+              : phaseLabel(progress, t) || progress?.phase}
           </div>
           {progress?.mode && (
             <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 2 }}>
-              mode: <span style={{ fontFamily: "var(--mono)" }}>{progress.mode}</span>
+              {t("benchmarks.profile_run.mode_label")} <span style={{ fontFamily: "var(--mono)" }}>{progress.mode}</span>
             </div>
           )}
           {(progress?.actual_n_ctx != null) && (
             <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-              actual n_ctx: {progress.actual_n_ctx}
+              {t("benchmarks.profile_run.actual_n_ctx_label", { value: progress.actual_n_ctx })}
               {progress.target_n_ctx != null && progress.actual_n_ctx < progress.target_n_ctx
-                ? ` (requested ${progress.target_n_ctx} — silently reduced)`
+                ? t("benchmarks.profile_run.silently_reduced", { target: progress.target_n_ctx })
                 : ""}
             </div>
           )}
           {(progress?.peak_bytes != null || progress?.safe_bytes != null) && (
             <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-              peak {progress.peak_bytes} bytes → safe {progress.safe_bytes} bytes
+              {t("benchmarks.profile_run.peak_safe", { peak: progress.peak_bytes, safe: progress.safe_bytes })}
             </div>
           )}
           {(progress?.prefill_tps != null || progress?.decode_tps != null) && (
             <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-              prefill {progress.prefill_tps?.toFixed(1)} t/s · decode {progress.decode_tps?.toFixed(1)} t/s
+              {t("benchmarks.profile_run.prefill_decode", { prefill: progress.prefill_tps?.toFixed(1), decode: progress.decode_tps?.toFixed(1) })}
             </div>
           )}
           {progress?.phase === "failed" && progress?.error && (
@@ -213,22 +216,24 @@ export function ProfileRunCard({ controller }: { controller: ProfileRunControlle
                 style={{ fontSize: 11 }}
                 onClick={() => qc.setQueryData(qk.profileProgress, { phase: "idle", running: false })}
               >
-                Dismiss
+                {t("benchmarks.profile_run.dismiss")}
               </button>
             </div>
           )}
           {polling && loadedSlots.length > 0 && progress?.phase === "evicting" && (
             <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 6 }}>
-              Evicting: {loadedSlots.map(([slot, mode]) => `${mode} (${slot})`).join(", ")}
+              {t("benchmarks.profile_run.evicting_label", { list: loadedSlots.map(([slot, mode]) => `${mode} (${slot})`).join(", ") })}
             </div>
           )}
           {polling && (
             <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 6 }}>
-              Slots: {Object.keys(slots).length === 0
-                ? "loading…"
-                : Object.entries(slots).map(([slot, mode]) =>
-                  mode ? `${slot}=${mode}` : `${slot}=empty`
-                ).join(", ")}
+              {t("benchmarks.profile_run.slots_label", {
+                list: Object.keys(slots).length === 0
+                  ? t("benchmarks.profile_run.slots_loading")
+                  : Object.entries(slots).map(([slot, mode]) =>
+                    mode ? `${slot}=${mode}` : `${slot}=${t("benchmarks.profile_run.slot_empty")}`
+                  ).join(", "),
+              })}
             </div>
           )}
         </div>
@@ -247,38 +252,37 @@ export function ProfileRunCard({ controller }: { controller: ProfileRunControlle
           }}
         >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Profile {confirmMode}?</h3>
+            <h3>{t("benchmarks.profile_run.confirm_heading", { mode: confirmMode })}</h3>
             <div className="error-note" style={{ marginBottom: 14, background: "color-mix(in srgb, var(--warn) 12%, transparent)" }}>
-              <b>Warning:</b> {targetAlreadyLoaded
-                ? <>{confirmMode} is already loaded and will be reused, not evicted.</>
-                : <>This loads <b>{confirmMode}</b> alone to measure it.</>}{" "}
+              <b>{t("benchmarks.profile_run.warning_prefix")}</b>{" "}
+              {targetAlreadyLoaded
+                ? t("benchmarks.profile_run.already_loaded_reused", { mode: confirmMode })
+                : <Trans i18nKey="benchmarks.profile_run.loads_alone" ns="settings" values={{ mode: confirmMode }} components={{ b: <b /> }} />}{" "}
               {toEvict.length > 0
-                ? <>Will unload <b>{toEvict.length} of {Object.keys(slots).length} slots</b> to make room.</>
-                : "No other slots need to be evicted."} The slots evicted will remain unloaded after
-              profiling completes — you or the scheduler will need to reload them.
+                ? <Trans i18nKey="benchmarks.profile_run.will_unload" ns="settings" values={{ count: toEvict.length, total: Object.keys(slots).length }} components={{ b: <b /> }} />
+                : t("benchmarks.profile_run.no_other_slots")}{t("benchmarks.profile_run.slots_evicted_note")}
             </div>
             {toEvict.length > 0 && (
               <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 10, lineHeight: 1.55 }}>
-                Will be evicted:
+                {t("benchmarks.profile_run.will_be_evicted")}
                 <ul style={{ margin: "4px 0 0 20px", padding: 0 }}>
                   {toEvict.map(([slot, mode]) => (
-                    <li key={slot}><span style={{ fontFamily: "var(--mono)" }}>{mode}</span> (slot {slot})</li>
+                    <li key={slot}><span style={{ fontFamily: "var(--mono)" }}>{mode}</span>{t("benchmarks.profile_run.slot_suffix", { slot })}</li>
                   ))}
                 </ul>
               </div>
             )}
             <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 14, lineHeight: 1.55 }}>
-              The run takes 1–3 minutes: evict → load target (if needed) → fill context → measure memory →
-              benchmark T/s at 4 depths → record → unload. Progress streams live on this panel.
+              {t("benchmarks.profile_run.run_duration_note")}
             </div>
             <div className="form-actions">
-              <button className="btn" disabled={submitting} onClick={() => setConfirmMode(null)}>Cancel</button>
+              <button className="btn" disabled={submitting} onClick={() => setConfirmMode(null)}>{t("benchmarks.profile_run.cancel")}</button>
               <button
                 className="btn primary"
                 disabled={submitting}
                 onClick={() => startProfile(confirmMode)}
               >
-                {submitting ? "Starting…" : "Evict & Profile"}
+                {submitting ? t("benchmarks.profile_run.starting_ellipsis") : t("benchmarks.profile_run.evict_and_profile")}
               </button>
             </div>
           </div>

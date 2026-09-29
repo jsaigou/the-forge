@@ -86,7 +86,7 @@ func (s *Server) handleModelFiles(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "models dir walk failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "models dir walk failed")
 		return
 	}
 

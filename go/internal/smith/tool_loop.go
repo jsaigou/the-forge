@@ -81,7 +81,7 @@ func clientErrorStatus(err error) int {
 // short-circuits to a single P3-shaped round (byte-identical wire request —
 // TestChatRequest_NoToolsByteIdenticalToP3 covers the request itself; this
 // is the orchestration-level mirror of that guarantee).
-func (s *Smith) runToolLoop(ctx context.Context, convID, msgID int64, sysPrompt, userText, model, mode string, tools []Tool, batcher *tokenBatcher, brainLocal bool, baseURLOverride string) (toolLoopResult, error) {
+func (s *Smith) runToolLoop(ctx context.Context, convID, msgID int64, sysPrompt, userText, model, mode string, tools []Tool, batcher *tokenBatcher, brainLocal bool, baseURLOverride string, lang string) (toolLoopResult, error) {
 	if mode == toolModeOff || len(tools) == 0 {
 		cr, err := s.streamChatCompletion(ctx, chatRequest{
 			Model:           model,
@@ -281,8 +281,8 @@ func (s *Smith) runToolLoop(ctx context.Context, convID, msgID int64, sysPrompt,
 					// at a call syntax becomes the "verified" answer instead
 					// (found live, Sprint 6, smith efficiency initiative — smith's
 					// real fenced-mode production brain was silently affected).
-					messages[0] = chatWireMessage{Role: "system", Content: embeddedAuditPrompt + "\n" + toolsInstructionBlock(tools, mode)}
-					messages = append(messages, chatWireMessage{Role: "user", Content: verifyNudge})
+					messages[0] = chatWireMessage{Role: "system", Content: embeddedAuditPrompt + "\n" + toolsInstructionBlock(tools, mode) + languageDirective(lang)}
+					messages = append(messages, chatWireMessage{Role: "user", Content: verifyNudge + languageDirective(lang)})
 					verifyNudged = true
 					round++
 					continue

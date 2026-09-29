@@ -126,11 +126,16 @@ func runBinaryPaths(ctx context.Context, env *CheckEnv) Finding {
 	sort.Strings(missing)
 	if len(missing) > 0 {
 		return Finding{CheckID: id, Severity: SeverityWarn,
-			Summary:  fmt.Sprintf("%d of %d tracked binary path(s) missing or not executable: %s", len(missing), len(statuses), strings.Join(missing, ", ")),
-			Evidence: ev, KBRefs: []string{"pitfalls:foundry-forge-env-divergence"}}
+			Summary:    fmt.Sprintf("%d of %d tracked binary path(s) missing or not executable: %s", len(missing), len(statuses), strings.Join(missing, ", ")),
+			SummaryKey: "checks.binary_paths.missing",
+			Params:     map[string]any{"missing_count": len(missing), "total_count": len(statuses), "names": strings.Join(missing, ", ")},
+			Evidence:   ev, KBRefs: []string{"pitfalls:foundry-forge-env-divergence"}}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary: fmt.Sprintf("%d binary path(s) checked, all present and executable", len(statuses)), Evidence: ev}
+		Summary:    fmt.Sprintf("%d binary path(s) checked, all present and executable", len(statuses)),
+		SummaryKey: "checks.binary_paths.ok",
+		Params:     map[string]any{"count": len(statuses)},
+		Evidence:   ev}
 }
 
 // runSlotModelIdentity is the ground-truth check: for every loaded slot
@@ -194,6 +199,8 @@ func runSlotModelIdentity(_ context.Context, env *CheckEnv) Finding {
 			Evidence: ev, KBRefs: []string{"pitfalls:foundry-forge-env-divergence"}}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary:  fmt.Sprintf("engine-configured alias matches the actually-running process on %d loaded slot(s)", len(checked)),
-		Evidence: ev}
+		Summary:    fmt.Sprintf("engine-configured alias matches the actually-running process on %d loaded slot(s)", len(checked)),
+		SummaryKey: "checks.slot_model_identity.ok",
+		Params:     map[string]any{"count": len(checked)},
+		Evidence:   ev}
 }

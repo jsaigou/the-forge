@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { SmithRunbookStep } from "../../lib/types";
 import { CopyButton } from "../CopyButton";
 
@@ -62,6 +63,7 @@ export function RunbookCard({
   storageKey?: string;
   whyCantRun?: string;
 }) {
+  const { t } = useTranslation("common");
   const [done, setDone] = useState<Set<number>>(() => loadDone(storageKey));
 
   useEffect(() => {
@@ -76,20 +78,20 @@ export function RunbookCard({
     if (storageKey) saveDone(storageKey, next);
   }
 
-  if (steps.length === 0) return <div className="empty-note">No runbook steps.</div>;
+  if (steps.length === 0) return <div className="empty-note">{t("runbook_card.empty")}</div>;
 
   return (
     <div className="runbook">
       {whyCantRun && (
         <div className="runbook-why-cant-run" style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 6 }}>
-          why smith can't run this: {whyCantRun}
+          {t("runbook_card.why_cant_run_prefix")}{whyCantRun}
         </div>
       )}
       <div className="runbook-header">
         <span style={{ fontSize: 11, color: "var(--text-mute)" }}>
-          {done.size} of {steps.length} done
+          {t("runbook_card.steps_done", { done: done.size, total: steps.length })}
         </span>
-        <CopyButton text={runbookAsShellScript(steps)} title="Copy all steps as a shell script" label="Copy all" />
+        <CopyButton text={runbookAsShellScript(steps)} title={t("runbook_card.copy_all_title")} label={t("runbook_card.copy_all_button")} />
       </div>
       <ol className="runbook-list">
         {steps.map((step, i) => (
@@ -103,16 +105,16 @@ export function RunbookCard({
               {step.command && (
                 <div className="runbook-step-cmd">
                   <code>{step.command}</code>
-                  <CopyButton text={step.command} title="Copy command" sm />
+                  <CopyButton text={step.command} title={t("runbook_card.copy_command_title")} sm />
                 </div>
               )}
               {step.verify && (
                 <div className="runbook-step-verify">
-                  verify: {step.verify}
+                  {t("runbook_card.verify_prefix")}{step.verify}
                   {step.verify_command && (
                     <div className="runbook-step-cmd">
                       <code>{step.verify_command}</code>
-                      <CopyButton text={step.verify_command} title="Copy verify command" sm />
+                      <CopyButton text={step.verify_command} title={t("runbook_card.copy_verify_command_title")} sm />
                     </div>
                   )}
                 </div>

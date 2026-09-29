@@ -185,6 +185,9 @@ Full list in [docs/pitfalls.md](docs/pitfalls.md).
 - Store-backed model catalog with live CRUD APIs
 - Tailscale-aware auth (conditional bypass, per-policy), API keys, TOTP/passkeys
 - Always-on sidecars: embeddings, speech-to-text, text-to-speech
+- Bilingual UI/CLI (English/Japanese) — web dashboard, error messages, Smith's chat + knowledge
+  base, and the `forge` TUI/CLI all switch languages independently per surface; see
+  [docs/adr/0016-localization.md](docs/adr/0016-localization.md)
 
 ## Documentation
 

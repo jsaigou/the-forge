@@ -1,0 +1,60 @@
+{
+  "provider": {
+    "source": "source: {{source}}",
+    "no_api": "no API",
+    "balance": "BALANCE",
+    "balance_as_of": "BALANCE · as of {{when}}",
+    "spend_period": "SPEND · {{period}}",
+    "spend_period_fallback": "period spend",
+    "disabled": "disabled",
+    "stop_routing_title": "Stop routing this provider (keys and offerings are kept)",
+    "resume_routing_title": "Resume routing this provider",
+    "billing_page_title": "Open {{name}}'s billing page"
+  },
+  "resource_bar": {
+    "vram": "VRAM"
+  },
+  "alerts": {
+    "ask_smith_title": "Ask smith about {{code}}",
+    "investigate": "investigate →"
+  },
+  "bays": {
+    "loading_status": "Loading slot status…"
+  },
+  "gallery": {
+    "title": "Choose a config",
+    "sort_alpha": "A–Z",
+    "sort_most_used": "most used",
+    "sort_newest": "newest",
+    "loading": "Loading config registry…"
+  },
+  "bay": {
+    "unload_stage_stopping": "Stopping service…",
+    "unload_stage_draining": "Waiting for GTT memory to drain…",
+    "unload_stage_slow": "Still draining — large models can take several minutes…",
+    "loading_mode": "Loading {{mode}}…",
+    "unloading_mode": "Unloading {{mode}}…",
+    "reserved_active": "reserved · active",
+    "reserved": "reserved",
+    "bay_free": "Bay free",
+    "load_model": "+ Load model",
+    "unload_title": "Unload",
+    "copy_config_title": "Copy config name",
+    "alias_prefix": "Alias: {{names}}",
+    "idle": "● loaded · idle {{idle}}",
+    "active_generating_title": "actively generating",
+    "active": "active",
+    "footprint": "footprint",
+    "context": "context",
+    "badges": "badges"
+  },
+  "services": {
+    "loading": "Loading services…",
+    "start": "Start",
+    "stop": "Stop",
+    "open_in_new_window_title": "Open {{name}} in a new window",
+    "compressor": "Compressor",
+    "passthrough": "passthrough",
+    "passthrough_title": "Compressor bypassed — requests route uncompressed"
+  }
+}
