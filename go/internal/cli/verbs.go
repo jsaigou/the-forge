@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/jsaigou/the-forge/internal/i18n"
 )
 
 // HumanBytes renders a byte count for humans.
@@ -36,11 +39,11 @@ func StatusVerb() error {
 		return err
 	}
 	sc, _ := c.SchedulerStatus()
-	fmt.Printf("host   %s\n", st.Hostname)
-	fmt.Printf("forge  %s\n", st.Version)
-	fmt.Printf("mode   %s\n", st.Mode)
+	fmt.Println(i18n.PadRight(i18n.T("cli.status.label_host"), 6) + " " + st.Hostname)
+	fmt.Println(i18n.PadRight(i18n.T("cli.status.label_forge"), 6) + " " + st.Version)
+	fmt.Println(i18n.PadRight(i18n.T("cli.status.label_mode"), 6) + " " + st.Mode)
 	for _, slot := range []string{"a1", "a2", "a3", "a4"} {
-		model := "(empty)"
+		model := i18n.T("cli.slot.empty")
 		if m, ok := st.Slots[slot]; ok && m != nil && *m != "" {
 			model = *m
 			if sc != nil {
@@ -48,19 +51,19 @@ func StatusVerb() error {
 					model += fmt.Sprintf(" (%s)", humanBytes(b))
 				}
 				if v, ok := sc.IdleSeconds[slot]; ok && v != nil {
-					model += fmt.Sprintf(" idle %.0fs", *v)
+					model += " " + i18n.T("cli.status.idle", *v)
 				}
 			}
 		}
-		fmt.Printf("%-6s %s\n", slot+":", model)
+		fmt.Println(i18n.PadRight(slot+":", 6) + " " + model)
 	}
 	if sc != nil {
 		bd := sc.MemoryBudget
-		fmt.Printf("budget used %s / %s\n", humanBytes(bd.UsedBytes), humanBytes(bd.TotalBytes))
+		fmt.Println(i18n.T("cli.status.budget", humanBytes(bd.UsedBytes), humanBytes(bd.TotalBytes)))
 	}
 	mt, _ := c.Metrics()
 	if mt != nil && mt.GTTUsedBytes != nil && mt.GTTTotalBytes != nil {
-		fmt.Printf("gtt    %s / %s\n", humanBytes(*mt.GTTUsedBytes), humanBytes(*mt.GTTTotalBytes))
+		fmt.Println(i18n.PadRight("gtt", 6) + " " + fmt.Sprintf("%s / %s", humanBytes(*mt.GTTUsedBytes), humanBytes(*mt.GTTTotalBytes)))
 	}
 	return nil
 }
@@ -78,9 +81,9 @@ func ModelsVerb() error {
 	for _, cfg := range cards {
 		def := ""
 		if cfg.IsDefault {
-			def = "  (default)"
+			def = i18n.T("cli.models.default_suffix")
 		}
-		fmt.Printf("%-28s ctx %-8d %s%s\n", cfg.Name, cfg.NCtx, cfg.Status, def)
+		fmt.Printf("%s ctx %s %s%s\n", i18n.PadRight(cfg.Name, 28), i18n.PadRight(fmt.Sprintf("%d", cfg.NCtx), 8), cfg.Status, def)
 	}
 	return nil
 }
@@ -96,15 +99,15 @@ func LoadVerb(mode, slot string) error {
 		return err
 	}
 	if !r.Success {
-		return fmt.Errorf("load failed: %s", r.Message)
+		return fmt.Errorf("%s", i18n.T("cli.load.failed", r.Message))
 	}
-	fmt.Printf("loaded %s on %s (n_ctx=%d)\n", mode, orSlot(slot), r.NCtx)
+	fmt.Println(i18n.T("cli.load.result", mode, orSlot(slot), r.NCtx))
 	return nil
 }
 
 func orSlot(s string) string {
 	if s == "" {
-		return "(default slot)"
+		return i18n.T("cli.load.default_slot")
 	}
 	return s
 }
@@ -120,9 +123,9 @@ func UnloadVerb(slot string) error {
 		return err
 	}
 	if !r.Success {
-		return fmt.Errorf("unload failed: %s", r.Message)
+		return fmt.Errorf("%s", i18n.T("cli.unload.failed", r.Message))
 	}
-	fmt.Printf("unloaded %s\n", slot)
+	fmt.Println(i18n.T("cli.unload.result", slot))
 	return nil
 }
 
@@ -139,22 +142,22 @@ func ServicesVerb(action, name string) error {
 	case "stop":
 		return c.ServiceStop(name)
 	default:
-		return fmt.Errorf("usage: forge services [start|stop <name>]")
+		return errors.New(i18n.T("cli.services.usage"))
 	}
 	l, err := c.InfraServices()
 	if err != nil {
 		return err
 	}
 	for _, s := range l.Services {
-		state := "down"
+		state := i18n.T("cli.services.state_down")
 		if s.Active {
-			state = "up"
+			state = i18n.T("cli.services.state_up")
 		}
 		port := ""
 		if s.Port > 0 {
 			port = fmt.Sprintf(" :%d", s.Port)
 		}
-		fmt.Printf("%-22s %-4s%s\n", s.Label, state, port)
+		fmt.Println(i18n.PadRight(s.Label, 22) + " " + i18n.PadRight(state, 4) + port)
 	}
 	return nil
 }
@@ -179,7 +182,7 @@ func KeyExportVerb(unbound bool) error {
 	}
 	resp, err := c.KeyCreate("forge", "cli-tui", "operator", !unbound, int64(cliKeyTTL.Seconds()))
 	if err != nil {
-		return fmt.Errorf("minting requires admin — run `forge mint-key -kind forge -name cli -role operator` on the host: %w", err)
+		return fmt.Errorf("%s: %w", i18n.T("cli.keyexport.requires_admin"), err)
 	}
 	p := KeyPath()
 	if err := os.MkdirAll(strings.TrimSuffix(p, "/cli.key"), 0o700); err != nil {
@@ -190,6 +193,6 @@ func KeyExportVerb(unbound bool) error {
 		fmt.Println(resp.Token)
 		return err
 	}
-	fmt.Printf("key %s written to %s\n", resp.Key.KeyID, p)
+	fmt.Println(i18n.T("cli.keyexport.written", resp.Key.KeyID, p))
 	return nil
 }

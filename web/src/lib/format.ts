@@ -1,3 +1,16 @@
+import { currentLang } from "./i18n";
+
+// Resolves the Intl locale tag to format with. `undefined` for English
+// preserves the exact pre-i18n behavior (the browser's own locale, whatever
+// it is) — English output is byte-identical to before this file gained a
+// language concept. Japanese is pinned to "ja-JP" explicitly, so numbers and
+// dates follow the operator's chosen UI language even when the browser
+// itself is set to something else (e.g. en-US) — see
+// docs/adr/0016-localization.md.
+export function appLocale(): string | undefined {
+  return currentLang() === "ja" ? "ja-JP" : undefined;
+}
+
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
@@ -24,19 +37,20 @@ export function formatUsd(n: number | null | undefined): string {
 const _ccyCache = new Map<string, Intl.NumberFormat>();
 
 function ccyFormatter(currency: string): Intl.NumberFormat {
-  let f = _ccyCache.get(currency);
+  const key = `${appLocale() ?? ""}:${currency}`;
+  let f = _ccyCache.get(key);
   if (f) return f;
   try {
-    f = new Intl.NumberFormat(undefined, {
+    f = new Intl.NumberFormat(appLocale(), {
       style: "currency",
       currency,
       maximumFractionDigits: 2,
     });
   } catch {
     // Invalid / empty ISO code — fall back to a neutral 2-decimal render.
-    f = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+    f = new Intl.NumberFormat(appLocale(), { maximumFractionDigits: 2 });
   }
-  _ccyCache.set(currency, f);
+  _ccyCache.set(key, f);
   return f;
 }
 
@@ -54,18 +68,18 @@ export function formatCurrency(n: number | null | undefined, currency: string): 
 const _ccyPreciseCache = new Map<string, Intl.NumberFormat>();
 
 function ccyPreciseFormatter(currency: string, digits: number): Intl.NumberFormat {
-  const key = `${currency}:${digits}`;
+  const key = `${appLocale() ?? ""}:${currency}:${digits}`;
   let f = _ccyPreciseCache.get(key);
   if (f) return f;
   try {
-    f = new Intl.NumberFormat(undefined, {
+    f = new Intl.NumberFormat(appLocale(), {
       style: "currency",
       currency,
       minimumFractionDigits: digits,
       maximumFractionDigits: digits,
     });
   } catch {
-    f = new Intl.NumberFormat(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    f = new Intl.NumberFormat(appLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
   }
   _ccyPreciseCache.set(key, f);
   return f;
@@ -96,14 +110,15 @@ export function formatDurationShort(seconds: number | null | undefined): string 
 const _ccyCompactCache = new Map<string, Intl.NumberFormat>();
 
 function ccyCompactFormatter(currency: string): Intl.NumberFormat {
-  let f = _ccyCompactCache.get(currency);
+  const key = `${appLocale() ?? ""}:${currency}`;
+  let f = _ccyCompactCache.get(key);
   if (f) return f;
   try {
-    f = new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 1 });
+    f = new Intl.NumberFormat(appLocale(), { style: "currency", currency, maximumFractionDigits: 1 });
   } catch {
-    f = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+    f = new Intl.NumberFormat(appLocale(), { maximumFractionDigits: 1 });
   }
-  _ccyCompactCache.set(currency, f);
+  _ccyCompactCache.set(key, f);
   return f;
 }
 
@@ -180,12 +195,12 @@ export function formatIdle(seconds: number | null | undefined): string {
 
 export function formatClock(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return d.toLocaleTimeString(appLocale(), { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 export function dayLabel(date: Date): { dn: string; dd: number } {
   return {
-    dn: date.toLocaleDateString([], { weekday: "short" }),
+    dn: date.toLocaleDateString(appLocale(), { weekday: "short" }),
     dd: date.getDate(),
   };
 }
@@ -196,9 +211,20 @@ export function isSameDay(a: Date, b: Date): boolean {
 
 // formatRelativeTime renders a unix-seconds timestamp as "just now" / "Nm
 // ago" / "Nh ago" / "Nd ago" (product/QA sprint, 2026-07-29 — Dashboard
-// notifications panel).
+// notifications panel). English keeps this exact compact form (no translation
+// catalog involved — this is formatting logic, like the date/currency
+// helpers above, not UI copy). Japanese uses Intl.RelativeTimeFormat instead
+// of a hand-translated compact form, since there's no idiomatic Japanese
+// equivalent of "3m ago" this terse.
 export function formatRelativeTime(epochSec: number): string {
   const diffS = Math.max(0, Date.now() / 1000 - epochSec);
+  if (currentLang() === "ja") {
+    if (diffS < 60) return "たった今";
+    const rtf = new Intl.RelativeTimeFormat("ja-JP", { numeric: "always", style: "short" });
+    if (diffS < 3600) return rtf.format(-Math.floor(diffS / 60), "minute");
+    if (diffS < 86400) return rtf.format(-Math.floor(diffS / 3600), "hour");
+    return rtf.format(-Math.floor(diffS / 86400), "day");
+  }
   if (diffS < 60) return "just now";
   if (diffS < 3600) return `${Math.floor(diffS / 60)}m ago`;
   if (diffS < 86400) return `${Math.floor(diffS / 3600)}h ago`;

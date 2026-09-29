@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useSavedFlash } from "../lib/useSavedFlash";
 
 // SaveButton — Sprint K: brief rotate-to-check on a successful save
@@ -8,14 +9,18 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 // ModelEditView.tsx — same repeated contract everywhere (idle label /
 // pending label / disabled), which is what makes a shared component the
 // right call instead of copying the flash logic into each site.
+//
+// label/pendingLabel default to the translated "Save"/"Saving…" — a caller
+// that overrides them with its own literal text is responsible for that
+// text's own translation (i18n Phase 1 extracts each call site in turn).
 export function SaveButton({
   pending,
   isError = false,
   disabled,
   onClick,
   className = "btn primary",
-  label = "Save",
-  pendingLabel = "Saving…",
+  label,
+  pendingLabel,
   type = "button",
 }: {
   pending: boolean;
@@ -27,6 +32,7 @@ export function SaveButton({
   pendingLabel?: string;
   type?: "button" | "submit";
 }) {
+  const { t } = useTranslation("common");
   const saved = useSavedFlash(pending, isError);
   return (
     <button
@@ -35,7 +41,11 @@ export function SaveButton({
       disabled={disabled ?? pending}
       onClick={onClick}
     >
-      {pending ? pendingLabel : saved ? <span className="check">✓ Saved</span> : label}
+      {pending
+        ? (pendingLabel ?? t("save_button.saving"))
+        : saved
+          ? <span className="check">✓ {t("save_button.saved")}</span>
+          : (label ?? t("save_button.save"))}
     </button>
   );
 }

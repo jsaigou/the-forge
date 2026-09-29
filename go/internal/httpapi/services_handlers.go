@@ -178,6 +178,19 @@ func (s *Server) handleInfraServices(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Apply any operator-set ↗ link override (infra.service_links), keyed by
+	// Name — generic across every row above (fixed systemd services,
+	// service_mode rows like ComfyUI, and the LLM Router), not special-cased
+	// per service. A row with no override keeps URL nil and the frontend
+	// falls back to its own hostname:port guess.
+	links := s.resolvedServiceLinks(r.Context())
+	for i := range services {
+		if link, ok := links.Links[services[i].Name]; ok && link != "" {
+			l := link
+			services[i].URL = &l
+		}
+	}
+
 	writeJSON(w, http.StatusOK, infraServicesResponse{Services: services})
 }
 

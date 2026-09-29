@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../../lib/api";
 import { useSmithActions } from "../../lib/queries";
 import { ErrorBoundary } from "../ErrorBoundary";
@@ -40,6 +41,7 @@ function ActionsTrayInner({
   investigationId?: number;
   compact: boolean;
 }) {
+  const { t } = useTranslation("common");
   const actions = useSmithActions(status, investigationId);
 
   if (compact) {
@@ -53,10 +55,10 @@ function ActionsTrayInner({
     );
     const dotColor = pending === 0 ? "var(--text-mute)" : anyBlocked ? "var(--warn)" : "var(--cool)";
     return (
-      <div className="cchip" title="smith actions awaiting approval">
+      <div className="cchip" title={t("actions_tray.awaiting_approval_title")}>
         <span className="sd" style={{ background: dotColor }} />
-        <span className="nm">smith actions</span>
-        <span className="pu">{actions.isLoading ? "…" : `${pending} pending`}</span>
+        <span className="nm">{t("actions_tray.label")}</span>
+        <span className="pu">{actions.isLoading ? "…" : t("actions_tray.pending_count", { count: pending })}</span>
         <a href="#help/smith" style={{ marginLeft: "auto", fontSize: 10, color: "var(--text-mute)" }}>
           →
         </a>
@@ -64,10 +66,10 @@ function ActionsTrayInner({
     );
   }
 
-  if (actions.isLoading) return <div className="empty-note">Loading actions…</div>;
+  if (actions.isLoading) return <div className="empty-note">{t("actions_tray.loading")}</div>;
   if (actions.isError) return <div className="error-note">{apiErrorMessage(actions.error)}</div>;
   const list = actions.data?.actions ?? [];
-  if (list.length === 0) return <div className="empty-note">No actions.</div>;
+  if (list.length === 0) return <div className="empty-note">{t("actions_tray.empty")}</div>;
   return (
     <div>
       {list.map((a) => (

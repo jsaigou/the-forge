@@ -652,16 +652,22 @@ func runGTTCeiling(_ context.Context, env *CheckEnv) Finding {
 	switch {
 	case pct >= env.Thresholds.GTTCritPct:
 		return Finding{CheckID: id, Severity: SeverityCrit,
-			Summary:  fmt.Sprintf("GTT at %.1f%% of ceiling (≥%.0f%% crit)", pct, env.Thresholds.GTTCritPct),
-			Evidence: ev, KBRefs: []string{"pitfalls:gtt-ceiling"}}
+			Summary:    fmt.Sprintf("GTT at %.1f%% of ceiling (≥%.0f%% crit)", pct, env.Thresholds.GTTCritPct),
+			SummaryKey: "checks.gtt_ceiling.crit",
+			Params:     map[string]any{"pct": round1(pct), "threshold": env.Thresholds.GTTCritPct},
+			Evidence:   ev, KBRefs: []string{"pitfalls:gtt-ceiling"}}
 	case pct >= env.Thresholds.GTTWarnPct:
 		return Finding{CheckID: id, Severity: SeverityWarn,
-			Summary:  fmt.Sprintf("GTT at %.1f%% of ceiling (≥%.0f%% warn)", pct, env.Thresholds.GTTWarnPct),
-			Evidence: ev, KBRefs: []string{"pitfalls:gtt-ceiling"}}
+			Summary:    fmt.Sprintf("GTT at %.1f%% of ceiling (≥%.0f%% warn)", pct, env.Thresholds.GTTWarnPct),
+			SummaryKey: "checks.gtt_ceiling.warn",
+			Params:     map[string]any{"pct": round1(pct), "threshold": env.Thresholds.GTTWarnPct},
+			Evidence:   ev, KBRefs: []string{"pitfalls:gtt-ceiling"}}
 	default:
 		return Finding{CheckID: id, Severity: SeverityOK,
-			Summary:  fmt.Sprintf("GTT at %.1f%% of ceiling", pct),
-			Evidence: ev}
+			Summary:    fmt.Sprintf("GTT at %.1f%% of ceiling", pct),
+			SummaryKey: "checks.gtt_ceiling.ok",
+			Params:     map[string]any{"pct": round1(pct)},
+			Evidence:   ev}
 	}
 }
 
@@ -690,16 +696,22 @@ func runDiskSpace(_ context.Context, env *CheckEnv) Finding {
 	switch {
 	case pct >= env.Thresholds.DiskCritPct:
 		return Finding{CheckID: id, Severity: SeverityCrit,
-			Summary:  fmt.Sprintf("disk %.1f%% used (≥%.0f%% crit)", pct, env.Thresholds.DiskCritPct),
-			Evidence: ev}
+			Summary:    fmt.Sprintf("disk %.1f%% used (≥%.0f%% crit)", pct, env.Thresholds.DiskCritPct),
+			SummaryKey: "checks.disk_space.crit",
+			Params:     map[string]any{"pct": round1(pct), "threshold": env.Thresholds.DiskCritPct},
+			Evidence:   ev}
 	case pct >= env.Thresholds.DiskWarnPct:
 		return Finding{CheckID: id, Severity: SeverityWarn,
-			Summary:  fmt.Sprintf("disk %.1f%% used (≥%.0f%% warn)", pct, env.Thresholds.DiskWarnPct),
-			Evidence: ev}
+			Summary:    fmt.Sprintf("disk %.1f%% used (≥%.0f%% warn)", pct, env.Thresholds.DiskWarnPct),
+			SummaryKey: "checks.disk_space.warn",
+			Params:     map[string]any{"pct": round1(pct), "threshold": env.Thresholds.DiskWarnPct},
+			Evidence:   ev}
 	default:
 		return Finding{CheckID: id, Severity: SeverityOK,
-			Summary:  fmt.Sprintf("disk %.1f%% used", pct),
-			Evidence: ev}
+			Summary:    fmt.Sprintf("disk %.1f%% used", pct),
+			SummaryKey: "checks.disk_space.ok",
+			Params:     map[string]any{"pct": round1(pct)},
+			Evidence:   ev}
 	}
 }
 
@@ -758,12 +770,16 @@ func runSlotAgreement(_ context.Context, env *CheckEnv) Finding {
 	ev := map[string]any{"slots_checked": len(sorted), "mismatches": mismatches}
 	if len(mismatches) > 0 {
 		return Finding{CheckID: id, Severity: SeverityWarn,
-			Summary:  fmt.Sprintf("%d slot(s) disagree between unit state and scheduler", len(mismatches)),
-			Evidence: ev, KBRefs: []string{"pitfalls:orphaned-slot-unit"}}
+			Summary:    fmt.Sprintf("%d slot(s) disagree between unit state and scheduler", len(mismatches)),
+			SummaryKey: "checks.slot_agreement.mismatch",
+			Params:     map[string]any{"count": len(mismatches)},
+			Evidence:   ev, KBRefs: []string{"pitfalls:orphaned-slot-unit"}}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary:  fmt.Sprintf("all %d slot(s) agree between unit state and scheduler", len(sorted)),
-		Evidence: ev}
+		Summary:    fmt.Sprintf("all %d slot(s) agree between unit state and scheduler", len(sorted)),
+		SummaryKey: "checks.slot_agreement.ok",
+		Params:     map[string]any{"count": len(sorted)},
+		Evidence:   ev}
 }
 
 // runCapabilityTierCoverage is the maintenance-trigger half of capability-tier
@@ -802,14 +818,17 @@ func runCapabilityTierCoverage(ctx context.Context, env *CheckEnv) Finding {
 	ev := map[string]any{"unclassed": gaps}
 	if len(gaps) == 0 {
 		return Finding{CheckID: id, Severity: SeverityOK,
-			Summary: "every visible config carries a capability tier", Evidence: ev}
+			Summary: "every visible config carries a capability tier", SummaryKey: "checks.capability_tier_coverage.ok", Evidence: ev}
 	}
 	names := make([]string, 0, len(gaps))
 	for _, g := range gaps {
 		names = append(names, g.Name)
 	}
 	summary := fmt.Sprintf("%d visible config(s) have no capability tier: %s", len(gaps), strings.Join(names, ", "))
-	return Finding{CheckID: id, Severity: SeverityInfo, Summary: summary, Evidence: ev}
+	return Finding{CheckID: id, Severity: SeverityInfo, Summary: summary,
+		SummaryKey: "checks.capability_tier_coverage.gap",
+		Params:     map[string]any{"count": len(gaps), "names": strings.Join(names, ", ")},
+		Evidence:   ev}
 }
 
 // runNCtxActual — the silent-GTT-reduction pitfall: llama.cpp may initialize
@@ -863,15 +882,28 @@ func runNCtxActual(ctx context.Context, env *CheckEnv) Finding {
 		first := reduced[0]
 		summary := fmt.Sprintf("slot %s (%s): actual n_ctx %d < configured %d — kernel silently reduced the context",
 			first.Slot, first.Mode, first.Actual, first.Configured)
+		// summaryKey/params pick a distinct ".reduced_more" key (with its own
+		// "extra" param) rather than trying to fold the optional "(+N more)"
+		// suffix into one template — found in review: the first migration
+		// pass at this key added SummaryKey without any way to represent
+		// that suffix at all, silently dropping it from the translated
+		// render for the multi-slot case.
+		summaryKey := "checks.n_ctx_actual.reduced"
+		params := map[string]any{"slot": first.Slot, "mode": first.Mode, "actual": first.Actual, "configured": first.Configured}
 		if len(reduced) > 1 {
 			summary += fmt.Sprintf(" (+%d more)", len(reduced)-1)
+			summaryKey = "checks.n_ctx_actual.reduced_more"
+			params["extra"] = len(reduced) - 1
 		}
 		return Finding{CheckID: id, Severity: SeverityCrit, Summary: summary,
+			SummaryKey: summaryKey, Params: params,
 			Evidence: ev, KBRefs: []string{"pitfalls:silent-context-reduction"}}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary:  fmt.Sprintf("actual n_ctx matches configured on %d loaded slot(s)", len(checked)),
-		Evidence: ev}
+		Summary:    fmt.Sprintf("actual n_ctx matches configured on %d loaded slot(s)", len(checked)),
+		SummaryKey: "checks.n_ctx_actual.ok",
+		Params:     map[string]any{"count": len(checked)},
+		Evidence:   ev}
 }
 
 // configuredNCtx resolves the configured context for a mode: merged config
@@ -925,12 +957,15 @@ func runGPUHang(_ context.Context, env *CheckEnv) Finding {
 	ev := map[string]any{"hung": hung}
 	if len(hung) > 0 {
 		return Finding{CheckID: id, Severity: SeverityCrit,
-			Summary:  fmt.Sprintf("%d GPU hang indicator(s) active", len(hung)),
-			Evidence: ev, KBRefs: []string{"pitfalls:inference-hang"}}
+			Summary:    fmt.Sprintf("%d GPU hang indicator(s) active", len(hung)),
+			SummaryKey: "checks.gpu_hang.active",
+			Params:     map[string]any{"count": len(hung)},
+			Evidence:   ev, KBRefs: []string{"pitfalls:inference-hang"}}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary:  "no GPU hang indicators",
-		Evidence: ev}
+		Summary:    "no GPU hang indicators",
+		SummaryKey: "checks.gpu_hang.ok",
+		Evidence:   ev}
 }
 
 // runGPUDeviceLost — device-lost detection from the journals, the signal
@@ -994,12 +1029,16 @@ func runGPUDeviceLost(ctx context.Context, env *CheckEnv) Finding {
 	ev["matches"] = matches
 	if len(matches) > 0 {
 		return Finding{CheckID: id, Severity: SeverityCrit,
-			Summary:  fmt.Sprintf("%d device-lost signature(s) in journals (last %dm)", len(matches), windowMin),
-			Evidence: ev, KBRefs: []string{"pitfalls:inference-hang"}}
+			Summary:    fmt.Sprintf("%d device-lost signature(s) in journals (last %dm)", len(matches), windowMin),
+			SummaryKey: "checks.gpu_device_lost.detected",
+			Params:     map[string]any{"count": len(matches), "minutes": windowMin},
+			Evidence:   ev, KBRefs: []string{"pitfalls:inference-hang"}}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary:  fmt.Sprintf("no GPU device-lost signatures in journals (last %dm)", windowMin),
-		Evidence: ev}
+		Summary:    fmt.Sprintf("no GPU device-lost signatures in journals (last %dm)", windowMin),
+		SummaryKey: "checks.gpu_device_lost.ok",
+		Params:     map[string]any{"minutes": windowMin},
+		Evidence:   ev}
 }
 
 // matchLines returns up to 5 recent lines matching any of the regexes,
@@ -1060,14 +1099,24 @@ func runAlwaysOnPorts(_ context.Context, env *CheckEnv) Finding {
 	if len(down) > 0 {
 		first := down[0]
 		summary := fmt.Sprintf("service %q not listening on port %v", first["service"], first["port"])
+		// See runNCtxActual's identical fix for why this is a distinct
+		// ".down_more" key rather than a dropped suffix.
+		summaryKey := "checks.always_on_ports.down"
+		params := map[string]any{"name": first["service"], "port": first["port"]}
 		if len(down) > 1 {
 			summary += fmt.Sprintf(" (+%d more)", len(down)-1)
+			summaryKey = "checks.always_on_ports.down_more"
+			params["extra"] = len(down) - 1
 		}
-		return Finding{CheckID: id, Severity: SeverityWarn, Summary: summary, Evidence: ev}
+		return Finding{CheckID: id, Severity: SeverityWarn, Summary: summary,
+			SummaryKey: summaryKey, Params: params,
+			Evidence: ev}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary:  fmt.Sprintf("all %d always-on service port(s) listening", len(names)),
-		Evidence: ev}
+		Summary:    fmt.Sprintf("all %d always-on service port(s) listening", len(names)),
+		SummaryKey: "checks.always_on_ports.ok",
+		Params:     map[string]any{"count": len(names)},
+		Evidence:   ev}
 }
 
 // runForgeSelf — the daemon's own integrity surface: PRAGMA quick_check
@@ -1090,8 +1139,10 @@ func runForgeSelf(ctx context.Context, env *CheckEnv) Finding {
 	ev["quick_check"] = quick
 	if quick != "ok" {
 		return Finding{CheckID: id, Severity: SeverityCrit,
-			Summary:  "DB integrity: PRAGMA quick_check reported " + quick,
-			Evidence: ev}
+			Summary:    "DB integrity: PRAGMA quick_check reported " + quick,
+			SummaryKey: "checks.forge_self.quick_check_failed",
+			Params:     map[string]any{"detail": quick},
+			Evidence:   ev}
 	}
 
 	rows, err := env.Store.SQL().QueryContext(ctx, `PRAGMA foreign_key_check`)
@@ -1100,8 +1151,9 @@ func runForgeSelf(ctx context.Context, env *CheckEnv) Finding {
 		// an integrity failure.
 		ev["foreign_key_check_error"] = err.Error()
 		return Finding{CheckID: id, Severity: SeverityOK,
-			Summary:  "DB integrity ok (foreign_key_check unavailable)",
-			Evidence: ev}
+			Summary:    "DB integrity ok (foreign_key_check unavailable)",
+			SummaryKey: "checks.forge_self.fk_unavailable",
+			Evidence:   ev}
 	}
 	defer rows.Close()
 	fkTables := map[string]int{}
@@ -1120,12 +1172,15 @@ func runForgeSelf(ctx context.Context, env *CheckEnv) Finding {
 	ev["fk_violation_tables"] = fkTables
 	if fkCount > 0 {
 		return Finding{CheckID: id, Severity: SeverityInfo,
-			Summary:  fmt.Sprintf("DB integrity ok; %d known foreign-key violation(s) surfaced (not auto-fixed)", fkCount),
-			Evidence: ev}
+			Summary:    fmt.Sprintf("DB integrity ok; %d known foreign-key violation(s) surfaced (not auto-fixed)", fkCount),
+			SummaryKey: "checks.forge_self.fk_violations",
+			Params:     map[string]any{"count": fkCount},
+			Evidence:   ev}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary:  "DB integrity ok (quick_check + foreign_key_check clean)",
-		Evidence: ev}
+		Summary:    "DB integrity ok (quick_check + foreign_key_check clean)",
+		SummaryKey: "checks.forge_self.ok",
+		Evidence:   ev}
 }
 
 // runA0Reachability — loopback probe of a0's unauthenticated /healthz
@@ -1161,12 +1216,16 @@ func runA0Reachability(ctx context.Context, env *CheckEnv) Finding {
 	ev := map[string]any{"url": url, "status": resp.StatusCode, "latency_ms": latencyMS}
 	if resp.StatusCode != http.StatusOK {
 		return Finding{CheckID: id, Severity: SeverityWarn,
-			Summary:  fmt.Sprintf("a0 healthz returned HTTP %d", resp.StatusCode),
-			Evidence: ev}
+			Summary:    fmt.Sprintf("a0 healthz returned HTTP %d", resp.StatusCode),
+			SummaryKey: "checks.a0_reachability.bad_status",
+			Params:     map[string]any{"status": resp.StatusCode},
+			Evidence:   ev}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary:  fmt.Sprintf("a0 healthy on port %d (%.0fms)", port, latencyMS),
-		Evidence: ev}
+		Summary:    fmt.Sprintf("a0 healthy on port %d (%.0fms)", port, latencyMS),
+		SummaryKey: "checks.a0_reachability.ok",
+		Params:     map[string]any{"port": port, "latency_ms": latencyMS},
+		Evidence:   ev}
 }
 
 // runCompressorReachability — per-proxy health (docs/v5-smith.md §4.2, FR3):
@@ -1224,8 +1283,9 @@ func runCompressorReachability(ctx context.Context, env *CheckEnv) Finding {
 
 	if len(states) == 0 {
 		return Finding{CheckID: id, Severity: SeverityOK,
-			Summary:  "no compressor proxies registered",
-			Evidence: map[string]any{"proxies": states}}
+			Summary:    "no compressor proxies registered",
+			SummaryKey: "checks.compressor_reachability.none",
+			Evidence:   map[string]any{"proxies": states}}
 	}
 
 	down := []proxyState{}
@@ -1237,12 +1297,16 @@ func runCompressorReachability(ctx context.Context, env *CheckEnv) Finding {
 	ev := map[string]any{"proxies": states, "down": down}
 	if len(down) > 0 {
 		return Finding{CheckID: id, Severity: SeverityWarn,
-			Summary:  fmt.Sprintf("%d of %d compressor prox(ies) unhealthy — remote routing may black-hole", len(down), len(states)),
-			Evidence: ev, KBRefs: []string{"pitfalls:compressor-black-hole"}}
+			Summary:    fmt.Sprintf("%d of %d compressor prox(ies) unhealthy — remote routing may black-hole", len(down), len(states)),
+			SummaryKey: "checks.compressor_reachability.unhealthy",
+			Params:     map[string]any{"down": len(down), "total": len(states)},
+			Evidence:   ev, KBRefs: []string{"pitfalls:compressor-black-hole"}}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary:  fmt.Sprintf("all %d compressor prox(ies) healthy", len(states)),
-		Evidence: ev}
+		Summary:    fmt.Sprintf("all %d compressor prox(ies) healthy", len(states)),
+		SummaryKey: "checks.compressor_reachability.ok",
+		Params:     map[string]any{"count": len(states)},
+		Evidence:   ev}
 }
 
 // runCompressorHealth — resource health (Sprint 4, resource bounding +
@@ -1310,19 +1374,24 @@ func runCompressorHealth(ctx context.Context, env *CheckEnv) Finding {
 
 	if len(results) == 0 {
 		return Finding{CheckID: id, Severity: SeverityOK,
-			Summary:  "no compressor proxies registered",
-			Evidence: map[string]any{"proxies": results}}
+			Summary:    "no compressor proxies registered",
+			SummaryKey: "checks.compressor_health.none",
+			Evidence:   map[string]any{"proxies": results}}
 	}
 
 	ev := map[string]any{"proxies": results, "window_hours": windowHours}
 	if len(warn) > 0 {
 		return Finding{CheckID: id, Severity: SeverityWarn,
-			Summary:  fmt.Sprintf("%d of %d compressor(s) show leak-shaped growth or restart churn over %.0fh", len(warn), len(results), windowHours),
-			Evidence: ev}
+			Summary:    fmt.Sprintf("%d of %d compressor(s) show leak-shaped growth or restart churn over %.0fh", len(warn), len(results), windowHours),
+			SummaryKey: "checks.compressor_health.growth",
+			Params:     map[string]any{"warn": len(warn), "total": len(results), "hours": windowHours},
+			Evidence:   ev}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary:  fmt.Sprintf("all %d compressor(s) resource-healthy over %.0fh", len(results), windowHours),
-		Evidence: ev}
+		Summary:    fmt.Sprintf("all %d compressor(s) resource-healthy over %.0fh", len(results), windowHours),
+		SummaryKey: "checks.compressor_health.ok",
+		Params:     map[string]any{"count": len(results), "hours": windowHours},
+		Evidence:   ev}
 }
 
 // runCompressorFailOpen computes the per-proxy fail-open rate over a 1-hour
@@ -1375,18 +1444,23 @@ func runCompressorFailOpen(ctx context.Context, env *CheckEnv) Finding {
 	if len(warn) > 0 {
 		ev := map[string]any{"warn": warn, "ok": ok, "threshold_pct": threshold}
 		return Finding{CheckID: id, Severity: SeverityWarn,
-			Summary:  fmt.Sprintf("%d of %d compressor(s) exceed %.0f%% fail-open rate over 1h", len(warn), len(warn)+len(ok), threshold),
-			Evidence: ev}
+			Summary:    fmt.Sprintf("%d of %d compressor(s) exceed %.0f%% fail-open rate over 1h", len(warn), len(warn)+len(ok), threshold),
+			SummaryKey: "checks.compressor_failopen.exceeded",
+			Params:     map[string]any{"warn": len(warn), "total": len(warn) + len(ok), "threshold": threshold},
+			Evidence:   ev}
 	}
 
 	n := len(ok)
 	if n == 0 {
 		return Finding{CheckID: id, Severity: SeverityOK,
-			Summary: "no compressor proxies with traffic in the last hour"}
+			Summary:    "no compressor proxies with traffic in the last hour",
+			SummaryKey: "checks.compressor_failopen.no_traffic"}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary:  fmt.Sprintf("all %d compressor(s) below %.0f%% fail-open rate over 1h", n, threshold),
-		Evidence: map[string]any{"ok": ok, "threshold_pct": threshold}}
+		Summary:    fmt.Sprintf("all %d compressor(s) below %.0f%% fail-open rate over 1h", n, threshold),
+		SummaryKey: "checks.compressor_failopen.ok",
+		Params:     map[string]any{"count": n, "threshold": threshold},
+		Evidence:   map[string]any{"ok": ok, "threshold_pct": threshold}}
 }
 
 // runBrainResolvable confirms smith.model currently resolves to a local
@@ -1407,7 +1481,8 @@ func runBrainResolvable(ctx context.Context, env *CheckEnv) Finding {
 	}
 	raw, err := env.Store.Settings().Get(ctx, SettingModel)
 	if err != nil || len(raw) == 0 {
-		return Finding{CheckID: id, Severity: SeverityWarn, Summary: "smith.model is unset — brain unresolvable"}
+		return Finding{CheckID: id, Severity: SeverityWarn, Summary: "smith.model is unset — brain unresolvable",
+			SummaryKey: "checks.brain_resolvable.unset"}
 	}
 	var model string
 	if err := json.Unmarshal(raw, &model); err != nil {
@@ -1415,7 +1490,8 @@ func runBrainResolvable(ctx context.Context, env *CheckEnv) Finding {
 	}
 	model = strings.TrimSpace(model)
 	if model == "" {
-		return Finding{CheckID: id, Severity: SeverityWarn, Summary: "smith.model is empty — brain unresolvable"}
+		return Finding{CheckID: id, Severity: SeverityWarn, Summary: "smith.model is empty — brain unresolvable",
+			SummaryKey: "checks.brain_resolvable.empty"}
 	}
 	if env.Catalog == nil {
 		return skipFinding(id, "catalog not wired")
@@ -1426,23 +1502,27 @@ func runBrainResolvable(ctx context.Context, env *CheckEnv) Finding {
 			for _, mode := range env.Sched.Status().Slots {
 				if mode == model {
 					return Finding{CheckID: id, Severity: SeverityOK,
-						Summary: "brain resolves to local config " + model, Evidence: map[string]any{"model": model}}
+						Summary: "brain resolves to local config " + model, SummaryKey: "checks.brain_resolvable.local",
+						Params: map[string]any{"model": model}, Evidence: map[string]any{"model": model}}
 				}
 			}
 		}
 		return Finding{CheckID: id, Severity: SeverityWarn,
-			Summary: "configured brain " + model + " is not currently loaded on any slot", Evidence: map[string]any{"model": model}}
+			Summary: "configured brain " + model + " is not currently loaded on any slot", SummaryKey: "checks.brain_resolvable.not_loaded",
+			Params: map[string]any{"model": model}, Evidence: map[string]any{"model": model}}
 	}
 	if offerings, err := env.Catalog.ListOfferings(ctx); err == nil {
 		for _, o := range offerings {
 			if o.Enabled && o.WireModel == model {
 				return Finding{CheckID: id, Severity: SeverityOK,
-					Summary: "brain resolves to remote offering via " + o.ProviderName, Evidence: map[string]any{"model": model, "provider": o.ProviderName}}
+					Summary: "brain resolves to remote offering via " + o.ProviderName, SummaryKey: "checks.brain_resolvable.remote",
+					Params: map[string]any{"model": model, "provider": o.ProviderName}, Evidence: map[string]any{"model": model, "provider": o.ProviderName}}
 			}
 		}
 	}
 	return Finding{CheckID: id, Severity: SeverityWarn,
-		Summary: "smith.model " + model + " resolves to no local config or enabled offering", Evidence: map[string]any{"model": model}}
+		Summary: "smith.model " + model + " resolves to no local config or enabled offering", SummaryKey: "checks.brain_resolvable.unresolved",
+		Params: map[string]any{"model": model}, Evidence: map[string]any{"model": model}}
 }
 
 // kernelParamChecks are the FR8 boot parameters: the KFD-eviction
@@ -1486,12 +1566,15 @@ func runKernelParams(_ context.Context, env *CheckEnv) Finding {
 	ev := map[string]any{"present": present, "missing": missing}
 	if len(missing) > 0 {
 		return Finding{CheckID: id, Severity: SeverityWarn,
-			Summary:  fmt.Sprintf("kernel boot params missing: %s (GPU eviction mitigations not applied)", strings.Join(missing, ", ")),
-			Evidence: ev, KBRefs: []string{"runbook:kernel-boot-params"}}
+			Summary:    fmt.Sprintf("kernel boot params missing: %s (GPU eviction mitigations not applied)", strings.Join(missing, ", ")),
+			SummaryKey: "checks.kernel_params.missing",
+			Params:     map[string]any{"params": strings.Join(missing, ", ")},
+			Evidence:   ev, KBRefs: []string{"runbook:kernel-boot-params"}}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary:  "kernel boot params carry the amdgpu mitigations",
-		Evidence: ev}
+		Summary:    "kernel boot params carry the amdgpu mitigations",
+		SummaryKey: "checks.kernel_params.ok",
+		Evidence:   ev}
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -1518,6 +1601,17 @@ func listenPort(addr string) int {
 // round2 rounds to 2 decimals for stable evidence values.
 func round2(v float64) float64 {
 	return float64(int64(v*100+0.5)) / 100
+}
+
+// round1 rounds to 1 decimal — matches the %.1f precision every Summary
+// Sprintf already uses for a percentage/GB figure. Phase 3's Params
+// (multilanguage plan) must carry the same rounded value the English
+// Summary displays, or the i18next-rendered text (no printf-style
+// formatting available at interpolation time) would show the raw,
+// many-decimal float instead of the tidy figure the English text has
+// always shown.
+func round1(v float64) float64 {
+	return float64(int64(v*10+0.5)) / 10
 }
 
 // evidenceJSON marshals a finding's evidence for persistence ({} on error —

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jsaigou/the-forge/internal/cli"
+	"github.com/jsaigou/the-forge/internal/i18n"
 )
 
 // tickMsg drives periodic refresh of the active page.
@@ -163,12 +164,12 @@ func (s *Session) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (s *Session) View() string {
 	if s.width == 0 {
-		return "loading…"
+		return i18n.T("tui.loading")
 	}
 	var b strings.Builder
 
 	b.WriteString(titleStyle.Render("The Forge"))
-	b.WriteString(dimStyle.Render(fmt.Sprintf("  ops console  %dx%d\n\n", s.width, s.height)))
+	b.WriteString(dimStyle.Render(i18n.T("tui.header.subtitle", s.width, s.height)))
 
 	for i, p := range s.pages {
 		name := fmt.Sprintf("%d %s", i+1, p.Name())
@@ -191,17 +192,17 @@ func (s *Session) View() string {
 		b.WriteString(infoStyle.Render(" ✓ "+truncate(s.infoText, s.width-4)) + "\n")
 	}
 	if s.showHelp {
-		b.WriteString(dimStyle.Render(" q quit · tab/1-6 tabs · ? toggle help · per-tab keys shown in panels") + "\n")
+		b.WriteString(dimStyle.Render(i18n.T("tui.footer.help")) + "\n")
 	}
 	return b.String()
 }
 
+// truncate shortens s to fit within n terminal display columns — a thin
+// wrapper over i18n.Truncate (go-runewidth-based), kept as a local name
+// since every call site in this package predates the i18n package and this
+// avoids a mechanical rename across all of them.
 func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:max(0, n-1)]) + "…"
+	return i18n.Truncate(s, n)
 }
 
 func max(a, b int) int {

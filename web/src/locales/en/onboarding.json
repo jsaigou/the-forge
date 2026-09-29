@@ -1,0 +1,31 @@
+{
+  "tour": {
+    "progress": "Getting started · {{current}} of {{total}}",
+    "back": "Back",
+    "next": "Next",
+    "done": "Done",
+    "skip": "Skip tour",
+    "steps": {
+      "bays": {
+        "title": "Load bays",
+        "body": "The Forge loads models onto this box's GPU across four load bays (A1–A4). Request a model through a0 and the scheduler places it here automatically — you don't normally need to load anything by hand."
+      },
+      "bay_load": {
+        "title": "Loading one by hand",
+        "body": "A free bay shows a <b>+ Load model</b> button. Clicking it doesn't load anything by itself — it scrolls down to the config picker below, where the real Load button lives."
+      },
+      "pick_config": {
+        "title": "Pick a config",
+        "body": "This carousel is the config picker — one card per loadable model configuration. Each card's own <b>Load</b> button opens a confirm dialog and picks (or lets you choose) which bay it lands in."
+      },
+      "ask_smith": {
+        "title": "Ask smith",
+        "body": "<b>Smith</b> is the built-in maintenance agent: it runs checks on a schedule, watches for drift and failures, and proposes fixes. Click here to expand the chat and ask it anything in plain language."
+      },
+      "add_model": {
+        "title": "Add a model",
+        "body": "On the Models page, <b>Add Model</b> searches Hugging Face directly, runs a pre-flight check against this hardware, and downloads + auto-registers the result into the catalog."
+      }
+    }
+  }
+}

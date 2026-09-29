@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AddModelPanel } from "../components/hf/AddModelPanel";
 import { RemoteOfferings } from "../components/RemoteOfferings";
 import { UnifiedModelCarousel } from "../components/UnifiedModelCarousel";
@@ -24,6 +25,7 @@ import { useModelCards, useStatus } from "../lib/queries";
 // sub-tab so the page has two clear modes: model cards and provider
 // offerings.
 export function Models() {
+  const { t } = useTranslation("models");
   const status = useStatus();
   const modelCards = useModelCards("7d");
   const [modelsTab, setModelsTab] = useState<"cards" | "offerings" | "add">("cards");
@@ -38,14 +40,14 @@ export function Models() {
           className={`tab${modelsTab === "cards" ? " active" : ""}`}
           onClick={() => setModelsTab("cards")}
         >
-          Model Cards
+          {t("tabs.cards")}
         </button>
         <button
           type="button"
           className={`tab${modelsTab === "offerings" ? " active" : ""}`}
           onClick={() => setModelsTab("offerings")}
         >
-          Offerings
+          {t("tabs.offerings")}
         </button>
         <button
           type="button"
@@ -53,7 +55,7 @@ export function Models() {
           data-tour-id="models-add-tab"
           onClick={() => setModelsTab("add")}
         >
-          Add Model
+          {t("tabs.add")}
         </button>
       </div>
 
@@ -68,10 +70,10 @@ export function Models() {
               displayCurrency={modelCards.data?.display_currency ?? "USD"}
             />
           ) : (
-            <div className="empty-note">No models in the catalog yet.</div>
+            <div className="empty-note">{t("gallery.no_models")}</div>
           )
         ) : (
-          <div className="empty-note">Loading model registry…</div>
+          <div className="empty-note">{t("gallery.loading")}</div>
         )
       ) : (
         <RemoteOfferings />

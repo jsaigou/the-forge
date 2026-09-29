@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../../lib/api";
 import {
   useSmithAction,
@@ -44,14 +45,18 @@ function parseConvId(sub?: string): number | null {
 
 // Suggested questions shown in the collapsible panel attached to the chat
 // input. Clicking one sends it immediately (no separate "press Send" step).
-const QUICK_QUESTIONS = [
-  "Is ComfyUI healthy?",
-  "How much memory is free?",
-  "What services are degraded?",
-  "Is A0 working?",
-  "What's in the backlog?",
-  "Is llama.cpp up to date?",
-  "Are there any pending investigation tasks?",
+// `en` is always what's actually sent to smith (Phase 3 — smith understanding
+// a non-English question — hasn't landed yet, so the payload must stay
+// English regardless of display language); `id` looks up a translated label
+// for display only, with `en` as the i18next fallback.
+const QUICK_QUESTIONS: { id: string; en: string }[] = [
+  { id: "comfyui_healthy", en: "Is ComfyUI healthy?" },
+  { id: "memory_free", en: "How much memory is free?" },
+  { id: "services_degraded", en: "What services are degraded?" },
+  { id: "a0_working", en: "Is A0 working?" },
+  { id: "backlog", en: "What's in the backlog?" },
+  { id: "llamacpp_up_to_date", en: "Is llama.cpp up to date?" },
+  { id: "pending_investigations", en: "Are there any pending investigation tasks?" },
 ];
 
 // LiveActionCard (Sprint S3-Web §2.4.2): action-kind messages carry
@@ -61,12 +66,13 @@ const QUICK_QUESTIONS = [
 // through to a plain notice if the action can't be loaded (deleted, store
 // unwired) so the transcript never has a blank hole.
 function LiveActionCard({ actionId }: { actionId: number }) {
+  const { t } = useTranslation("help");
   const action = useSmithAction(actionId);
   if (action.isLoading) {
     return (
       <div className="smith-msg smith-msg-assistant" style={{ maxWidth: "100%" }}>
         <div className="card" style={{ padding: "10px 14px" }}>
-          <span style={{ color: "var(--text-mute)" }}>Loading action…</span>
+          <span style={{ color: "var(--text-mute)" }}>{t("ask_smith.live_action.loading")}</span>
         </div>
       </div>
     );
@@ -75,7 +81,7 @@ function LiveActionCard({ actionId }: { actionId: number }) {
     return (
       <div className="smith-msg smith-msg-assistant" style={{ maxWidth: "100%" }}>
         <div className="card" style={{ padding: "10px 14px" }}>
-          <span style={{ color: "var(--text-mute)" }}>Action #{actionId} is no longer available.</span>
+          <span style={{ color: "var(--text-mute)" }}>{t("ask_smith.live_action.unavailable", { id: actionId })}</span>
         </div>
       </div>
     );
@@ -133,6 +139,7 @@ function MessageBubble({
   turnStatus: string;
   onDigDeeper?: () => void;
 }) {
+  const { t } = useTranslation("help");
   if (msg.kind === "user") {
     return (
       <div className="smith-msg smith-msg-user">
@@ -228,7 +235,7 @@ function MessageBubble({
           <>
             <ToolActivityList events={toolActivity} />
             <span style={{ color: "var(--text-mute)" }}>
-              {turnStatus || (toolActivity.length > 0 ? "…" : "thinking…")}
+              {turnStatus || (toolActivity.length > 0 ? "…" : t("ask_smith.message_bubble.thinking"))}
             </span>
           </>
         ) : (
@@ -250,6 +257,7 @@ function MessageBubble({
 // same .smith-quick-btn chips as the quick-question suggestions above the
 // chat input rather than a separate bordered card of .tab pills.
 function SweepControls() {
+  const { t } = useTranslation("help");
   const checks = useSmithChecks();
   const checksRun = useSmithChecksRun();
   const [showPicker, setShowPicker] = useState(false);
@@ -294,13 +302,13 @@ function SweepControls() {
     <div style={{ marginTop: 6 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
         <button className="smith-quick-btn" onClick={() => run("quick")} disabled={checksRun.isPending}>
-          {checksRun.isPending && !showPicker ? "…" : "Quick sweep"}
+          {checksRun.isPending && !showPicker ? "…" : t("ask_smith.sweep.quick")}
         </button>
         <button className="smith-quick-btn" onClick={() => run("deep")} disabled={checksRun.isPending}>
-          Deep sweep
+          {t("ask_smith.sweep.deep")}
         </button>
         <button className="smith-quick-btn" onClick={() => setShowPicker(!showPicker)} disabled={checksRun.isPending}>
-          Custom…
+          {t("ask_smith.sweep.custom")}
         </button>
       </div>
 
@@ -315,7 +323,7 @@ function SweepControls() {
       {showPicker && (
         <div style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
           {checks.isLoading ? (
-            <div className="empty-note">Loading check catalog…</div>
+            <div className="empty-note">{t("ask_smith.sweep.loading_checks")}</div>
           ) : (
             <>
               {Array.from(grouped.entries()).map(([cat, items]) => (
@@ -340,7 +348,7 @@ function SweepControls() {
                         style={{ cursor: "pointer" }}
                       />
                       {c.name}
-                      {c.fast && <span className="chip" style={{ fontSize: 9, padding: "0 4px" }}>fast</span>}
+                      {c.fast && <span className="chip" style={{ fontSize: 9, padding: "0 4px" }}>{t("ask_smith.sweep.fast_chip")}</span>}
                     </label>
                   ))}
                 </div>
@@ -351,10 +359,10 @@ function SweepControls() {
                   onClick={runCustom}
                   disabled={checksRun.isPending || selected.size === 0}
                 >
-                  Run {selected.size} check{selected.size === 1 ? "" : "s"}
+                  {t("ask_smith.sweep.run_n_checks", { count: selected.size })}
                 </button>
                 <button className="smith-quick-btn" onClick={() => { setSelected(new Set()); setShowPicker(false); }}>
-                  Cancel
+                  {t("ask_smith.sweep.cancel")}
                 </button>
               </div>
             </>
@@ -374,6 +382,7 @@ function SweepControls() {
 // shouldn't start hidden the way the more occasional
 // ProcedureRuns/BlockedWork sections further down do.
 function SuggestionsPanel() {
+  const { t } = useTranslation("help");
   const actions = useSmithActions("pending");
   const [expanded, setExpanded] = useState(true);
   if (actions.isLoading || actions.isError) return null;
@@ -386,7 +395,7 @@ function SuggestionsPanel() {
         style={{ fontSize: 11, padding: 0, fontWeight: 600 }}
         onClick={() => setExpanded((v) => !v)}
       >
-        {expanded ? "▾" : "▸"} Suggestions ({list.length})
+        {expanded ? "▾" : "▸"} {t("ask_smith.suggestions.toggle", { count: list.length })}
       </button>
       {expanded && (
         <div style={{ marginTop: 8 }}>
@@ -406,6 +415,7 @@ export function AskSmith({
   sub?: string;
   onSubChange?: (sub: string, opts?: { replace?: boolean }) => void;
 }) {
+  const { t } = useTranslation("help");
   const conversations = useSmithConversations();
   const [selectedId, setSelectedId] = useState<number | null>(() => parseConvId(sub));
   const [showList, setShowList] = useState(false);
@@ -528,18 +538,18 @@ export function AskSmith({
           <HammerIcon className={`smith-hammer ${hammerClass}`} />
           <span style={{ fontWeight: 700, fontSize: 13, letterSpacing: "0.02em" }}>SMITH</span>
           <button className="tab" onClick={() => setShowList((v) => !v)}>
-            {conv.data ? conv.data.title || `Conversation #${conv.data.id}` : "Conversations"} ▾
+            {conv.data ? conv.data.title || t("ask_smith.conversation_fallback_title", { id: conv.data.id }) : t("ask_smith.conversations_button")} ▾
           </button>
           <button className="tab" onClick={() => selectConversation(null)}>
-            + New conversation
+            {t("ask_smith.new_conversation")}
           </button>
           {selectedId != null && (
             <ConfirmButton
               onConfirm={() => del.mutate(selectedId, { onSuccess: () => selectConversation(null) })}
               pending={del.isPending}
-              label="Delete"
-              confirmLabel="Delete?"
-              warning="This conversation and its transcript will be deleted."
+              label={t("ask_smith.delete_conversation.label")}
+              confirmLabel={t("ask_smith.delete_conversation.confirm")}
+              warning={t("ask_smith.delete_conversation.warning")}
             />
           )}
           {status.data && (
@@ -552,7 +562,7 @@ export function AskSmith({
         {showList && (
           <div className="smith-conv-list" style={{ marginBottom: 10 }}>
             {conversations.isLoading ? (
-              <div className="empty-note">Loading…</div>
+              <div className="empty-note">{t("ask_smith.list.loading")}</div>
             ) : conversations.data && conversations.data.conversations.length > 0 ? (
               conversations.data.conversations.map((c) => (
                 <div
@@ -561,23 +571,23 @@ export function AskSmith({
                   onClick={() => selectConversation(c.id)}
                 >
                   <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {c.title || `Conversation #${c.id}`}
+                    {c.title || t("ask_smith.conversation_fallback_title", { id: c.id })}
                   </span>
                 </div>
               ))
             ) : (
-              <div className="empty-note">No conversations yet.</div>
+              <div className="empty-note">{t("ask_smith.list.empty")}</div>
             )}
           </div>
         )}
 
         <div ref={transcriptRef} className="smith-transcript" style={{ maxHeight: 480, overflowY: "auto", paddingRight: 4 }}>
           {selectedId == null ? null : conv.isLoading ? (
-            <div className="empty-note">Loading conversation…</div>
+            <div className="empty-note">{t("ask_smith.transcript.loading")}</div>
           ) : conv.isError ? (
             <div className="error-note">{apiErrorMessage(conv.error)}</div>
           ) : conv.data && conv.data.messages.length === 0 ? (
-            <div className="empty-note">No messages yet. Say something below.</div>
+            <div className="empty-note">{t("ask_smith.transcript.empty")}</div>
           ) : (
             conv.data?.messages.map((m) => (
               <MessageBubble
@@ -596,12 +606,12 @@ export function AskSmith({
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {QUICK_QUESTIONS.map((q) => (
               <button
-                key={q}
+                key={q.id}
                 className="smith-quick-btn"
                 disabled={chat.isPending}
-                onClick={() => send(q)}
+                onClick={() => send(q.en)}
               >
-                {q}
+                {t(`ask_smith.quick_questions.${q.id}`, { defaultValue: q.en })}
               </button>
             ))}
           </div>
@@ -614,11 +624,11 @@ export function AskSmith({
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask the smith… (Enter to send, Shift+Enter for a new line)"
+            placeholder={t("ask_smith.input.placeholder")}
             rows={3}
           />
           <button className="btn primary" onClick={() => send()} disabled={chat.isPending || !text.trim()}>
-            {chat.isPending ? "…" : "Ask SMITH"}
+            {chat.isPending ? "…" : t("ask_smith.input.send")}
           </button>
         </div>
         {sendError && <div className="error-note" style={{ marginTop: 6 }}>{sendError}</div>}

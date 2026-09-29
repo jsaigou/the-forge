@@ -57,7 +57,7 @@ func (s *Server) handleCatalogFamiliesList(w http.ResponseWriter, r *http.Reques
 	defer cancel()
 	list, err := cat.ListFamilies(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "families query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "families query failed")
 		return
 	}
 	out := make([]familyJSON, 0, len(list))
@@ -74,10 +74,12 @@ type familyBody struct {
 	LogoDark    string `json:"logo_dark"`
 }
 
-func (s *Server) validateFamily(ctx context.Context, b familyBody) map[string]string {
+func (s *Server) validateFamily(ctx context.Context, b familyBody) (map[string]string, map[string]string) {
 	fields := map[string]string{}
+	codes := map[string]string{}
 	if b.Name == "" {
 		fields["name"] = "is required"
+		codes["name"] = "required"
 	} else if len(b.Name) > 256 {
 		fields["name"] = "must be ≤256 characters"
 	}
@@ -86,18 +88,18 @@ func (s *Server) validateFamily(ctx context.Context, b familyBody) map[string]st
 			fields["genealogy_id"] = "does not exist"
 		}
 	}
-	return fields
+	return fields, codes
 }
 
 func (s *Server) handleCatalogFamilyGet(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -105,7 +107,7 @@ func (s *Server) handleCatalogFamilyGet(w http.ResponseWriter, r *http.Request) 
 	f, err := cat.GetFamily(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "family not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "family"}, "family not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -117,7 +119,7 @@ func (s *Server) handleCatalogFamilyGet(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleCatalogFamilyCreate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b familyBody
@@ -125,8 +127,8 @@ func (s *Server) handleCatalogFamilyCreate(w http.ResponseWriter, r *http.Reques
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateFamily(r.Context(), b); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateFamily(r.Context(), b); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -145,12 +147,12 @@ func (s *Server) handleCatalogFamilyCreate(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleCatalogFamilyUpdate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	var b familyBody
@@ -158,15 +160,15 @@ func (s *Server) handleCatalogFamilyUpdate(w http.ResponseWriter, r *http.Reques
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateFamily(r.Context(), b); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateFamily(r.Context(), b); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
 	if err := cat.UpdateFamily(ctx, store.Family{ID: id, Name: b.Name, GenealogyID: b.GenealogyID, Logo: b.Logo, LogoDark: b.LogoDark}); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "family not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "family"}, "family not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -185,19 +187,19 @@ func (s *Server) handleCatalogFamilyUpdate(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleCatalogFamilyDelete(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
 	if err := cat.DeleteFamily(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "family not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "family"}, "family not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -214,14 +216,16 @@ type genealogyBody struct {
 	LogoDark string `json:"logo_dark"`
 }
 
-func validateGenealogy(b genealogyBody) map[string]string {
+func validateGenealogy(b genealogyBody) (map[string]string, map[string]string) {
 	fields := map[string]string{}
+	codes := map[string]string{}
 	if b.Name == "" {
 		fields["name"] = "is required"
+		codes["name"] = "required"
 	} else if len(b.Name) > 256 {
 		fields["name"] = "must be ≤256 characters"
 	}
-	return fields
+	return fields, codes
 }
 
 func (s *Server) handleCatalogGenealogiesList(w http.ResponseWriter, r *http.Request) {
@@ -234,7 +238,7 @@ func (s *Server) handleCatalogGenealogiesList(w http.ResponseWriter, r *http.Req
 	defer cancel()
 	list, err := cat.ListGenealogies(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "genealogies query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "genealogies query failed")
 		return
 	}
 	out := make([]genealogyJSON, 0, len(list))
@@ -247,12 +251,12 @@ func (s *Server) handleCatalogGenealogiesList(w http.ResponseWriter, r *http.Req
 func (s *Server) handleCatalogGenealogyGet(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -260,7 +264,7 @@ func (s *Server) handleCatalogGenealogyGet(w http.ResponseWriter, r *http.Reques
 	g, err := cat.GetGenealogy(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "genealogy not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "genealogy"}, "genealogy not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -272,7 +276,7 @@ func (s *Server) handleCatalogGenealogyGet(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleCatalogGenealogyCreate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b genealogyBody
@@ -280,8 +284,8 @@ func (s *Server) handleCatalogGenealogyCreate(w http.ResponseWriter, r *http.Req
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := validateGenealogy(b); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := validateGenealogy(b); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -299,12 +303,12 @@ func (s *Server) handleCatalogGenealogyCreate(w http.ResponseWriter, r *http.Req
 func (s *Server) handleCatalogGenealogyUpdate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	var b genealogyBody
@@ -312,15 +316,15 @@ func (s *Server) handleCatalogGenealogyUpdate(w http.ResponseWriter, r *http.Req
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := validateGenealogy(b); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := validateGenealogy(b); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
 	if err := cat.UpdateGenealogy(ctx, store.Genealogy{ID: id, Name: b.Name, Logo: b.Logo, LogoDark: b.LogoDark}); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "genealogy not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "genealogy"}, "genealogy not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -336,19 +340,19 @@ func (s *Server) handleCatalogGenealogyUpdate(w http.ResponseWriter, r *http.Req
 func (s *Server) handleCatalogGenealogyDelete(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
 	if err := cat.DeleteGenealogy(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "genealogy not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "genealogy"}, "genealogy not found")
 			return
 		}
 		writeInternalError(w, err)

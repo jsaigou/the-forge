@@ -4,11 +4,13 @@
 // masked `api_key_masked` form, the API key itself is write-only
 // (PUT /api/v1/providers/{name}/key) and never echoed back by the server.
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { Icon } from "../../components/Icon";
 import { SaveButton } from "../../components/SaveButton";
 import { apiErrorMessage } from "../../lib/api";
 import { countryFlag } from "../../lib/format";
+import { translatedDataResidencyGroup, translatedProviderNote } from "../../lib/providerPresetI18n";
 import { PROVIDER_PRESETS, providerIconSlug } from "../../lib/providerPresets";
 import { useCreateProvider, useDeleteProvider, useDiscoverProviderBilling, useProviders, useSetProviderKey, useUpdateProvider } from "../../lib/queries";
 import type { ProviderCreateRequest, ProviderUpdateRequest } from "../../lib/types";
@@ -25,6 +27,7 @@ const EMPTY_CREATE: ProviderCreateRequest = {
 };
 
 export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const providers = useProviders();
   const create = useCreateProvider();
   const update = useUpdateProvider();
@@ -164,19 +167,18 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow" id="providers-keys">Providers</div>
+      <div className="eyebrow" id="providers-keys">{t("provider_keys.title")}</div>
       <div className="card">
         <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, lineHeight: 1.55 }}>
-          External providers routed via A0. Keys are stored server-side in <span style={{ fontFamily: "var(--mono)" }}>router_providers</span>;
-          the masked form below is the only shape the API ever returns — new keys are write-only.
+          <Trans i18nKey="provider_keys.intro" ns="settings" components={{ code: <span style={{ fontFamily: "var(--mono)" }} /> }} />
         </div>
 
         {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
 
-        {providers.isError && <div className="empty-note">Operator role required to view providers.</div>}
-        {!providers.isError && !providers.data && <div className="empty-note">Loading providers…</div>}
+        {providers.isError && <div className="empty-note">{t("provider_keys.role_required")}</div>}
+        {!providers.isError && !providers.data && <div className="empty-note">{t("provider_keys.loading")}</div>}
         {!providers.isError && providers.data && list.length === 0 && (
-          <div className="empty-note">No providers configured.</div>
+          <div className="empty-note">{t("provider_keys.no_providers")}</div>
         )}
 
         <div className="hoom">
@@ -198,7 +200,7 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                       {p.name}
                       {!p.enabled && (
                         <span className="chip" style={{ marginLeft: 6, color: "var(--warn)", borderColor: "color-mix(in srgb, var(--warn) 40%, var(--border))" }}>
-                          disabled — not routing
+                          {t("provider_keys.disabled_chip")}
                         </span>
                       )}
                       <span className="chip" style={{ marginLeft: 6, color: healthColor, borderColor: `color-mix(in srgb, ${healthColor} 40%, var(--border))` }}>
@@ -206,7 +208,7 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                       </span>
                       {p.country && (
                         <span className="chip" style={{ marginLeft: 4, color: "var(--text-dim)" }}>
-                          {countryFlag(p.country)} {p.country}{p.data_residency_group ? ` · ${p.data_residency_group}` : ""}
+                          {countryFlag(p.country)} {p.country}{p.data_residency_group ? ` · ${translatedDataResidencyGroup(t, p.data_residency_group)}` : ""}
                         </span>
                       )}
                       {p.models.length > 0 && (
@@ -214,19 +216,19 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                           className="chip"
                           style={{ marginLeft: 4, cursor: "pointer" }}
                           onClick={() => setExpandedModels(modelsShown ? null : p.id)}
-                          title="Show the models routed through this provider"
+                          title={t("provider_keys.show_models_title")}
                         >
-                          {p.models.length} model{p.models.length === 1 ? "" : "s"} {modelsShown ? "▲" : "▼"}
+                          {t("provider_keys.models_count", { count: p.models.length })} {modelsShown ? "▲" : "▼"}
                         </button>
                       )}
                     </div>
                     <div className="pu">
-                      {p.api_key_masked || "no key set"} · {p.bill_currency}
+                      {p.api_key_masked || t("provider_keys.no_key_set")} · {p.bill_currency}
                       {p.credits.supported && p.credits.balance_native != null
-                        ? ` · balance ${p.credits.balance_native}${p.credits.currency ? " " + p.credits.currency : ""}`
+                        ? t("provider_keys.balance_value", { balance: p.credits.balance_native, currency: p.credits.currency ? " " + p.credits.currency : "" })
                         : p.credits.supported
-                          ? " · balance unavailable"
-                          : " · no balance API"}
+                          ? t("provider_keys.balance_unavailable")
+                          : t("provider_keys.no_balance_api")}
                     </div>
                   </div>
                   {canAdmin && (
@@ -234,11 +236,11 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                       <button
                         disabled={update.isPending}
                         title={p.enabled
-                          ? "Stop routing this provider's models (keys and offerings are kept)"
-                          : "Resume routing this provider's models"}
+                          ? t("provider_keys.disable_provider_title")
+                          : t("provider_keys.enable_provider_title")}
                         onClick={() => toggleEnabled(p.id, !p.enabled)}
                       >
-                        {p.enabled ? "Disable" : "Enable"}
+                        {p.enabled ? t("routing.disable_button") : t("routing.enable_button")}
                       </button>
                       <button
                         disabled={isEditing || update.isPending}
@@ -257,21 +259,21 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                           setKeyFor(null);
                         }}
                       >
-                        Edit
+                        {t("provider_keys.edit_button")}
                       </button>
-                      <button disabled={isKeying || setKey.isPending} onClick={() => { setKeyFor(p.id); setNewKey(""); setEditing(null); }}>Set key</button>
+                      <button disabled={isKeying || setKey.isPending} onClick={() => { setKeyFor(p.id); setNewKey(""); setEditing(null); }}>{t("provider_keys.set_key_button")}</button>
                       <button
                         disabled={discoverBilling.isPending}
-                        title="Probe candidate billing-API URLs for this provider"
+                        title={t("provider_keys.discover_billing_title")}
                         onClick={() => submitDiscover(p.id, p.name)}
                       >
-                        {discoverBilling.isPending && discoverBilling.variables === p.id ? "Discovering…" : "Discover billing"}
+                        {discoverBilling.isPending && discoverBilling.variables === p.id ? t("provider_keys.discovering") : t("provider_keys.discover_billing_button")}
                       </button>
                       <ConfirmButton
                         className=""
                         pending={remove.isPending}
                         onConfirm={() => submitDelete(p.id)}
-                        warning={`Delete provider "${p.name}"? Its offerings go with it. Use Disable instead to keep everything and just stop routing.`}
+                        warning={t("provider_keys.delete_warning", { name: p.name })}
                       />
                     </div>
                   )}
@@ -280,68 +282,68 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                   <div className="d" style={{ marginTop: 2 }}>
                     {discoverResult.found
                       ? discoverResult.saved
-                        ? `Found and saved: ${discoverResult.url}`
-                        : `Found ${discoverResult.url} but credits_url was already set — not overwritten`
-                      : "No billing endpoint found among the candidates tried"}
+                        ? t("provider_keys.discover_found_saved", { url: discoverResult.url })
+                        : t("provider_keys.discover_found_not_saved", { url: discoverResult.url })
+                      : t("provider_keys.discover_not_found")}
                   </div>
                 )}
 
                 {modelsShown && (
                   <div className="hoom" style={{ marginTop: 4, paddingLeft: 12, borderLeft: "2px solid var(--border)" }}>
-                    {p.models.length === 0 && <div className="empty-note">No offerings route through this provider.</div>}
+                    {p.models.length === 0 && <div className="empty-note">{t("provider_keys.no_offerings_for_provider")}</div>}
                     {p.models.map((m) => (
                       <div key={m.catalog_model_id + ":" + m.model_id} className="prox" style={{ opacity: m.enabled ? undefined : 0.55 }}>
                         {m.logo && <Icon slug={m.logo} name={m.display_name} sm />}
                         <div>
                           <div className="pn">
                             {m.display_name || m.model_id}
-                            {!m.enabled && <span className="chip" style={{ marginLeft: 6, color: "var(--text-mute)" }}>disabled</span>}
+                            {!m.enabled && <span className="chip" style={{ marginLeft: 6, color: "var(--text-mute)" }}>{t("provider_keys.model_disabled_chip")}</span>}
                           </div>
                           <div className="pu" style={{ fontFamily: "var(--mono)" }}>
-                            {m.model_id} · {m.price_in_per_1m}/{m.price_out_per_1m} {m.currency} · priority {m.priority}
+                            {m.model_id} · {m.price_in_per_1m}/{m.price_out_per_1m} {m.currency} · {t("routing.priority_label")} {m.priority}
                             {m.compressor_proxy ? ` · via ${m.compressor_proxy}` : ""}
                           </div>
                         </div>
                       </div>
                     ))}
                     <a href="#settings/routing" style={{ fontSize: 11, marginTop: 4 }}>
-                      Edit routing / pricing in Settings → Routing →
+                      {t("provider_keys.edit_routing_link")}
                     </a>
                   </div>
                 )}
 
                 {isEditing && (
                   <div className="form-grid" style={{ marginTop: 4 }}>
-                    <label className="form-row">Name
+                    <label className="form-row">{t("provider_keys.name_label")}
                       <input value={editDraft.name ?? ""} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
                       <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
-                        The icon above previews live — renaming off a recognized vendor slug (e.g. "deepseek", "qwen") drops the vendor mark.
+                        {t("provider_keys.name_hint")}
                       </span>
                       {editDraft.name && /[^\p{L}\p{N} &_.-]/u.test(editDraft.name) && (
                         <span style={{ fontSize: 11, color: "var(--warn)" }}>
-                          Names must start with a letter or number and contain only letters, numbers, spaces, &, and .-_ — other characters will be rejected by the server.
+                          {t("provider_keys.name_invalid_chars")}
                         </span>
                       )}
                     </label>
-                    <label className="form-row">Bill currency
+                    <label className="form-row">{t("provider_keys.bill_currency_label")}
                       <select value={editDraft.bill_currency ?? ""} onChange={(e) => setEditDraft({ ...editDraft, bill_currency: e.target.value })}>
                         {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
                       </select>
                     </label>
-                    <label className="form-row">Target URL
+                    <label className="form-row">{t("compression.target_url_label")}
                       <input value={editDraft.target_url ?? ""} placeholder="https://api.example.com/v1" onChange={(e) => setEditDraft({ ...editDraft, target_url: e.target.value })} />
                     </label>
-                    <label className="form-row">Status URL
+                    <label className="form-row">{t("provider_keys.status_url_label")}
                       <input value={editDraft.status_url ?? ""} placeholder="https://deepseek.statuspage.io/api/v2/summary.json" onChange={(e) => setEditDraft({ ...editDraft, status_url: e.target.value })} />
-                      <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Wants a machine-readable Statuspage /api/v2/summary.json feed, not a human status page.</span>
+                      <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{t("provider_keys.status_url_hint_edit")}</span>
                     </label>
-                    <label className="form-row">Credits URL
+                    <label className="form-row">{t("provider_keys.credits_url_label")}
                       <input value={editDraft.credits_url ?? ""} placeholder="https://api.example.com/user/balance" onChange={(e) => setEditDraft({ ...editDraft, credits_url: e.target.value })} />
                     </label>
-                    <label className="form-row">Org ID
+                    <label className="form-row">{t("provider_keys.org_id_label")}
                       <input value={editDraft.org_id ?? ""} placeholder="required by some providers' credits/analytics APIs (e.g. AI&)" onChange={(e) => setEditDraft({ ...editDraft, org_id: e.target.value })} />
                     </label>
-                    <label className="form-row">Billing console URL
+                    <label className="form-row">{t("provider_keys.billing_console_url_label")}
                       <input value={editDraft.billing_console_url ?? ""} placeholder="https://platform.example.com/usage" onChange={(e) => setEditDraft({ ...editDraft, billing_console_url: e.target.value })} />
                     </label>
                     <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -350,7 +352,7 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                         checked={editDraft.billing_enabled ?? true}
                         onChange={(e) => setEditDraft({ ...editDraft, billing_enabled: e.target.checked })}
                       />
-                      Billing API enabled
+                      {t("provider_keys.billing_api_enabled")}
                     </label>
                     <PeakWindowsEditor
                       value={editDraft.peak_windows ?? p.peak_windows ?? ""}
@@ -358,7 +360,7 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                       onChange={(v) => setEditDraft({ ...editDraft, peak_windows: v })}
                     />
                     <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
-                      <button className="btn" onClick={() => { setEditing(null); setEditDraft({}); }}>Cancel</button>
+                      <button className="btn" onClick={() => { setEditing(null); setEditDraft({}); }}>{t("provider_keys.cancel")}</button>
                       <SaveButton pending={update.isPending} isError={update.isError} onClick={() => submitEdit(p.id)} />
                     </div>
                   </div>
@@ -366,7 +368,7 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
 
                 {isKeying && (
                   <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginTop: 4 }}>
-                    <label className="form-row" style={{ flex: "1 1 320px" }}>New API key (write-only — never echoed back)
+                    <label className="form-row" style={{ flex: "1 1 320px" }}>{t("provider_keys.new_api_key_label")}
                       <input
                         type="password"
                         value={newKey}
@@ -377,13 +379,13 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                       />
                     </label>
                     <div className="form-actions">
-                      <button className="btn" onClick={() => { setKeyFor(null); setNewKey(""); }}>Cancel</button>
+                      <button className="btn" onClick={() => { setKeyFor(null); setNewKey(""); }}>{t("provider_keys.cancel")}</button>
                       <SaveButton
                         pending={setKey.isPending}
                         isError={setKey.isError}
                         disabled={setKey.isPending || !newKey}
                         onClick={() => submitKey(p.id)}
-                        label="Save key"
+                        label={t("provider_keys.save_key")}
                       />
                     </div>
                   </div>
@@ -396,64 +398,64 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
         {canAdmin && (
           creating ? (
             <div className="form-grid" style={{ marginTop: 14 }}>
-              <label className="form-row" style={{ gridColumn: "1 / -1" }}>Preset
+              <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("provider_keys.preset_label")}
                 <select value={presetId} onChange={(e) => applyPreset(e.target.value)}>
-                  <option value="">Custom…</option>
+                  <option value="">{t("provider_keys.preset_custom")}</option>
                   {PROVIDER_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
               </label>
               {selectedPreset?.note && (
-                <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "var(--text-dim)", marginTop: -6 }}>{selectedPreset.note}</div>
+                <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "var(--text-dim)", marginTop: -6 }}>{translatedProviderNote(t, selectedPreset)}</div>
               )}
               {selectedPreset && selectedPreset.credits === "none" && (
                 <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "var(--text-dim)", marginTop: -6 }}>
-                  No balance API for this provider — billing polling stays off (Billing console URL is still a human link).
+                  {t("provider_keys.no_balance_api_note")}
                 </div>
               )}
-              <label className="form-row">Name *
+              <label className="form-row">{t("provider_keys.name_required_label")}
                 <input value={createDraft.name} placeholder="deepseek" onChange={(e) => setCreateDraft({ ...createDraft, name: e.target.value })} />
                 {createDraft.name && /[^\p{L}\p{N} &_.-]/u.test(createDraft.name) && (
                   <span style={{ fontSize: 11, color: "var(--warn)" }}>
-                    Names must start with a letter or number and contain only letters, numbers, spaces, &, and .-_ — other characters will be rejected by the server.
+                    {t("provider_keys.name_invalid_chars")}
                   </span>
                 )}
               </label>
-              <label className="form-row">Bill currency
+              <label className="form-row">{t("provider_keys.bill_currency_label")}
                 <select value={createDraft.bill_currency} onChange={(e) => setCreateDraft({ ...createDraft, bill_currency: e.target.value })}>
                   {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </label>
-              <label className="form-row">Target URL
+              <label className="form-row">{t("compression.target_url_label")}
                 <input value={createDraft.target_url} placeholder="https://api.deepseek.com/v1" onChange={(e) => setCreateDraft({ ...createDraft, target_url: e.target.value })} />
                 {selectedPreset?.targetUrlIsTemplate && (
-                  <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Replace &lt;resource&gt; with your own — {selectedPreset.label} has no single fixed endpoint.</span>
+                  <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{t("provider_keys.target_url_template_hint", { preset: selectedPreset.label })}</span>
                 )}
               </label>
-              <label className="form-row">Status URL
+              <label className="form-row">{t("provider_keys.status_url_label")}
                 <input value={createDraft.status_url} placeholder="https://deepseek.statuspage.io/api/v2/summary.json" onChange={(e) => setCreateDraft({ ...createDraft, status_url: e.target.value })} />
-                <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Wants a machine-readable Statuspage /api/v2/summary.json feed, not a human status page — an unrecognized shape falls back to a live probe of the target URL.</span>
+                <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{t("provider_keys.status_url_hint_create")}</span>
               </label>
-              <label className="form-row">Credits URL
+              <label className="form-row">{t("provider_keys.credits_url_label")}
                 <input value={createDraft.credits_url} placeholder="https://api.deepseek.com/user/balance" onChange={(e) => setCreateDraft({ ...createDraft, credits_url: e.target.value })} />
               </label>
-              <label className="form-row">Org ID{selectedPreset?.orgIdRequired ? " *" : ""}
+              <label className="form-row">{t("provider_keys.org_id_label")}{selectedPreset?.orgIdRequired ? t("provider_keys.org_id_required_suffix") : ""}
                 <input value={createDraft.org_id} placeholder="required by some providers' credits/analytics APIs (e.g. AI&)" onChange={(e) => setCreateDraft({ ...createDraft, org_id: e.target.value })} />
               </label>
-              <label className="form-row">Billing console URL
+              <label className="form-row">{t("provider_keys.billing_console_url_label")}
                 <input value={createDraft.billing_console_url ?? ""} placeholder="https://platform.example.com/usage" onChange={(e) => setCreateDraft({ ...createDraft, billing_console_url: e.target.value })} />
               </label>
               <label className="form-row" style={{ gridColumn: "1 / -1", flexDirection: "row", alignItems: "center", gap: 8 }}>
                 <input type="checkbox" checked={createProxy} onChange={(e) => setCreateProxy(e.target.checked)} style={{ width: "auto" }} />
-                <span>Create a Compressor proxy for this provider (recommended)</span>
+                <span>{t("provider_keys.create_proxy_checkbox")}</span>
               </label>
               <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
-                <button className="btn" onClick={() => { setCreating(false); setCreateDraft(EMPTY_CREATE); setPresetId(""); }}>Cancel</button>
-                <button className="btn primary" disabled={create.isPending || !createDraft.name} onClick={submitCreate}>Create</button>
+                <button className="btn" onClick={() => { setCreating(false); setCreateDraft(EMPTY_CREATE); setPresetId(""); }}>{t("provider_keys.cancel")}</button>
+                <button className="btn primary" disabled={create.isPending || !createDraft.name} onClick={submitCreate}>{t("provider_keys.create_button")}</button>
               </div>
             </div>
           ) : (
             <button className="btn" style={{ marginTop: 14 }} onClick={() => { setCreating(true); setCreateDraft(EMPTY_CREATE); setPresetId(""); setError(null); }}>
-              + Add provider
+              {t("provider_keys.add_provider_button")}
             </button>
           )
         )}
@@ -464,7 +466,7 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
 
 const PEAK_WINDOWS_JSON_PLACEHOLDER = `[{"days":[1,2,3,4,5],"start":"01:00","end":"04:00"}]`;
 
-const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAY_SHORT_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
 // A short curated list, not the full ~600-name IANA database — common
 // zones a provider is actually likely to publish hours in, covering every
@@ -556,6 +558,7 @@ function PeakWindowsEditor({
   peakActiveNow: boolean;
   onChange: (v: string) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [tz, setTz] = useState(() => splitStored(value).tz);
   const [windowsJson, setWindowsJson] = useState(() => splitStored(value).windowsJson);
   const [tzMode, setTzMode] = useState<"select" | "custom">(() =>
@@ -575,17 +578,17 @@ function PeakWindowsEditor({
       const parsed = JSON.parse(windowsJson) as PeakWindowRow[];
       const tzLabel = tz.trim() || "UTC";
       summary = parsed
-        .map((w) => `${w.days.map((d) => WEEKDAY_SHORT[d] ?? `?${d}`).join("/")} ${w.start}–${w.end} ${tzLabel}`)
-        .join(", ") || "(no windows)";
+        .map((w) => `${w.days.map((d) => (WEEKDAY_SHORT_KEYS[d] ? t(`provider_keys.peak_windows.weekday_${WEEKDAY_SHORT_KEYS[d]}`) : `?${d}`)).join("/")} ${w.start}–${w.end} ${tzLabel}`)
+        .join(", ") || t("provider_keys.peak_windows.no_windows");
     } catch {
-      localParseError = "Not valid JSON — the server will reject this until it parses.";
+      localParseError = t("provider_keys.peak_windows.parse_error");
     }
   }
 
   return (
     <div style={{ gridColumn: "1 / -1", display: "grid", gap: 10 }}>
       <label className="form-row">
-        Timezone
+        {t("provider_keys.peak_windows.timezone_label")}
         {tzMode === "select" ? (
           <select
             value={COMMON_TIMEZONES.includes(tz) ? tz : "UTC"}
@@ -598,23 +601,22 @@ function PeakWindowsEditor({
             }}
           >
             {COMMON_TIMEZONES.map((z) => <option key={z} value={z}>{z}</option>)}
-            <option value="__custom">Custom…</option>
+            <option value="__custom">{t("provider_keys.peak_windows.custom_ellipsis")}</option>
           </select>
         ) : (
           <input
             value={tz}
-            placeholder="e.g. America/Los_Angeles — full IANA name, not an abbreviation like PST"
+            placeholder={t("provider_keys.peak_windows.timezone_placeholder")}
             style={{ fontFamily: "var(--mono)" }}
             onChange={(e) => update(e.target.value, windowsJson)}
           />
         )}
         <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
-          What zone the hours below are in — the server converts to real UTC per request (DST-correct)
-          automatically. Leave as UTC if you already have UTC hours.
+          {t("provider_keys.peak_windows.timezone_hint")}
         </span>
       </label>
       <label className="form-row">
-        Peak pricing windows (JSON, local to the timezone above)
+        {t("provider_keys.peak_windows.windows_label")}
         <textarea
           rows={2}
           value={windowsJson}
@@ -623,13 +625,13 @@ function PeakWindowsEditor({
           onChange={(e) => update(tz, e.target.value)}
         />
         <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
-          Empty = no peak/off-peak concept for this provider. Format: {`[{"days":[0-6, 0=Sun],"start":"HH:MM","end":"HH:MM"}]`}
+          {t("provider_keys.peak_windows.windows_hint", { format: `[{"days":[0-6, 0=Sun],"start":"HH:MM","end":"HH:MM"}]` })}
         </span>
         {localParseError && <span style={{ fontSize: 11, color: "var(--warn)" }}>{localParseError}</span>}
         {summary && !localParseError && (
           <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
             {summary}
-            {peakActiveNow && <span className="chip" style={{ marginLeft: 6, color: "var(--warn)" }}>peak now</span>}
+            {peakActiveNow && <span className="chip" style={{ marginLeft: 6, color: "var(--warn)" }}>{t("provider_keys.peak_windows.peak_now_chip")}</span>}
           </span>
         )}
       </label>

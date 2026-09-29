@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import type { ConfigCard, SchedulerStatus, Status } from "../../lib/types";
 import { ConfigDetailView } from "./ConfigDetailView";
 import { ConfigEditView } from "./ConfigEditView";
@@ -35,6 +36,7 @@ export function DetailModal({
   displayCurrency?: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("common");
   const [stack, setStack] = useState<DetailViewEntry[]>([initial]);
   const current = stack[stack.length - 1];
 
@@ -112,11 +114,11 @@ export function DetailModal({
         <div className="modal wide detail-modal" onClick={(e) => e.stopPropagation()}>
           <div className="detail-modal-bar">
             {stack.length > 1 ? (
-              <button className="icon-btn" title="Back" aria-label="Back" onClick={back}>←</button>
+              <button className="icon-btn" title={t("detail_modal.back")} aria-label={t("detail_modal.back")} onClick={back}>←</button>
             ) : (
               <span />
             )}
-            <button className="icon-btn" title="Close" aria-label="Close" onClick={onClose}>✕</button>
+            <button className="icon-btn" title={t("detail_modal.close")} aria-label={t("detail_modal.close")} onClick={onClose}>✕</button>
           </div>
           {current.kind === "config" ? (
             <ConfigDetailView

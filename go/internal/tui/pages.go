@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jsaigou/the-forge/internal/cli"
+	"github.com/jsaigou/the-forge/internal/i18n"
 )
 
 const refreshInterval = 3 * time.Second
@@ -41,7 +43,7 @@ type overviewPage struct {
 
 func newOverviewPage(c *cli.Client) *overviewPage { return &overviewPage{client: c} }
 
-func (p *overviewPage) Name() string { return "Overview" }
+func (p *overviewPage) Name() string { return i18n.T("tui.page.overview") }
 
 func (p *overviewPage) SetSize(w, h int) { p.width = w }
 
@@ -79,17 +81,17 @@ func (p *overviewPage) fetch() tea.Cmd {
 
 func (p *overviewPage) View() string {
 	if p.status == nil {
-		return dimStyle.Render(" loading…")
+		return dimStyle.Render(i18n.T("tui.loading_indented"))
 	}
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("host %s · forge %s · mode %s\n\n",
+	b.WriteString(i18n.T("tui.overview.status_line",
 		p.status.Hostname, p.status.Version, okStyle.Render(p.status.Mode)))
 
 	// slots one-liner
 	var slots []string
 	for _, name := range []string{"a1", "a2", "a3", "a4"} {
-		model := "(empty)"
+		model := i18n.T("tui.slot.empty")
 		style := dimStyle
 		if m, ok := p.status.Slots[name]; ok && m != nil && *m != "" {
 			model = *m
@@ -116,7 +118,7 @@ func (p *overviewPage) View() string {
 			color.Render(bar), humanBytes(used), humanBytes(total), pct*100))
 	}
 	if p.metrics != nil && p.metrics.TempCelsius != nil {
-		b.WriteString(fmt.Sprintf("temp %.0f°C", *p.metrics.TempCelsius))
+		b.WriteString(i18n.T("tui.overview.temp", *p.metrics.TempCelsius))
 		if p.metrics.GPUUsePct != nil {
 			b.WriteString(fmt.Sprintf(" · gpu %.0f%%", *p.metrics.GPUUsePct))
 		}
@@ -131,14 +133,14 @@ func (p *overviewPage) View() string {
 			if v, ok := p.sched.IdleSeconds[slot]; ok && v != nil {
 				idle = fmt.Sprintf("%.0fs", *v)
 			}
-			parts = append(parts, fmt.Sprintf("%s %s idle %s", slot, humanBytes(mem), idle))
+			parts = append(parts, i18n.T("tui.overview.slot_idle", slot, humanBytes(mem), idle))
 		}
 		b.WriteString(dimStyle.Render(strings.Join(parts, " · ")) + "\n")
 	}
 
 	// alerts
 	if len(p.notifs) > 0 {
-		b.WriteString("\n" + warnStyle.Render("alerts:") + "\n")
+		b.WriteString("\n" + warnStyle.Render(i18n.T("tui.overview.alerts_header")) + "\n")
 		n := len(p.notifs)
 		if n > 6 {
 			n = 6
@@ -178,10 +180,10 @@ type slotsDataMsg struct{}
 func newSlotsPage(c *cli.Client) *slotsPage {
 	t := table.New(
 		table.WithColumns([]table.Column{
-			{Title: "SLOT", Width: 6},
-			{Title: "MODEL", Width: 34},
-			{Title: "MEM", Width: 10},
-			{Title: "IDLE", Width: 8},
+			{Title: i18n.T("tui.slots.col_slot"), Width: 6},
+			{Title: i18n.T("tui.slots.col_model"), Width: 34},
+			{Title: i18n.T("tui.slots.col_mem"), Width: 10},
+			{Title: i18n.T("tui.slots.col_idle"), Width: 8},
 		}),
 		table.WithFocused(true),
 		table.WithHeight(6),
@@ -193,7 +195,7 @@ func newSlotsPage(c *cli.Client) *slotsPage {
 	return &slotsPage{client: c, table: t}
 }
 
-func (p *slotsPage) Name() string { return "Slots" }
+func (p *slotsPage) Name() string { return i18n.T("tui.page.slots") }
 
 func (p *slotsPage) SetSize(w, h int) { p.width = w; p.table.SetHeight(max(3, h-8)) }
 
@@ -209,7 +211,7 @@ func (p *slotsPage) Update(msg tea.Msg) tea.Cmd {
 		case "enter":
 			slot := p.selectedSlot()
 			if slot == "" {
-				return func() tea.Msg { return errMsg{fmt.Errorf("no slot row selected")} }
+				return func() tea.Msg { return errMsg{errors.New(i18n.T("tui.slots.no_row_selected"))} }
 			}
 			cur := p.client
 			s := slot
@@ -218,7 +220,7 @@ func (p *slotsPage) Update(msg tea.Msg) tea.Cmd {
 				if err != nil {
 					return errMsg{err}
 				}
-				return infoMsg{"unload " + s + ": " + r.Message}
+				return infoMsg{i18n.T("tui.slots.unload_result", s, r.Message)}
 			}
 		case "l":
 			return p.loadSelected()
@@ -245,7 +247,7 @@ func (p *slotsPage) selectedSlot() string {
 func (p *slotsPage) loadSelected() tea.Cmd {
 	slot := p.selectedSlot()
 	if slot == "" {
-		return func() tea.Msg { return errMsg{fmt.Errorf("no slot row selected")} }
+		return func() tea.Msg { return errMsg{errors.New(i18n.T("tui.slots.no_row_selected"))} }
 	}
 	loaded := map[string]bool{}
 	for _, m := range p.sched.Slots {
@@ -261,7 +263,7 @@ func (p *slotsPage) loadSelected() tea.Cmd {
 		}
 	}
 	if pick == "" {
-		return func() tea.Msg { return infoMsg{"every config is already loaded"} }
+		return func() tea.Msg { return infoMsg{i18n.T("tui.slots.all_loaded")} }
 	}
 	c, mode := p.client, pick
 	return func() tea.Msg {
@@ -269,7 +271,7 @@ func (p *slotsPage) loadSelected() tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		return infoMsg{fmt.Sprintf("load %s → %s: %s", mode, slot, r.Message)}
+		return infoMsg{i18n.T("tui.slots.load_result", mode, slot, r.Message)}
 	}
 }
 
@@ -311,21 +313,21 @@ func (p *slotsPage) refreshRows() {
 
 func orDash(s string) string {
 	if s == "" {
-		return "(empty)"
+		return i18n.T("tui.slot.empty")
 	}
 	return s
 }
 
 func (p *slotsPage) View() string {
 	var b strings.Builder
-	b.WriteString(dimStyle.Render(" enter unload · l load first-free config · up/down select") + "\n")
+	b.WriteString(dimStyle.Render(i18n.T("tui.slots.help")) + "\n")
 	b.WriteString(p.table.View() + "\n")
 	if p.sched != nil {
 		bd := p.sched.MemoryBudget
-		b.WriteString(dimStyle.Render(fmt.Sprintf("budget used %s / %s (free %s)",
+		b.WriteString(dimStyle.Render(i18n.T("tui.slots.budget",
 			humanBytes(bd.UsedBytes), humanBytes(bd.TotalBytes), humanBytes(bd.FreeBytes))) + "\n")
 		if q := p.sched.Queue; len(q) > 0 {
-			b.WriteString(fmt.Sprintf("queue: %d pending\n", len(q)))
+			b.WriteString(i18n.T("tui.slots.queue", len(q)))
 		}
 	}
 	return b.String()
@@ -343,7 +345,7 @@ type servicesDataMsg struct{}
 
 func newServicesPage(c *cli.Client) *servicesPage { return &servicesPage{client: c} }
 
-func (p *servicesPage) Name() string { return "Services" }
+func (p *servicesPage) Name() string { return i18n.T("tui.page.services") }
 
 func (p *servicesPage) SetSize(w, h int) { p.width = w }
 
@@ -372,9 +374,9 @@ func (p *servicesPage) Update(msg tea.Msg) tea.Cmd {
 						return errMsg{err}
 					}
 					if start {
-						return infoMsg{"started " + svc.Key}
+						return infoMsg{i18n.T("tui.services.started", svc.Key)}
 					}
-					return infoMsg{"stopped " + svc.Key}
+					return infoMsg{i18n.T("tui.services.stopped", svc.Key)}
 				}
 			}
 		}
@@ -396,20 +398,20 @@ func (p *servicesPage) fetch() tea.Cmd {
 
 func (p *servicesPage) View() string {
 	if p.list == nil {
-		return dimStyle.Render(" loading…")
+		return dimStyle.Render(i18n.T("tui.loading_indented"))
 	}
 	var b strings.Builder
-	b.WriteString(dimStyle.Render(" 1-9 toggle service") + "\n\n")
+	b.WriteString(dimStyle.Render(i18n.T("tui.services.help")) + "\n\n")
 	for i, s := range p.list.Services {
-		state := critStyle.Render("● down")
+		state := critStyle.Render("● " + i18n.T("tui.services.state_down"))
 		if s.Active {
-			state = okStyle.Render("● up")
+			state = okStyle.Render("● " + i18n.T("tui.services.state_up"))
 		}
 		port := ""
 		if s.Port > 0 {
 			port = fmt.Sprintf(" :%d", s.Port)
 		}
-		fmt.Fprintf(&b, "  %d. %-22s %s%s  %s\n", i+1, s.Label, state, dimStyle.Render(port), dimStyle.Render(s.Unit))
+		fmt.Fprintf(&b, "  %d. %s %s%s  %s\n", i+1, i18n.PadRight(s.Label, 22), state, dimStyle.Render(port), dimStyle.Render(s.Unit))
 	}
 	return b.String()
 }

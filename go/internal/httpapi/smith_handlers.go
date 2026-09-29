@@ -31,7 +31,7 @@ import (
 // Phase 4 stub environment and tests that don't exercise smith).
 func (s *Server) smithOK(w http.ResponseWriter) bool {
 	if s.deps.Smith == nil {
-		writeError(w, http.StatusServiceUnavailable, "smith not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "smith"}, "smith not wired")
 		return false
 	}
 	return true
@@ -82,13 +82,13 @@ func (s *Server) handleSmithChecksRun(w http.ResponseWriter, r *http.Request) {
 		scope = smith.ScopeQuick // a bare POST runs the quick sweep
 	}
 	if len(b.CheckIDs) == 0 && scope != smith.ScopeQuick && scope != smith.ScopeDeep {
-		writeValidationError(w, map[string]string{"scope": "must be one of quick, deep (or provide check_ids)"})
+		writeValidationErrorCodes(w, map[string]string{"scope": "must be one of quick, deep (or provide check_ids)"}, map[string]string{"scope": "must_be_one_of"})
 		return
 	}
 
 	findings, err := s.deps.Smith.RunChecks(r.Context(), scope, b.CheckIDs, smith.SweepManual)
 	if err == smith.ErrAlreadyRunning {
-		writeError(w, http.StatusConflict, "a smith sweep is already in progress")
+		writeErrorCode(w, http.StatusConflict, "already_in_progress", nil, "a smith sweep is already in progress")
 		return
 	}
 	if err != nil {
@@ -160,7 +160,7 @@ func (s *Server) handleSmithFindings(w http.ResponseWriter, r *http.Request) {
 	if raw := q.Get("since"); raw != "" {
 		parsed, ok := parseSince(raw)
 		if !ok {
-			writeValidationError(w, map[string]string{"since": "must be unix seconds or RFC3339"})
+			writeValidationErrorCodes(w, map[string]string{"since": "must be unix seconds or RFC3339"}, map[string]string{"since": "invalid_timestamp"})
 			return
 		}
 		since = parsed
@@ -168,7 +168,7 @@ func (s *Server) handleSmithFindings(w http.ResponseWriter, r *http.Request) {
 
 	severity := q.Get("severity")
 	if severity != "" && !validFindingSeverities[severity] {
-		writeValidationError(w, map[string]string{"severity": "must be one of ok, info, warn, crit"})
+		writeValidationErrorCodes(w, map[string]string{"severity": "must be one of ok, info, warn, crit"}, map[string]string{"severity": "must_be_one_of"})
 		return
 	}
 
@@ -176,7 +176,7 @@ func (s *Server) handleSmithFindings(w http.ResponseWriter, r *http.Request) {
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 0 {
-			writeValidationError(w, map[string]string{"limit": "must be a non-negative integer"})
+			writeValidationErrorCodes(w, map[string]string{"limit": "must be a non-negative integer"}, map[string]string{"limit": "must_be_non_negative_integer"})
 			return
 		}
 		limit = n
@@ -188,7 +188,7 @@ func (s *Server) handleSmithFindings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list findings failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "list findings failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, smithFindingsResponse{Count: len(findings), Findings: findings})
@@ -243,7 +243,7 @@ func (s *Server) handleSmithFindingsPurge(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "purge findings failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "purge findings failed")
 		return
 	}
 	s.audit(r, identity(r).Name, "smith_findings_purge", maxAge, fmt.Sprintf("deleted=%d", deleted))

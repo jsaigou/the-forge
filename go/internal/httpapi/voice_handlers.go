@@ -123,11 +123,12 @@ func (s *Server) handleVoiceList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, upstreamResp)
 }
 
-func validateEngineMode(mode ttsctl.EngineMode, field string, fields map[string]string) {
+func validateEngineMode(mode ttsctl.EngineMode, field string, fields, codes map[string]string) {
 	switch mode {
 	case ttsctl.ModeResident, ttsctl.ModeAvailable, ttsctl.ModeDisabled:
 	default:
 		fields[field] = "must be one of resident, available, disabled"
+		codes[field] = "must_be_one_of"
 	}
 }
 
@@ -156,7 +157,7 @@ func validateEngineURL(rawURL, field string, fields map[string]string) {
 // a fire-and-forget 200.
 func (s *Server) handleVoiceSettingsPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings store"}, "settings store not wired")
 		return
 	}
 	var body ttsctl.Engines
@@ -166,16 +167,17 @@ func (s *Server) handleVoiceSettingsPut(w http.ResponseWriter, r *http.Request) 
 	}
 
 	fields := map[string]string{}
+	codes := map[string]string{}
 	for name, eng := range map[string]ttsctl.EngineConfig{
 		"kokoro": body.Kokoro, "customvoice": body.CustomVoice,
 		"voicedesign": body.VoiceDesign, "base": body.Base,
 	} {
-		validateEngineMode(eng.Mode, name+".mode", fields)
+		validateEngineMode(eng.Mode, name+".mode", fields, codes)
 		validateEngineUnit(eng.Unit, name+".unit", fields)
 		validateEngineURL(eng.URL, name+".url", fields)
 	}
 	if len(fields) > 0 {
-		writeValidationError(w, fields)
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 

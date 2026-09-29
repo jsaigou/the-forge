@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../../lib/api";
 import { useSmithActionProcedurePreview, useSmithActionProcedurize } from "../../lib/queries";
 import { useStepUpGate } from "../../lib/useStepUpGate";
@@ -28,6 +29,7 @@ interface DowntimeModalProps {
 }
 
 export function DowntimeModal({ actionId, onClose, extraWarning }: DowntimeModalProps) {
+  const { t } = useTranslation("common");
   const preview = useSmithActionProcedurePreview(actionId);
   const procedurize = useSmithActionProcedurize(actionId);
   const gate = useStepUpGate();
@@ -50,14 +52,14 @@ export function DowntimeModal({ actionId, onClose, extraWarning }: DowntimeModal
   return (
     <div className="modal-backdrop" onClick={(e) => { e.stopPropagation(); if (!busy) onClose(); }}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Approve</h3>
+        <h3>{t("downtime_modal.title")}</h3>
 
         {extraWarning && (
           <div className="error-note" style={{ marginBottom: 14 }}>{extraWarning}</div>
         )}
 
         {preview.isLoading && (
-          <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 14 }}>Loading…</div>
+          <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 14 }}>{t("downtime_modal.loading")}</div>
         )}
         {preview.isError && (
           <div className="error-note" style={{ marginBottom: 14 }}>{apiErrorMessage(preview.error)}</div>
@@ -66,35 +68,34 @@ export function DowntimeModal({ actionId, onClose, extraWarning }: DowntimeModal
         {p && (
           <>
             <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 14 }}>
-              This will run <b>{p.title}</b> through smith's procedure engine — approve, post-verify,
-              and (if it hits trouble) checkpoint/rollback, instead of the bare one-shot action.
+              <Trans i18nKey="downtime_modal.run_description" ns="common" values={{ title: p.title }} components={{ b: <b /> }} />
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12.5, marginBottom: 14 }}>
               <div>
-                <span style={{ color: "var(--text-mute)" }}>Estimated duration: </span>
+                <span style={{ color: "var(--text-mute)" }}>{t("downtime_modal.estimated_duration_label")}</span>
                 {p.est_duration_sec < 60
-                  ? `${p.est_duration_sec}s`
-                  : `${Math.round(p.est_duration_sec / 60)}m`}
+                  ? t("downtime_modal.duration_seconds", { sec: p.est_duration_sec })
+                  : t("downtime_modal.duration_minutes", { min: Math.round(p.est_duration_sec / 60) })}
               </div>
               {p.needs_maintenance && (
                 <div style={{ color: "var(--warn)" }}>
-                  A maintenance window will be held for the whole run — no other load/unload/switch/restart can happen until it finishes.
+                  {t("downtime_modal.maintenance_window_warning")}
                 </div>
               )}
               {p.daemon_restart && (
                 <div style={{ color: "var(--warn)" }}>
-                  This procedure restarts the daemon itself partway through — the run resumes automatically afterward.
+                  {t("downtime_modal.daemon_restart_warning")}
                 </div>
               )}
               {p.affected_slots && p.affected_slots.length > 0 && (
                 <div>
-                  <span style={{ color: "var(--text-mute)" }}>Affected slots: </span>
+                  <span style={{ color: "var(--text-mute)" }}>{t("downtime_modal.affected_slots_label")}</span>
                   {p.affected_slots.join(", ")}
                 </div>
               )}
               {p.affected_services && p.affected_services.length > 0 && (
                 <div>
-                  <span style={{ color: "var(--text-mute)" }}>Affected services: </span>
+                  <span style={{ color: "var(--text-mute)" }}>{t("downtime_modal.affected_services_label")}</span>
                   {p.affected_services.join(", ")}
                 </div>
               )}
@@ -105,9 +106,9 @@ export function DowntimeModal({ actionId, onClose, extraWarning }: DowntimeModal
         {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
 
         <div className="form-actions">
-          <button className="btn" disabled={busy} onClick={onClose}>Cancel</button>
+          <button className="btn" disabled={busy} onClick={onClose}>{t("downtime_modal.cancel")}</button>
           <button className="btn primary" disabled={busy || !p} onClick={confirm}>
-            {busy ? "…" : "Run through smith"}
+            {busy ? "…" : t("downtime_modal.run_through_smith")}
           </button>
         </div>
 

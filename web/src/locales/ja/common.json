@@ -1,0 +1,523 @@
+{
+  "language": {
+    "label": "言語",
+    "hint": "この設定はこのブラウザにのみ保存され、他の端末や他の運用者には同期されません。",
+    "toggle_title": "言語を切り替え"
+  },
+  "app": {
+    "loading": "読み込み中…",
+    "toggle_theme": "テーマを切り替え",
+    "buy_me_a_coffee": "コーヒーをおごる"
+  },
+  "restart_pip": {
+    "title_other": "再起動が必要です — {{by}} により起動後に {{count}} 件の設定が変更されました。クリックで詳細を表示。"
+  },
+  "profile_pip": {
+    "title": "{{mode}} をプロファイリング中 — {{phase}}。クリックで詳細を表示。"
+  },
+  "error_boundary": {
+    "title": "このページの描画中にエラーが発生しました",
+    "hint": "アプリの他の部分には影響していません。再試行するか、別のタブに切り替えてください。",
+    "try_again": "再試行"
+  },
+  "pwa_update": {
+    "message": "アプリの新しいバージョンが利用可能です。再読み込みして適用してください。",
+    "later": "あとで",
+    "reload_now": "今すぐ再読み込み"
+  },
+  "step_up": {
+    "title": "再認証",
+    "hint": "この操作には<b>{{factor}}</b>による認証が必要です。続行するには再認証してください。",
+    "password": "パスワード",
+    "totp_code": "TOTPコード",
+    "cancel": "キャンセル",
+    "verify": "認証",
+    "verifying": "認証中…"
+  },
+  "save_button": {
+    "save": "保存",
+    "saving": "保存中…",
+    "saved": "保存済み",
+    "create": "作成"
+  },
+  "maintenance": {
+    "enter_title": "メンテナンスモードを開始",
+    "active_title": "メンテナンスモード実行中 — {{reason}}。クリックで詳細を表示。",
+    "no_reason": "理由の記載なし",
+    "panel_title": "メンテナンスモード",
+    "active_hint": "実行中 — この期間が終了するまで、モデルの読み込み・解放・切り替え・再起動はできません。",
+    "entered_by": "{{who}} が開始",
+    "auto_exits": "自動終了: {{when}}",
+    "end_button": "メンテナンスを終了",
+    "end_confirm": "今すぐ終了",
+    "end_warning": "読み込み・解放・再起動が直ちに可能になります。",
+    "inactive_hint": "実行中は、このホスト上でモデルの読み込み・解放・切り替え・再起動が一切できなくなります。静かな状態が必要な手動修復の前に使用してください。",
+    "reason_label": "理由",
+    "reason_placeholder": "例: Vulkanバイナリの再ビルド",
+    "duration_label": "継続時間(分)",
+    "enter_button": "メンテナンスモードを開始"
+  },
+  "ask_smith": {
+    "default_title": "これについて smith に質問",
+    "label": "smith に質問"
+  },
+  "carousel": {
+    "ungrouped": "その他",
+    "noun": {
+      "model": "モデル",
+      "model_plural": "モデル",
+      "config": "コンフィグ",
+      "config_plural": "コンフィグ"
+    },
+    "region_label_models": "モデルファミリー",
+    "region_label_configs": "コンフィグファミリー",
+    "count_other": "{{noun}} {{count}}件",
+    "tap_to_fan_out": "タップして展開",
+    "tap_to_center": "タップして中央へ",
+    "prev_family": "前のファミリー",
+    "next_family": "次のファミリー",
+    "go_to_family": "{{family}} へ移動",
+    "slide_aria_active": "{{family}}: {{countPhrase}}。タップして展開。",
+    "slide_aria_inactive": "{{family}}: {{countPhrase}}。タップして中央へ。",
+    "fan_stage_aria": "{{family}} の{{nounPlural}} — スワイプで閲覧、前面のカードをタップして拡大",
+    "collapse_fan_aria": "{{family}} の展開を閉じる",
+    "up_card_suffix": " — 前面のカード、タップで拡大",
+    "card_aria": "{{name}}{{suffix}}",
+    "prev_noun": "前の{{noun}}",
+    "next_noun": "次の{{noun}}",
+    "go_to_card": "{{name}} へ移動"
+  },
+  "compressor_chips": {
+    "local_label": "ローカル · 圧縮による削減 ({{window}})",
+    "external_label": "外部 · 圧縮による削減 ({{window}})",
+    "local_title_none": "この期間、キャッシュまたは圧縮されたローカルリクエストはありません",
+    "local_title_tokens_dropped": "圧縮により {{tokens}} トークンを削減",
+    "local_title_tokens_cached": "{{tokens}} トークンが再プリフィル不要(キャッシュヒット、推定)",
+    "local_title_time_suffix": "。プリフィル回避時間は {{sources}} による実測プリフィルTPSを基準に推定",
+    "local_title_no_tps": "この期間にキャッシュ/圧縮されたリクエストを持つモデルに実測プリフィルTPSがありませんでした — 時間の推定はできません",
+    "external_title_none": "この期間、圧縮された外部リクエストはありません",
+    "external_title_priced": "{{tokens}} トークンが圧縮され、{{currency}} での各プロバイダーの混合入力レートで価格付けされました",
+    "external_title_unpriced": "{{tokens}} トークンが圧縮されましたが、この期間に評価できる価格設定がありません",
+    "value_unmeasured": "未計測",
+    "value_no_data": "データなし",
+    "value_unpriced": "未価格設定"
+  },
+  "routing_tree": {
+    "layout_az": "A–Z",
+    "layout_group": "グループ",
+    "hold_to_toggle_title": "長押しでこのプロバイダーを有効/無効化",
+    "off_chip": "無効",
+    "model_fallback_name": "モデル #{{id}}",
+    "no_offerings": "オファリングが設定されていません — マップする対象がありません。",
+    "all_disabled": "すべてのオファリングが現在無効です。",
+    "legend_compressing": "圧縮中",
+    "legend_degraded": "圧縮中 · 劣化",
+    "legend_bypassed": "運用者によるバイパス",
+    "legend_autobypass": "自動バイパス(圧縮機能ダウン)",
+    "legend_failing": "失敗(圧縮機能・接続先ともにダウン)",
+    "legend_unreachable": "プロバイダーに到達不可",
+    "legend_disabled": "無効",
+    "legend_note": "太いほど優先度が高い",
+    "legend_note_hold_suffix": " · プロバイダーノードを長押しで有効/無効化"
+  },
+  "detail_modal": {
+    "back": "戻る",
+    "close": "閉じる"
+  },
+  "catalog_form": {
+    "offering": {
+      "model_label": "モデル *",
+      "select_ellipsis": "— 選択 —",
+      "variant_label": "バリアント(任意)",
+      "none_option": "— なし —",
+      "provider_label": "プロバイダー *",
+      "wire_model_label": "ワイヤーモデル *",
+      "wire_model_placeholder": "deepseek-chat",
+      "price_in_label": "入力価格 / 100万トークン",
+      "price_out_label": "出力価格 / 100万トークン",
+      "cached_price_in_label": "キャッシュ入力価格 / 100万トークン(任意)",
+      "cached_price_placeholder": "未設定 — キャッシュヒットにも通常価格が適用されます",
+      "peak_pricing_title": "時間帯別価格(任意)",
+      "fill_peak_button": "自動入力: ピーク = オフピークの2倍",
+      "no_peak_schedule_warning": "{{provider}} にはピークスケジュールが設定されていません(設定 → プロバイダー) — これらのピーク料金は適用されません。",
+      "peak_lower_warning": "ピーク料金がオフピーク料金より低く設定されています — 通常とは異なりますが、プロバイダー自身の価格ポリシーはここでは強制されません。",
+      "price_in_peak_label": "入力価格 / 100万トークン、ピーク時",
+      "price_out_peak_label": "出力価格 / 100万トークン、ピーク時",
+      "cached_price_peak_label": "キャッシュ入力価格 / 100万トークン、ピーク時",
+      "same_as_off_peak_placeholder": "オフピークと同じ",
+      "currency_label": "通貨",
+      "context_length_label": "コンテキスト長",
+      "priority_label": "優先度",
+      "priority_hint": "複数のプロバイダーが同じモデルを提供する場合、最も低い値がa0経由で提供されます(100 = 優先なし。同値の場合はプロバイダー名で決定)。",
+      "enabled_checkbox": "有効(このオファリングへルーティング)",
+      "data_residency_label": "データ所在地: {{country}}",
+      "data_residency_group_suffix": " · グループ: {{group}}",
+      "cancel": "キャンセル"
+    },
+    "icon_picker": {
+      "light_theme_title": "ライトテーマ",
+      "dark_theme_title": "ダークテーマ",
+      "light_set_to": "ライトの設定:",
+      "light_inherits_from": "ライトは {{label}} から <1>{{icon}}</1> を継承しています",
+      "light_inherits_none": "ライトアイコン未設定 — {{label}} から継承しますが、そちらも未設定です",
+      "light_not_set": "ライトアイコン未設定",
+      "uploaded_image": "(アップロード画像)",
+      "dark_set_to": "ダークの設定:",
+      "dark_same_as_light": "ダークはライトと同じ",
+      "light_tab": "☀ ライト",
+      "dark_tab": "☾ ダーク",
+      "change_icon": "アイコンを変更",
+      "close": "閉じる",
+      "editing_mark": "{{variant}}マークを編集中{{suffix}}",
+      "editing_mark_light": "ライト",
+      "editing_mark_dark": "ダーク",
+      "editing_mark_same_as_light_suffix": " (現在: ライトと同じ)",
+      "clear_dark": "ダークをクリア(ライトにフォールバック)",
+      "clear": "クリア",
+      "clear_inherit_suffix": " ({{label}} から継承)",
+      "upload_label": "または{{suffix}}をアップロード (WebM/JPG/PNG/WebP/SVG、1MB以下)",
+      "upload_dark_suffix": "ダークテーマのマーク"
+    },
+    "load_options": {
+      "raw_mode_hint": "1行につき1つのargvトークンです — フラグとその値はそれぞれ別の行に記述してください(例: 「--parallel」の次の行に「1」)。「--parallel 1」を1行にまとめないでください。ランチャーはこのファイルをシェルの単語分割なしで読み込みます。",
+      "back_to_picker": "ピッカーに戻る",
+      "add_option_ellipsis": "+ オプションを追加…",
+      "advanced_title": "詳細設定",
+      "advanced_hint": "上のキュレーションされたリストにないものすべて。生のフラグ/値のペアとして編集され、そのまま使用されます — 検証は行われません。",
+      "value_optional_placeholder": "(値、任意)",
+      "flag_placeholder": "--flag",
+      "malformed_hint": "1つの不正なargvトークンとして保存されています(フラグとその値が同じ行にあります) — このコンフィグを保存すると、2つの正しいトークンに分割されます。",
+      "remove_flag_aria": "{{flag}} を削除",
+      "add_custom_flag": "+ カスタムフラグを追加",
+      "edit_as_raw_text": "生テキストとして編集"
+    }
+  },
+  "confirm_button": {
+    "delete": "削除",
+    "confirm_question": "確認しますか?",
+    "pending": "…"
+  },
+  "benchmark_form": {
+    "benchmark_label": "ベンチマーク",
+    "custom_ellipsis": "カスタム…",
+    "frontier_ceiling": "フロンティア上限 約{{pct}}% ({{source}}、{{asOf}}) — スコアはこれを基準に正規化されます。",
+    "custom_no_ceiling": "カスタムベンチマーク名 — 引用元のフロンティア上限がないため、カードには生のスコアがそのまま表示されます。",
+    "metric_label": "指標 *",
+    "value_label": "値 *",
+    "source_label": "ソース *",
+    "subject_type_label": "対象タイプ *",
+    "subject_type_model": "モデル — 能力スコア、モデルカードとコンフィグカードに表示",
+    "subject_type_variant": "バリアント — パフォーマンス指標(decode_tps、prefill_tps、safe_memory_bytes)、コンフィグカードに表示",
+    "subject_type_config": "コンフィグ — この起動レシピに固有の能力/パフォーマンススコア、このコンフィグのカードに表示",
+    "subject_type_offering": "オファリング — レガシー、新規行では選択不可、カードには表示されません",
+    "offering_scoped_hint": "オファリング単位のベンチマークはコンフィグ単位のカード修正より前のもので、どのカードにも表示されたことがありません — この行をモデル・バリアント・コンフィグのいずれかに再割り当てすると表示されるようになります。または履歴としてそのまま残すこともできます。",
+    "variant_metric_hint": "既知のパフォーマンス指標名: <code>decode_tps</code>、<code>prefill_tps</code>(いずれもtok/s)、<code>safe_memory_bytes</code> — 下の「指標」欄に正確に入力してください。上の能力プリセットとは異なり、これらは生の測定値であり、上限に対して正規化されていません。",
+    "subject_label": "対象 *",
+    "select_placeholder": "— 選択 —",
+    "source_url_label": "ソースURL",
+    "source_date_label": "ソース日付",
+    "benchmark_name_custom": "ベンチマーク名(カスタム)",
+    "notes_label": "メモ",
+    "f7_gate": "F7ゲート: 公開済みベンチマークにはソースURLとソース日付の両方が必要です。",
+    "cancel": "キャンセル"
+  },
+  "llama_flags": {
+    "--parallel": {
+      "label": "並列スロット数",
+      "why": "設定したコンテキストを倍増するのではなくN分割します — n_ctx 131072に--parallel 2を指定すると、各リクエストが実際に使えるのは65536トークンだけになります。1つの長い会話をフルコンテキストで処理させたいモードでは必ず1にしてください。qwen25coderの--parallel 4だけが意図的な例外(同時に複数の短いリクエストを処理する高速ワーカーモード)です。2026-07-23にgemma4-e2b/nemotron-nanoで実際に発見されました。"
+    },
+    "--ctx-checkpoints": {
+      "label": "コンテキストチェックポイント",
+      "why": "会話全体を最初から再処理する代わりに、保存済みのKVキャッシュのチェックポイントを復元できるようにします。2026-07時点で、このコード経路には未解決の上流llama.cppのハングバグがあります(docs/investigations.md item 9) — このボックス上のほとんどのコンフィグは16を使用し、swallow-32b/swallow-8bは回避のため明示的に0を使用しています。"
+    },
+    "--cache-type-k": {
+      "label": "KVキャッシュ量子化(K)",
+      "why": "アテンションのキーキャッシュを量子化してメモリ使用量を削減します(多少の品質低下と引き換え)。すでにいくつかのコンフィグが--cache-type-vと非対称(例: q4_0/q8_0)で運用しています — これは既に本番投入済みの実際のトレードオフであり、危険なものではありません。"
+    },
+    "--cache-type-v": {
+      "label": "KVキャッシュ量子化(V)",
+      "why": "アテンションのバリューキャッシュを量子化します。--cache-type-kと対で使用されます。詳細はそちらの項目を参照してください。"
+    },
+    "--flash-attn": {
+      "label": "フラッシュアテンション",
+      "why": "対応バックエンドで、より高速・低メモリなフラッシュアテンションの融合カーネルを有効にします。有効のままにして問題ありません — このボックス上のほぼすべてのコンフィグで有効になっています。"
+    },
+    "--jinja": {
+      "label": "Jinjaチャットテンプレート",
+      "why": "llama.cppの組み込みテンプレート推測ではなく、モデル自身のJinjaチャットテンプレート(GGUFメタデータ由来)を使用します。組み込みの推測ロジックがまだ認識していないプロンプト形式のモデルに必要です。"
+    },
+    "--mmproj": {
+      "label": "マルチモーダルプロジェクター",
+      "why": "画像入力を受け付けるモデルに必要な、視覚/マルチモーダルプロジェクター重みへのパスです。コンフィグに紐づいたmmprojアーティファクトから自動的に設定され、手入力するものではありません。"
+    },
+    "--no-mmap": {
+      "label": "mmap無効化",
+      "why": "オンデマンドのメモリマップではなく、重みファイル全体を事前にメモリへ読み込みます。起動は遅くなりますが、一部のファイルシステム/GPUドライバの組み合わせで生成中に発生するページフォールトの停滞を回避できます。"
+    },
+    "--threads": {
+      "label": "CPUスレッド数",
+      "why": "GPUにオフロードされない推論部分(トークン化、サンプリング、CPU常駐のレイヤーなど)で使用するCPUスレッド数です。このボックスのGPUバウンドなモードではボトルネックになることはほとんどありません。"
+    },
+    "--swa-full": {
+      "label": "フルスライディングウィンドウアテンションキャッシュ",
+      "why": "縮小形式ではなく、フルのスライディングウィンドウアテンションキャッシュを常駐させます — ターンをまたいでキャッシュを再利用する一部のハイブリッド/リカレントアーキテクチャに必要です。--ctx-checkpointsと相互作用するため、これを設定するモデルでどちらかを変更する前にdocs/investigations.md item 9を読んでください。"
+    },
+    "--spec-type": {
+      "label": "投機的デコーディング",
+      "why": "複数トークン先を予測し、まとめて検証する投機的デコーディング戦略(ドラフトモデルやMTPヘッドなど)を選択します — ドラフトの採択率が高い場合は実際のスループット向上になり、低い場合は実際の速度低下になります。"
+    },
+    "--spec-draft-model": {
+      "label": "ドラフトモデル",
+      "why": "投機的デコーディングに使用する、より小さなドラフトモデルへの手入力パスです(--mmprojと異なり、カタログに紐づいたドラフトモデルアーティファクトはありません)。qwen36-mtpのコンフィグは--spec-type draft-mtpを設定していますが、ドラフトモデルのパスはまったく設定されていません — テンプレートとしてコピーする前に、これが意図的かどうか確認する価値があります。"
+    },
+    "--spec-draft-n-max": {
+      "label": "最大ドラフトトークン数",
+      "why": "メインモデルがまとめて検証する前に、ドラフトモデルが何トークン先まで予測するかの上限です。値を大きくすると潜在的な高速化幅も、リジェクトされたバッチのコストも大きくなります。"
+    },
+    "--model-draft": {
+      "label": "ドラフトモデル",
+      "why": "ドラフトモデルパスの短縮フラグ形式(-md)で、このボックスのdraft-dflash系コンフィグ(laguna-s-21)で使用されます。draft-mtp系コンフィグでは代わりに--spec-draft-modelが使用されます — 役割は同じですが、コンフィグが使用する投機的デコーディングの方式によってフラグ名が異なります。手入力で、カタログには紐づいていません — --spec-draft-modelも参照してください。"
+    },
+    "--n-gpu-layers": {
+      "label": "GPUオフロードレイヤー数",
+      "why": "CPUではなくGPUに配置するトランスフォーマーレイヤーの数です。999(nemotron-puzzleの値)は「すべて」を意味します — llama.cppはモデルの実際のレイヤー数にクランプします。この値を下げると、推論速度とGPUメモリ負荷のトレードオフになります。"
+    },
+    "--batch-size": {
+      "label": "プロンプトバッチサイズ",
+      "why": "プロンプト(プリフィル)処理の論理バッチサイズです。値を大きくするとプロンプト処理は高速化しますが、計算バッファは大きくなります。このボックスの複数のコンフィグは--ubatch-sizeと組み合わせて使用しています。"
+    },
+    "--ubatch-size": {
+      "label": "物理バッチサイズ",
+      "why": "各論理バッチ(--batch-size)内での物理(GPUカーネル)バッチサイズです。--batch-size以下である必要があり、このハードウェアのメモリ/スループットのトレードオフに合わせて--batch-sizeと合わせて調整されます。"
+    },
+    "--reasoning-budget": {
+      "label": "推論トークン予算",
+      "why": "推論モデルが最終回答を強制されるまでに<think>ブロック内で消費できるトークン数の上限です。モデルがコンテキスト全体を内部推論に使い切って回答できなくなることを防ぎます。"
+    },
+    "--chat-template-kwargs": {
+      "label": "チャットテンプレートkwargs",
+      "why": "Jinjaチャットテンプレートに渡す追加のJSON kwargsです — このボックスではほぼ常に{\"preserve_thinking\":true|false}です(gemma4-mtp-nothinkだけは代わりに{\"enable_thinking\":false}を使用します — kwarg名自体がテンプレート依存です)。2つの系統で挙動が逆です: Qwen 3.6(qwen36/qwen36-mtp)は前のターンの推論内容を保持する必要がありますが、Ornith(Qwen 3.5系)は保持してはいけません — froggeric v21.3のデフォルトtrueにより、Ornithは<think>の中身が空のまま予算を使い切ってしまいました(docs/pitfalls.md参照)。ここを逆にすると、症状は推論予算やテンプレートのバグのように見えますが、実際は1行のkwargの問題です。"
+    },
+    "--chat-template-file": {
+      "label": "チャットテンプレートの上書き",
+      "why": "GGUFに埋め込まれたチャットテンプレートを外部ファイルに置き換えます。Ornithはこれが必要です。元の埋め込みテンプレートが無条件に前のすべてのターンの<think>ブロックを再挿入してしまうためです(docs/investigations.md item 9で追跡している再処理問題とは別の、実際に壊れたテンプレートのバグです) — docs/pitfalls.md参照。"
+    },
+    "--repeat-penalty": {
+      "label": "リピートペナルティ",
+      "why": "モデルが直近に生成したトークンにペナルティを与えます。llama-serverのデフォルト(1.0)は事実上オフであり、推論負荷の高いMoEモデルがテキストの繰り返しループに陥る原因になります — サンプリングの問題であり、テンプレートの問題ではありません。Ornithは実際のインシデントを修正するため1.08に設定しています(docs/pitfalls.md)。"
+    },
+    "--dry-multiplier": {
+      "label": "DRYサンプラー強度",
+      "why": "繰り返しを抑制するDRY(Don't Repeat Yourself)サンプラーの強度で、デフォルトはオフ(0.0)です。Ornithでは--repeat-penaltyと組み合わせて、実際に発生したテキスト繰り返しループのインシデントを修正しています(docs/pitfalls.md) — 必要なモデルでこれを外すとループが再発します。"
+    },
+    "--temp": {
+      "label": "サンプリング温度",
+      "why": "標準的なサンプリング温度です。ここで取り上げているのは、Ornithでの--repeat-penalty/--dry-multiplierと同じ厳選済みサンプラー修正の一部だからです(0.7) — これだけを単独で変更すると、修正した繰り返しループの症状が再発する可能性があります。"
+    }
+  },
+  "vllm_flags": {
+    "--trust-remote-code": {
+      "label": "リモートコードを信頼",
+      "why": "vLLM組み込みのアーキテクチャだけでなく、モデルリポジトリに同梱されたカスタムモデリングコードの実行を許可します。vLLMがネイティブに認識しないモデルに必要です。"
+    },
+    "--dtype": {
+      "label": "重みのdtype",
+      "why": "vLLMが重みを読み込む際の計算/保存用dtype(例: bfloat16)です。GGUFの量子化方式とは別物です — このボックスのvLLMコンフィグは量子化なしのbf16重みで動作しています。"
+    },
+    "--tensor-parallel-size": {
+      "label": "テンソル並列サイズ",
+      "why": "各レイヤーの重みを分割する対象GPU数です。このボックス(シングルGPUのStrix Halo)では1です — このホストに2枚目のGPUが追加された場合のみ意味を持ちます。"
+    },
+    "--gpu-memory-utilization": {
+      "label": "GPUメモリ使用率",
+      "why": "vLLMが重み+KVキャッシュ用に確保できるGPUメモリの割合です(0.98はほぼ全量)。これを下げると他プロセス用の余裕は増えますが、使用可能なKVキャッシュは縮小します。"
+    }
+  },
+  "hazards": {
+    "parallel": "コンテキストは倍増ではなく分割されます: n_ctx {{nCtx}}に{{flag}} {{n}}を組み合わせると、各リクエストが実際に使えるのは{{perSlot}}トークンだけです。意図的な設定(同時に短いリクエストを処理するためのトレードオフ)か、削除し忘れたデフォルト値かを確認してください。",
+    "ctx_checkpoints": "このコード経路には未解決の上流llama.cppのハングバグが存在します(docs/investigations.md item 9)。長時間の会話でこれに依存する前に、意図した設定であることを確認してください。"
+  },
+  "provider_presets": {
+    "data_residency_groups": {
+      "China": "中国",
+      "Japan": "日本",
+      "United States": "米国",
+      "European Union": "欧州連合",
+      "Southeast Asia": "東南アジア",
+      "Azure region (operator-selected)": "Azureリージョン(オペレーターが選択)"
+    },
+    "notes": {
+      "aiand": "残高照会APIは存在しません(AI&自身のドキュメントで確認済み) — クレジットはStripeのWebチェックアウト経由でのみ購入できます。代わりにAnalytics APIで実際の期間支出を確認できます。日本の事業者で、このアカウントはJPYで請求されます。",
+      "openrouter": "Statuspageフィードが見つかりません(status.openrouter.aiに/api/v2/summary.jsonがありません) — ヘルスチェックはターゲットURLへのライブプローブにフォールバックします。",
+      "openai": "利用可能な残高APIはありません: 旧credit_grantsエンドポイントは廃止済みで、org-costsエンドポイントにはこの保存済み推論キーではなくAdmin APIキーが必要です。",
+      "anthropic": "利用可能な残高APIはありません: コスト/使用状況レポートはこの保存済み推論キーではなくベータ版Admin APIの背後にあります。",
+      "google": "Google Cloudのステータスフィードは Statuspage の summary.json 形式ではありません — ヘルスチェックはライブプローブにフォールバックします。キーごとの残高APIもありません。",
+      "microsoft": "Azure OpenAIには単一のベースURLがありません — 保存前に<resource>を自分のリソース名に置き換えてください。キーごとの残高APIはなく、コスト管理はAzure Cost Managementで行います。",
+      "moonshot": "文書化されたキーごとの残高APIはありません。.aiエンドポイントはUSDで請求されます。中国リージョン向け製品を利用する場合はapi.moonshot.cn(CNY請求)に切り替えてください。",
+      "fireworks": "文書化されたキーごとの残高APIはありません。",
+      "mistral": "文書化されたキーごとの残高APIはありません。",
+      "qwen": "Alibaba CloudのModel-as-a-Service(OpenAI互換モード API)、シンガポールリージョンです。モデル: qwen3.8-max、qwen3.7-plus、qwen3.6-flash、glm-5.2。文書化されたキーごとの残高APIはありません。"
+    }
+  },
+  "action_card": {
+    "risk_chip": {
+      "info": "情報リスク",
+      "low": "低リスク",
+      "high": "高リスク"
+    },
+    "status_chip": {
+      "pending": "保留中",
+      "approved": "承認済み",
+      "executing": "実行中",
+      "done": "完了",
+      "done_unverified": "完了(未検証)",
+      "failed": "失敗",
+      "rejected": "却下",
+      "superseded": "置き換え済み"
+    },
+    "self_evicting_chip": "自己退避",
+    "suggestion_notice": "何も壊れていません — これは提案であり、失敗しているチェックではありません。",
+    "executing_notice": "実行中…(SSE経由でリアルタイム更新)",
+    "approve": "承認",
+    "reject": "却下",
+    "dismiss": "却下",
+    "dismiss_confirm": "却下しますか?",
+    "reject_confirm": "却下しますか?",
+    "reject_warning": "この提案は却下済みとして記録されます。",
+    "delete_confirm": "これらのファイルを削除しますか?",
+    "delete_warning": "上に表示されているすべてのファイルが完全に削除されます。元に戻すことはできません。",
+    "check_now": {
+      "self_review_close": "解決済みとして確定",
+      "with_investigation": "今すぐチェック",
+      "with_check_id": "{{id}}を今すぐチェック",
+      "none": "チェックするものがありません"
+    },
+    "recheck": {
+      "with_investigation": "チェックを再実行",
+      "with_check_id": "{{id}}を再チェック",
+      "none": "再検証するチェックがありません"
+    },
+    "no_recheck_done": "再検証するチェックがありません — 完了",
+    "still_failing": "まだ失敗しています: {{list}}",
+    "paused_for_review": "レビューのため一時停止中",
+    "continue": "続行",
+    "abort": "中止",
+    "abort_confirm": "この実行を中止しますか?",
+    "abort_warning": "プロシージャはここで停止します — ここまで実行された内容はそのまま残ります。",
+    "step_running": "ステップ{{n}}…",
+    "result": {
+      "done": "完了",
+      "done_unverified": "完了 — 未検証",
+      "failed": "失敗"
+    },
+    "why_cant_run": {
+      "requires_reboot": "ホストの再起動が必要です — smithはこれを自ら実行しません",
+      "policy_defers_to_human": "意図的なガードレールです — smithはこれを報告しますが、判断はあなたに委ねます",
+      "risks_live_workload": "稼働中のスロットまたはサービスが使用している何かに影響を与える可能性があります",
+      "default": "これらの手順は人手での実行が必要です"
+    },
+    "severity": {
+      "ok": "正常",
+      "info": "情報",
+      "warn": "警告",
+      "crit": "重大"
+    }
+  },
+  "actions_tray": {
+    "awaiting_approval_title": "smithの承認待ちアクション",
+    "label": "smithのアクション",
+    "pending_count": "保留中 {{count}}件",
+    "loading": "アクションを読み込み中…",
+    "empty": "アクションはありません。"
+  },
+  "downtime_modal": {
+    "title": "承認",
+    "loading": "読み込み中…",
+    "run_description": "これにより、単発の一発実行ではなく、<b>{{title}}</b>がsmithのプロシージャエンジンを通じて実行されます — 承認、事後検証、そして(問題が発生した場合の)チェックポイント/ロールバックを伴います。",
+    "estimated_duration_label": "推定所要時間: ",
+    "duration_seconds": "{{sec}}秒",
+    "duration_minutes": "{{min}}分",
+    "maintenance_window_warning": "実行中はメンテナンスウィンドウが確保されます — 完了するまで他の読み込み/解放/切り替え/再起動は行えません。",
+    "daemon_restart_warning": "このプロシージャは途中でデーモン自体を再起動します — 実行は自動的に再開されます。",
+    "affected_slots_label": "影響を受けるスロット: ",
+    "affected_services_label": "影響を受けるサービス: ",
+    "cancel": "キャンセル",
+    "run_through_smith": "smith経由で実行"
+  },
+  "delete_files_card": {
+    "file_count_reclaimable_other": "{{count}}個のファイル — {{gb}} GB回収可能",
+    "irreversible_notice": "削除は元に戻せません — リスクは承認する行為そのものにあり、ここに一覧表示されていること自体にはありません。",
+    "guidance_intro": "これらのどれかを残しておきたいですか? ",
+    "guidance_instructions": "下の行にある「{{keepLabel}}」をクリックしてください(常設の除外リストに追加され、これ以降のチェックでも除外されます)。または",
+    "keep": "残す",
+    "kept_notice": "保持済み — この提案を却下して再チェックすれば今すぐ除外できます",
+    "col_path": "パス",
+    "col_folder": "フォルダ",
+    "col_size": "サイズ"
+  },
+  "runbook_card": {
+    "empty": "runbookの手順がありません。",
+    "why_cant_run_prefix": "smithがこれを実行できない理由: ",
+    "steps_done": "{{total}}件中{{done}}件完了",
+    "copy_all_button": "すべてコピー",
+    "copy_all_title": "すべての手順をシェルスクリプトとしてコピー",
+    "copy_command_title": "コマンドをコピー",
+    "copy_verify_command_title": "検証コマンドをコピー",
+    "verify_prefix": "検証: "
+  },
+  "handoff_panel": {
+    "title": "ハンドオフが必要です — これを承認するとsmith自身のブレインが退避されます",
+    "brain_slot_label": "ブレインスロット:",
+    "brain_model_label": "ブレインモデル:",
+    "state_chip": {
+      "not_required": "不要",
+      "required": "必要",
+      "runbook_issued": "ランブック発行済み",
+      "acknowledged": "確認済み",
+      "remote_swapped": "リモートに切り替え済み"
+    },
+    "get_runbook_button": "ハンドオフ用ランブックを取得",
+    "issuing": "発行中…",
+    "remote_prompt": "またはこの操作のためにリモートのブレインへハンドオフする:",
+    "via_prefix": "経由: ",
+    "unreachable": "(到達不可)",
+    "switch_brain_button": "ブレインを{{model}}に切り替え",
+    "switching": "切り替え中…",
+    "no_candidate_reachable": "現在到達可能な候補がありません — 代わりにランブックの手順を使用してください。",
+    "acknowledging": "…",
+    "acknowledge_button": "確認しました — 読みました",
+    "resolved_remote": "ブレインがリモート候補に切り替わりました",
+    "resolved_ack": "ハンドオフが確認されました",
+    "by_prefix": " 実行者: ",
+    "at_prefix": " 日時: ",
+    "approval_can_proceed": "。承認を続行できます。",
+    "swap_back_notice": " この操作が完了するとスワップバックの提案が表示されます。",
+    "approving": "承認中…",
+    "cancel_button": "この操作をキャンセル"
+  },
+  "evidence_block": {
+    "summary": "根拠 ({{count}})"
+  },
+  "tool_call_card": {
+    "round_summary": "ラウンド{{round}}: {{names}}",
+    "ok": "正常",
+    "error": "エラー"
+  },
+  "self_context_chip": {
+    "brain_local": "ブレイン: {{model}}(この筐体上)",
+    "brain_remote": "ブレイン: {{model}} · リモート",
+    "web_research_on": "Web調査 オン",
+    "missed_patterns_summary": "smithが考え込んだ質問 ({{count}})"
+  },
+  "dig_deeper_chip": {
+    "button": "さらに詳しく — フォローアップを質問"
+  },
+  "sources_list": {
+    "summary": "情報源 ({{count}})",
+    "cached_title": "smithのWebキャッシュから提供(新規取得ではありません)",
+    "cached_chip": "キャッシュ済み"
+  },
+  "markdown": {
+    "copy_code_title": "コードをコピー"
+  }
+}

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { SaveButton } from "../../components/SaveButton";
 import type { ConfigWritePayload } from "../../lib/configPayload";
@@ -55,66 +56,44 @@ import type { CatalogConfig, CatalogModelAlias, CatalogCapabilityTier, CatalogVi
 // construction — every write here goes through ConfigWritePayload, the same
 // full-replace-safe type they use (lib/configPayload.ts).
 export function ModelBehaviorSection({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   return (
     <>
-      <div className="eyebrow" id="behavior" style={{ marginTop: 22 }}>Model Behavior</div>
+      <div className="eyebrow" id="behavior" style={{ marginTop: 22 }}>{t("behavior.heading")}</div>
       <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.55 }}>
-          A request's model name may resolve through an <b>alias</b> that forces its own defaults
-          on every call through that name; capability-tier substitution (the toggle above) may then{" "}
-          <b>substitute</b> an already-loaded config ranked in the same capability tier instead
-          of waiting on a load; and <code>reasoning_effort</code> is <b>translated</b> per that
-          config's own build — native passthrough where the build honors it directly, an injected{" "}
-          <code>enable_thinking</code> kwarg where only that exists, or left alone where neither
-          does. Mutations require admin + Settings assurance.
+          <Trans i18nKey="behavior.intro" ns="settings" components={{ b: <b />, code: <code /> }} />
         </div>
       </div>
 
-      <div className="eyebrow" id="behavior-configs" style={{ marginTop: 22 }}>Configs</div>
+      <div className="eyebrow" id="behavior-configs" style={{ marginTop: 22 }}>{t("behavior.configs_heading")}</div>
       <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 10 }}>
-          One row per config. "native" under the thinking column means this build honors{" "}
-          <code>reasoning_effort</code> directly and the override is unused; everything else is a
-          build that only understands the <code>enable_thinking</code> chat-template kwarg (or
-          nothing at all) — set Force on there to let <code>reasoning_effort: none</code> actually
-          take effect on it.
+          <Trans i18nKey="behavior.configs_note" ns="settings" components={{ code: <code /> }} />
         </div>
         <ConfigBehaviorMatrix canAdmin={canAdmin} />
       </div>
 
-      <div className="eyebrow" id="behavior-capability-tiers" style={{ marginTop: 22 }}>Capability tiers</div>
+      <div className="eyebrow" id="behavior-capability-tiers" style={{ marginTop: 22 }}>{t("behavior.tiers_heading")}</div>
       <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 10 }}>
-          Groups of configs that may substitute for each other under capability-tier substitution —
-          an already-loaded model standing in for a requested one, to avoid a load wait or to
-          prefer a smarter resident model. Curated, not derived: assign a config to a class and a
-          rank (lower = more capable) in the table above or the config's own edit form. The global
-          on/off mode is the Capability-tier substitution toggle on the Router behavior card above.
+          {t("behavior.tiers_note")}
         </div>
         <CapabilityTiersSection canAdmin={canAdmin} />
       </div>
 
-      <div className="eyebrow" id="behavior-aliases" style={{ marginTop: 22 }}>Model aliases</div>
+      <div className="eyebrow" id="behavior-aliases" style={{ marginTop: 22 }}>{t("behavior.aliases_heading")}</div>
       <div className="card">
         <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 10 }}>
-          A second name for a config that FORCES a setting on every request through that name —
-          even overriding what the caller asks for. For a consumer that can't send custom
-          parameters itself (e.g. a fixed integration that can only be pointed at one model name),
-          an alias guarantees the behavior it needs without a second, duplicate config.
+          {t("behavior.aliases_note")}
         </div>
         <ModelAliasesSection canAdmin={canAdmin} />
       </div>
 
-      <div className="eyebrow" id="behavior-virtual-models" style={{ marginTop: 22 }}>Virtual models</div>
+      <div className="eyebrow" id="behavior-virtual-models" style={{ marginTop: 22 }}>{t("behavior.virtual_models_heading")}</div>
       <div className="card">
         <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 10 }}>
-          A model name for a caller that doesn't care which real config serves it, only that it has
-          some general characteristic — resolved to a real config fresh on every request, never a
-          fixed target the way an alias is above. <b>Capability-tier</b> kind ranks a capability
-          tier's own curated members; <b>throughput</b> kind ignores tiers entirely and ranks by
-          real measured tokens/sec instead, so it's never a guess. Either way, whichever candidate
-          is already loaded wins — otherwise the best-ranked one loads fresh, same as any other
-          request.
+          <Trans i18nKey="behavior.virtual_models_note" ns="settings" components={{ b: <b /> }} />
         </div>
         <VirtualModelsSection canAdmin={canAdmin} />
       </div>
@@ -127,6 +106,7 @@ export function ModelBehaviorSection({ canAdmin }: { canAdmin: boolean }) {
 type ThinkingOverrideState = "auto" | "on" | "off";
 
 function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const configs = useCatalogConfigs();
   const capabilityTiers = useCatalogCapabilityTiers();
   const aliases = useCatalogModelAliases();
@@ -157,10 +137,10 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
   }
 
   if (configs.isError) {
-    return <div className="empty-note">Catalog not available (503 — store may not be wired).</div>;
+    return <div className="empty-note">{t("behavior.matrix.catalog_unavailable")}</div>;
   }
   if (configList.length === 0) {
-    return <div className="empty-note">No configs yet — add one in Catalog → Configs first.</div>;
+    return <div className="empty-note">{t("behavior.matrix.no_configs")}</div>;
   }
 
   return (
@@ -170,11 +150,11 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
             <tr style={{ textAlign: "left", color: "var(--text-mute)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em" }}>
-              <th style={{ padding: "4px 8px 4px 0" }}>Config</th>
-              <th style={{ padding: "4px 8px" }}>Capability tier</th>
-              <th style={{ padding: "4px 8px" }}>Default reasoning</th>
-              <th style={{ padding: "4px 8px" }}>Thinking (enable_thinking)</th>
-              <th style={{ padding: "4px 8px" }}>Aliases</th>
+              <th style={{ padding: "4px 8px 4px 0" }}>{t("behavior.matrix.col_config")}</th>
+              <th style={{ padding: "4px 8px" }}>{t("behavior.matrix.col_tier")}</th>
+              <th style={{ padding: "4px 8px" }}>{t("behavior.matrix.col_reasoning")}</th>
+              <th style={{ padding: "4px 8px" }}>{t("behavior.matrix.col_thinking")}</th>
+              <th style={{ padding: "4px 8px" }}>{t("behavior.matrix.col_aliases")}</th>
             </tr>
           </thead>
           <tbody>
@@ -193,13 +173,13 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
                           value={c.capability_tier_id}
                           onChange={(e) => patch(c, { capability_tier_id: Number(e.target.value), capability_rank: 0 })}
                         >
-                          <option value={0}>— none —</option>
+                          <option value={0}>{t("behavior.matrix.tier_none")}</option>
                           {capabilityTierList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                         {c.capability_tier_id !== 0 && (
                           <input
                             type="number"
-                            title="Rank within class — lower = more capable"
+                            title={t("behavior.matrix.rank_title")}
                             value={c.capability_rank}
                             style={{ width: 48 }}
                             onChange={(e) => patch(c, { capability_rank: Number(e.target.value) })}
@@ -207,7 +187,7 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
                         )}
                       </div>
                     ) : (
-                      `${capabilityTierList.find((p) => p.id === c.capability_tier_id)?.name ?? "—"}${c.capability_tier_id !== 0 ? ` (rank ${c.capability_rank})` : ""}`
+                      `${capabilityTierList.find((p) => p.id === c.capability_tier_id)?.name ?? "—"}${c.capability_tier_id !== 0 ? t("behavior.matrix.tier_rank_suffix", { rank: c.capability_rank }) : ""}`
                     )}
                   </td>
                   <td style={{ padding: "6px 8px" }}>
@@ -216,7 +196,7 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
                         value={c.reasoning_effort_default}
                         onChange={(e) => patch(c, { reasoning_effort_default: e.target.value as CatalogConfig["reasoning_effort_default"] })}
                       >
-                        <option value="">— build default —</option>
+                        <option value="">{t("behavior.matrix.reasoning_build_default")}</option>
                         <option value="none">none</option>
                         <option value="low">low</option>
                         <option value="medium">medium</option>
@@ -228,8 +208,8 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
                   </td>
                   <td style={{ padding: "6px 8px" }}>
                     {nativeReasoning ? (
-                      <span className="chip" title="This build honors reasoning_effort natively — the enable_thinking override below is unused.">
-                        native
+                      <span className="chip" title={t("behavior.matrix.thinking_native_title")}>
+                        {t("behavior.matrix.thinking_native")}
                       </span>
                     ) : canAdmin ? (
                       <select
@@ -242,12 +222,12 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
                           patch(c, { chat_template_caps_override: Object.keys(next).length > 0 ? next : undefined });
                         }}
                       >
-                        <option value="auto">Auto (unsupported)</option>
-                        <option value="on">Force on</option>
-                        <option value="off">Force off</option>
+                        <option value="auto">{t("behavior.matrix.thinking_auto")}</option>
+                        <option value="on">{t("behavior.matrix.thinking_force_on")}</option>
+                        <option value="off">{t("behavior.matrix.thinking_force_off")}</option>
                       </select>
                     ) : (
-                      thinkingOverride === undefined ? "—" : thinkingOverride ? "forced on" : "forced off"
+                      thinkingOverride === undefined ? "—" : thinkingOverride ? t("behavior.matrix.thinking_forced_on") : t("behavior.matrix.thinking_forced_off")
                     )}
                   </td>
                   <td style={{ padding: "6px 8px", color: "var(--text-mute)" }}>
@@ -269,6 +249,7 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
 // plumbing (a capability tier is an operator-only routing label, never rendered
 // in the model gallery). See store.CapabilityTier's doc comment.
 function CapabilityTiersSection({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const capabilityTiers = useCatalogCapabilityTiers();
   const configs = useCatalogConfigs();
   const create = useCreateCatalogCapabilityTier();
@@ -294,15 +275,15 @@ function CapabilityTiersSection({ canAdmin }: { canAdmin: boolean }) {
   function deleteWarning(id: number, name: string) {
     const dependents = configList.filter((c) => c.capability_tier_id === id).length;
     return dependents > 0
-      ? `Delete capability tier "${name}"? ${dependents} config${dependents === 1 ? "" : "s"} will lose this class (never substitutes or is substituted for) — they are not deleted, just unparented.`
-      : `Delete capability tier "${name}"?`;
+      ? t("behavior.tiers.delete_confirm_dependents", { name, count: dependents })
+      : t("behavior.tiers.delete_confirm_simple", { name });
   }
   function handleDelete(id: number) {
     remove.mutate(id, { onError: showError });
   }
 
   if (capabilityTiers.isError) {
-    return <div className="empty-note">Catalog not available (503 — store may not be wired).</div>;
+    return <div className="empty-note">{t("behavior.tiers.catalog_unavailable")}</div>;
   }
 
   return (
@@ -319,17 +300,17 @@ function CapabilityTiersSection({ canAdmin }: { canAdmin: boolean }) {
         />
       ) : (
         <>
-          {list.length === 0 && <div className="empty-note">No capability tiers yet.</div>}
+          {list.length === 0 && <div className="empty-note">{t("behavior.tiers.none_yet")}</div>}
           {list.map((p) => (
             <div className="qrow" key={p.id}>
               <span style={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>{p.name}</span>
               {p.mode && <span className="chip" style={{ fontSize: 10.5 }}>{p.mode}</span>}
               <span style={{ fontSize: 11, color: "var(--text-mute)" }}>
-                {configList.filter((c) => c.capability_tier_id === p.id).length} config{configList.filter((c) => c.capability_tier_id === p.id).length === 1 ? "" : "s"}
+                {t("behavior.tiers.configs_count", { count: configList.filter((c) => c.capability_tier_id === p.id).length })}
               </span>
               {canAdmin && (
                 <div className="actions" style={{ marginLeft: 12, display: "flex", gap: 6 }}>
-                  <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(p.id); clearError(); }}>Edit</button>
+                  <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(p.id); clearError(); }}>{t("behavior.tiers.edit")}</button>
                   <ConfirmButton
                     className="btn"
                     style={{ fontSize: 11, padding: "4px 8px" }}
@@ -343,7 +324,7 @@ function CapabilityTiersSection({ canAdmin }: { canAdmin: boolean }) {
           ))}
           {canAdmin && (
             <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); }}>
-              + New capability tier
+              {t("behavior.tiers.new_tier")}
             </button>
           )}
         </>
@@ -365,28 +346,29 @@ function CapabilityTierForm({
   pending: boolean;
   isError?: boolean;
 }) {
+  const { t } = useTranslation("settings");
   const [name, setName] = useState(existing?.name ?? "");
   const [mode, setMode] = useState(existing?.mode ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
 
   return (
     <div className="form-grid" style={{ marginTop: 4 }}>
-      <label className="form-row">Name *
-        <input value={name} placeholder="flagship-chat" onChange={(e) => setName(e.target.value)} />
+      <label className="form-row">{t("behavior.tiers.form.name_label")}
+        <input value={name} placeholder={t("behavior.tiers.form.name_placeholder")} onChange={(e) => setName(e.target.value)} />
       </label>
-      <label className="form-row">Mode override
+      <label className="form-row">{t("behavior.tiers.form.mode_label")}
         <select value={mode} onChange={(e) => setMode(e.target.value)}>
-          <option value="">Inherit global setting</option>
-          <option value="off">Off</option>
-          <option value="fallback_only">Fallback only</option>
-          <option value="prefer_smarter">Prefer smarter</option>
+          <option value="">{t("behavior.tiers.form.mode_inherit")}</option>
+          <option value="off">{t("behavior.tiers.form.mode_off")}</option>
+          <option value="fallback_only">{t("behavior.tiers.form.mode_fallback_only")}</option>
+          <option value="prefer_smarter">{t("behavior.tiers.form.mode_prefer_smarter")}</option>
         </select>
       </label>
-      <label className="form-row" style={{ gridColumn: "1 / -1" }}>Notes
+      <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("behavior.tiers.form.notes_label")}
         <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </label>
       <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
-        <button className="btn" onClick={onCancel}>Cancel</button>
+        <button className="btn" onClick={onCancel}>{t("behavior.tiers.form.cancel")}</button>
         <SaveButton
           className="go"
           pending={pending}
@@ -407,6 +389,7 @@ function CapabilityTierForm({
 // what it forces visible, since there's nowhere else in the catalog UI a
 // "second name for this config" would otherwise show up.
 function ModelAliasesSection({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const aliases = useCatalogModelAliases();
   const configs = useCatalogConfigs();
   const create = useCreateCatalogModelAlias();
@@ -418,7 +401,7 @@ function ModelAliasesSection({ canAdmin }: { canAdmin: boolean }) {
 
   const list = aliases.data ?? [];
   const configList = configs.data ?? [];
-  const configName = (id: number) => configList.find((c) => c.id === id)?.name ?? `config #${id}`;
+  const configName = (id: number) => configList.find((c) => c.id === id)?.name ?? t("behavior.aliases.config_fallback", { id });
   const editingAlias = editing === "new" ? null : list.find((a) => a.id === editing);
 
   function handleSubmit(draft: Partial<CatalogModelAlias>, id?: number) {
@@ -434,7 +417,7 @@ function ModelAliasesSection({ canAdmin }: { canAdmin: boolean }) {
   }
 
   if (aliases.isError) {
-    return <div className="empty-note">Catalog not available (503 — store may not be wired).</div>;
+    return <div className="empty-note">{t("behavior.aliases.catalog_unavailable")}</div>;
   }
 
   return (
@@ -452,25 +435,25 @@ function ModelAliasesSection({ canAdmin }: { canAdmin: boolean }) {
         />
       ) : (
         <>
-          {list.length === 0 && <div className="empty-note">No model aliases yet.</div>}
+          {list.length === 0 && <div className="empty-note">{t("behavior.aliases.none_yet")}</div>}
           {list.map((a) => {
             const forcedEffort = typeof a.request_defaults.reasoning_effort === "string" ? a.request_defaults.reasoning_effort : "";
             return (
               <div className="qrow" key={a.id}>
                 <span style={{ fontSize: 12.5, fontWeight: 600 }}>{a.name}</span>
                 <span style={{ fontSize: 11, color: "var(--text-mute)" }}>→ {configName(a.config_id)}</span>
-                {forcedEffort && <span className="chip" style={{ fontSize: 10.5 }}>forces reasoning: {forcedEffort}</span>}
-                {a.visibility === "hidden" && <span className="chip" style={{ fontSize: 10.5 }}>hidden</span>}
+                {forcedEffort && <span className="chip" style={{ fontSize: 10.5 }}>{t("behavior.aliases.forces_reasoning", { effort: forcedEffort })}</span>}
+                {a.visibility === "hidden" && <span className="chip" style={{ fontSize: 10.5 }}>{t("behavior.aliases.hidden_chip")}</span>}
                 <span style={{ flex: 1 }} />
                 {canAdmin && (
                   <div className="actions" style={{ marginLeft: 12, display: "flex", gap: 6 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(a.id); clearError(); }}>Edit</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(a.id); clearError(); }}>{t("behavior.aliases.edit")}</button>
                     <ConfirmButton
                       className="btn"
                       style={{ fontSize: 11, padding: "4px 8px" }}
                       pending={remove.isPending}
                       onConfirm={() => handleDelete(a.id)}
-                      warning={`Delete alias "${a.name}"? Any caller still requesting this exact model name will get "model not found" afterward.`}
+                      warning={t("behavior.aliases.delete_confirm", { name: a.name })}
                     />
                   </div>
                 )}
@@ -479,7 +462,7 @@ function ModelAliasesSection({ canAdmin }: { canAdmin: boolean }) {
           })}
           {canAdmin && (
             <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); }}>
-              + New model alias
+              {t("behavior.aliases.new_alias")}
             </button>
           )}
         </>
@@ -503,6 +486,7 @@ function ModelAliasForm({
   pending: boolean;
   isError?: boolean;
 }) {
+  const { t } = useTranslation("settings");
   const [name, setName] = useState(existing?.name ?? "");
   const [configId, setConfigId] = useState(existing?.config_id ?? 0);
   const existingEffort = typeof existing?.request_defaults.reasoning_effort === "string" ? existing.request_defaults.reasoning_effort : "";
@@ -525,38 +509,36 @@ function ModelAliasForm({
 
   return (
     <div className="form-grid" style={{ marginTop: 4 }}>
-      <label className="form-row">Alias name *
-        <input value={name} placeholder="gemma4-26b-a4b-nothink" onChange={(e) => setName(e.target.value)} />
+      <label className="form-row">{t("behavior.aliases.form.name_label")}
+        <input value={name} placeholder={t("behavior.aliases.form.name_placeholder")} onChange={(e) => setName(e.target.value)} />
         <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>
-          The model name callers send. Must not collide with a real config or offering name.
+          {t("behavior.aliases.form.name_hint")}
         </span>
       </label>
-      <label className="form-row">Routes to config *
+      <label className="form-row">{t("behavior.aliases.form.routes_to_label")}
         <select value={configId} onChange={(e) => setConfigId(Number(e.target.value))}>
-          <option value={0}>— select —</option>
+          <option value={0}>{t("behavior.aliases.form.select_placeholder")}</option>
           {configs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </label>
-      <label className="form-row">Force reasoning effort
+      <label className="form-row">{t("behavior.aliases.form.force_effort_label")}
         <select value={reasoningEffort} onChange={(e) => setReasoningEffort(e.target.value)}>
-          <option value="">Don't force anything</option>
-          <option value="none">none (thinking off)</option>
-          <option value="low">low</option>
-          <option value="medium">medium</option>
-          <option value="high">high</option>
+          <option value="">{t("behavior.aliases.form.dont_force")}</option>
+          <option value="none">{t("behavior.aliases.form.effort_none")}</option>
+          <option value="low">{t("behavior.aliases.form.effort_low")}</option>
+          <option value="medium">{t("behavior.aliases.form.effort_medium")}</option>
+          <option value="high">{t("behavior.aliases.form.effort_high")}</option>
         </select>
         <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>
-          Applied to EVERY request through this alias, even one that asks for something else —
-          for a caller that can't send this setting itself. Translated per the target config's
-          own build, same as a config's own default.
+          {t("behavior.aliases.form.force_effort_hint")}
         </span>
       </label>
       <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8, gridColumn: "1 / -1" }}>
         <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
-        Hidden (not listed in /v1/models, but still resolvable if requested directly)
+        {t("behavior.aliases.form.hidden_label")}
       </label>
       <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
-        <button className="btn" onClick={onCancel}>Cancel</button>
+        <button className="btn" onClick={onCancel}>{t("behavior.aliases.form.cancel")}</button>
         <SaveButton
           className="go"
           pending={pending}
@@ -575,6 +557,7 @@ function ModelAliasForm({
 // request time by virtual_models.go — this UI only manages which tier (or
 // "real throughput data, no tier") a name resolves against.
 function VirtualModelsSection({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const virtualModels = useCatalogVirtualModels();
   const capabilityTiers = useCatalogCapabilityTiers();
   const create = useCreateCatalogVirtualModel();
@@ -586,7 +569,7 @@ function VirtualModelsSection({ canAdmin }: { canAdmin: boolean }) {
 
   const list = virtualModels.data ?? [];
   const tierList = capabilityTiers.data ?? [];
-  const tierName = (id: number) => tierList.find((p) => p.id === id)?.name ?? `tier #${id}`;
+  const tierName = (id: number) => tierList.find((p) => p.id === id)?.name ?? t("behavior.virtual_models.tier_fallback", { id });
   const editingVirtualModel = editing === "new" ? null : list.find((m) => m.id === editing);
 
   function handleSubmit(draft: Partial<CatalogVirtualModel>, id?: number) {
@@ -602,7 +585,7 @@ function VirtualModelsSection({ canAdmin }: { canAdmin: boolean }) {
   }
 
   if (virtualModels.isError) {
-    return <div className="empty-note">Catalog not available (503 — store may not be wired).</div>;
+    return <div className="empty-note">{t("behavior.virtual_models.catalog_unavailable")}</div>;
   }
 
   return (
@@ -620,24 +603,24 @@ function VirtualModelsSection({ canAdmin }: { canAdmin: boolean }) {
         />
       ) : (
         <>
-          {list.length === 0 && <div className="empty-note">No virtual models yet.</div>}
+          {list.length === 0 && <div className="empty-note">{t("behavior.virtual_models.none_yet")}</div>}
           {list.map((m) => (
             <div className="qrow" key={m.id}>
               <span style={{ fontSize: 12.5, fontWeight: 600 }}>{m.name}</span>
               <span style={{ fontSize: 11, color: "var(--text-mute)" }}>
-                {m.kind === "capability_tier" ? `→ ${tierName(m.capability_tier_id)} (best loaded)` : "→ fastest measured, any tier"}
+                {m.kind === "capability_tier" ? t("behavior.virtual_models.resolves_tier", { tier: tierName(m.capability_tier_id) }) : t("behavior.virtual_models.resolves_throughput")}
               </span>
-              {m.visibility === "hidden" && <span className="chip" style={{ fontSize: 10.5 }}>hidden</span>}
+              {m.visibility === "hidden" && <span className="chip" style={{ fontSize: 10.5 }}>{t("behavior.virtual_models.hidden_chip")}</span>}
               <span style={{ flex: 1 }} />
               {canAdmin && (
                 <div className="actions" style={{ marginLeft: 12, display: "flex", gap: 6 }}>
-                  <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(m.id); clearError(); }}>Edit</button>
+                  <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(m.id); clearError(); }}>{t("behavior.virtual_models.edit")}</button>
                   <ConfirmButton
                     className="btn"
                     style={{ fontSize: 11, padding: "4px 8px" }}
                     pending={remove.isPending}
                     onConfirm={() => handleDelete(m.id)}
-                    warning={`Delete virtual model "${m.name}"? Any caller still requesting this exact model name will get "model not found" afterward.`}
+                    warning={t("behavior.virtual_models.delete_confirm", { name: m.name })}
                   />
                 </div>
               )}
@@ -645,7 +628,7 @@ function VirtualModelsSection({ canAdmin }: { canAdmin: boolean }) {
           ))}
           {canAdmin && (
             <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); }}>
-              + New virtual model
+              {t("behavior.virtual_models.new_virtual_model")}
             </button>
           )}
         </>
@@ -669,6 +652,7 @@ function VirtualModelForm({
   pending: boolean;
   isError?: boolean;
 }) {
+  const { t } = useTranslation("settings");
   const [name, setName] = useState(existing?.name ?? "");
   const [kind, setKind] = useState<CatalogVirtualModel["kind"]>(existing?.kind ?? "capability_tier");
   const [capabilityTierId, setCapabilityTierId] = useState(existing?.capability_tier_id ?? 0);
@@ -689,35 +673,35 @@ function VirtualModelForm({
 
   return (
     <div className="form-grid" style={{ marginTop: 4 }}>
-      <label className="form-row">Virtual model name *
-        <input value={name} placeholder="local-smart" onChange={(e) => setName(e.target.value)} />
+      <label className="form-row">{t("behavior.virtual_models.form.name_label")}
+        <input value={name} placeholder={t("behavior.virtual_models.form.name_placeholder")} onChange={(e) => setName(e.target.value)} />
         <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>
-          The model name callers send. Must not collide with a real config, alias, or offering name.
+          {t("behavior.virtual_models.form.name_hint")}
         </span>
       </label>
-      <label className="form-row">Resolves by
+      <label className="form-row">{t("behavior.virtual_models.form.resolves_by_label")}
         <select value={kind} onChange={(e) => setKind(e.target.value as CatalogVirtualModel["kind"])}>
-          <option value="capability_tier">Capability tier (curated)</option>
-          <option value="throughput">Real measured throughput (any tier)</option>
+          <option value="capability_tier">{t("behavior.virtual_models.form.kind_tier")}</option>
+          <option value="throughput">{t("behavior.virtual_models.form.kind_throughput")}</option>
         </select>
       </label>
       {kind === "capability_tier" && (
-        <label className="form-row">Capability tier *
+        <label className="form-row">{t("behavior.virtual_models.form.tier_label")}
           <select value={capabilityTierId} onChange={(e) => setCapabilityTierId(Number(e.target.value))}>
-            <option value={0}>— select —</option>
+            <option value={0}>{t("behavior.virtual_models.form.select_placeholder")}</option>
             {capabilityTiers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>
       )}
-      <label className="form-row" style={{ gridColumn: "1 / -1" }}>Notes
+      <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("behavior.virtual_models.form.notes_label")}
         <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </label>
       <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8, gridColumn: "1 / -1" }}>
         <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
-        Hidden (not listed in /v1/models, but still resolvable if requested directly)
+        {t("behavior.virtual_models.form.hidden_label")}
       </label>
       <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
-        <button className="btn" onClick={onCancel}>Cancel</button>
+        <button className="btn" onClick={onCancel}>{t("behavior.virtual_models.form.cancel")}</button>
         <SaveButton
           className="go"
           pending={pending}

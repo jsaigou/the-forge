@@ -46,19 +46,19 @@ func (s *Server) handleCatalogVariantsList(w http.ResponseWriter, r *http.Reques
 	if mid := r.URL.Query().Get("model_id"); mid != "" {
 		id, err := strconv.ParseInt(mid, 10, 64)
 		if err != nil {
-			writeValidationError(w, map[string]string{"model_id": "must be an integer"})
+			writeValidationErrorCodes(w, map[string]string{"model_id": "must be an integer"}, map[string]string{"model_id": "must_be_integer"})
 			return
 		}
 		list, err = cat.ListVariantsForModel(ctx, id)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "variants query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "variants query failed")
 			return
 		}
 	} else {
 		var err error
 		list, err = cat.ListVariants(ctx)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "variants query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "variants query failed")
 			return
 		}
 	}
@@ -72,12 +72,12 @@ func (s *Server) handleCatalogVariantsList(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleCatalogVariantGet(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -85,7 +85,7 @@ func (s *Server) handleCatalogVariantGet(w http.ResponseWriter, r *http.Request)
 	v, err := cat.GetVariant(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "variant not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "variant"}, "variant not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -97,7 +97,7 @@ func (s *Server) handleCatalogVariantGet(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleCatalogVariantCreate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b variantBody
@@ -105,8 +105,8 @@ func (s *Server) handleCatalogVariantCreate(w http.ResponseWriter, r *http.Reque
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateVariant(r.Context(), b, 0); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateVariant(r.Context(), b, 0); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -129,12 +129,12 @@ func (s *Server) handleCatalogVariantCreate(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleCatalogVariantUpdate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	var b variantBody
@@ -142,8 +142,8 @@ func (s *Server) handleCatalogVariantUpdate(w http.ResponseWriter, r *http.Reque
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateVariant(r.Context(), b, id); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateVariant(r.Context(), b, id); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -155,7 +155,7 @@ func (s *Server) handleCatalogVariantUpdate(w http.ResponseWriter, r *http.Reque
 	})
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "variant not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "variant"}, "variant not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -170,22 +170,22 @@ func (s *Server) handleCatalogVariantUpdate(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleCatalogVariantDelete(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
 	if err := cat.DeleteVariant(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "variant not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "variant"}, "variant not found")
 			return
 		}
-		writeError(w, http.StatusConflict, "variant has dependent configs — delete those first")
+		writeErrorCode(w, http.StatusConflict, "has_dependents", map[string]any{"resource": "configs"}, "variant has dependent configs — delete those first")
 		return
 	}
 	s.audit(r, identity(r).Name, "catalog_variant_delete", strconv.FormatInt(id, 10), "")
@@ -196,7 +196,7 @@ func (s *Server) handleCatalogVariantDelete(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleCatalogVariantValidate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b variantBody
@@ -204,8 +204,8 @@ func (s *Server) handleCatalogVariantValidate(w http.ResponseWriter, r *http.Req
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateVariant(r.Context(), b, 0); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateVariant(r.Context(), b, 0); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"valid": true})
@@ -221,14 +221,21 @@ type variantBody struct {
 	AbliterationQuality string `json:"abliteration_quality"`
 }
 
-// validateVariant checks field constraints + model existence.
-func (s *Server) validateVariant(ctx context.Context, b variantBody, excludeID int64) map[string]string {
+// validateVariant checks field constraints + model existence. The second
+// return value is codes' i18n Phase 2 companion (field -> stable error
+// code); a field with no matching pre-defined code (e.g. "does not exist",
+// or an enum message needing a params.allowed this map can't carry) simply
+// has no entry, and the frontend falls back to the English fields text.
+func (s *Server) validateVariant(ctx context.Context, b variantBody, excludeID int64) (map[string]string, map[string]string) {
 	fields := map[string]string{}
+	codes := map[string]string{}
 	if b.Name == "" {
 		fields["name"] = "is required"
+		codes["name"] = "required"
 	}
 	if b.ModelID == 0 {
 		fields["model_id"] = "is required"
+		codes["model_id"] = "required"
 	} else if s.deps.Catalog != nil {
 		if _, err := s.deps.Catalog.GetModel(ctx, b.ModelID); err != nil {
 			fields["model_id"] = "does not exist"
@@ -244,5 +251,5 @@ func (s *Server) validateVariant(ctx context.Context, b variantBody, excludeID i
 	default:
 		fields["derivation_type"] = "must be one of: abliteration, finetune, merge, mtp-head-add, uncensor, base"
 	}
-	return fields
+	return fields, codes
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { AskSmith } from "../components/help/AskSmith";
 import { Diagnostics } from "../components/help/Diagnostics";
@@ -21,12 +22,9 @@ import { useSession } from "../lib/session";
 // hash edit). onSubChange pushes the new sub into the hash so deep links
 // work.
 
-const HELP_TABS = [
-  { key: "guide", label: "Guide" },
-  { key: "smith", label: "Ask the smith" },
-] as const;
+const HELP_TABS = ["guide", "smith"] as const;
 
-type HelpTab = (typeof HELP_TABS)[number]["key"];
+type HelpTab = (typeof HELP_TABS)[number];
 
 function parseSub(sub?: string): HelpTab {
   if (sub?.startsWith("smith") || sub?.startsWith("ask") || sub?.startsWith("diagnostics")) return "smith";
@@ -34,6 +32,7 @@ function parseSub(sub?: string): HelpTab {
 }
 
 export function Help({ sub, onSubChange }: { sub?: string; onSubChange?: (sub: string, opts?: { replace?: boolean }) => void }) {
+  const { t } = useTranslation("help");
   const [tab, setTab] = useState<HelpTab>(parseSub(sub));
   const { canOperate } = useSession();
 
@@ -52,7 +51,7 @@ export function Help({ sub, onSubChange }: { sub?: string; onSubChange?: (sub: s
   return (
     <section className="page">
       <div className="eyebrow" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span>Help</span>
+        <span>{t("eyebrow")}</span>
         {/* Sprint 6: re-run entry for the first-run tour (useOnboarding owns
             the done-flag; this just re-opens it for this session). Gated on
             canOperate to match useOnboarding's own first-run gate — every
@@ -61,23 +60,23 @@ export function Help({ sub, onSubChange }: { sub?: string; onSubChange?: (sub: s
         {canOperate && (
           <button
             className="btn sm"
-            title="Replay the first-run guided tour"
+            title={t("replay_tour.title")}
             onClick={reopenTour}
           >
-            Replay onboarding tour
+            {t("replay_tour.button")}
           </button>
         )}
         <div className="tabs" style={{ marginLeft: "auto" }}>
-          {HELP_TABS.map((t) => (
+          {HELP_TABS.map((key) => (
             <button
-              key={t.key}
-              className={`tab ${tab === t.key ? "active" : ""}`}
+              key={key}
+              className={`tab ${tab === key ? "active" : ""}`}
               onClick={() => {
-                setTab(t.key);
-                onSubChange?.(t.key);
+                setTab(key);
+                onSubChange?.(key);
               }}
             >
-              {t.label}
+              {t(`tabs.${key}`)}
             </button>
           ))}
         </div>

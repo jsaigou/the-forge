@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactElement } from "react";
+import { useTranslation } from "react-i18next";
 import { CatalogPanel, type SubTab as CatalogSubTab } from "../components/CatalogPanel";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { SecurityPanel } from "../components/SecurityPanel";
@@ -95,6 +96,7 @@ function isCatalogSubTab(v: string | undefined): v is CatalogSubTab {
 }
 
 export function Settings({ sub, onSubChange }: { sub?: string; onSubChange?: (sub: string, opts?: { replace?: boolean }) => void }) {
+  const { t } = useTranslation("settings");
   const [sectionPart, anchorPart] = (sub ?? "").split("/");
   const retiredCatalog = sub ? RETIRED_CATALOG_SLUGS[sub] : undefined;
   const retiredSection = RETIRED_SECTION_SLUGS[sectionPart];
@@ -158,17 +160,17 @@ export function Settings({ sub, onSubChange }: { sub?: string; onSubChange?: (su
 
   return (
     <section className="page settings-shell">
-      <nav className="side-nav" aria-label="Settings sections">
+      <nav className="side-nav" aria-label={t("shell.sections_aria")}>
         {SETTINGS_GROUPS.map((group) => (
           <div key={group}>
-            <div className="side-nav-group">{group}</div>
+            <div className="side-nav-group">{t(`groups.${group.toLowerCase()}`)}</div>
             {SETTINGS_SECTIONS.filter((s) => s.group === group).map((s) => (
               <button
                 key={s.key}
                 className={`side-nav-item ${s.danger ? "danger" : ""} ${activeKey === s.key ? "active" : ""}`}
                 onClick={() => onSubChange?.(s.key)}
               >
-                {s.label}
+                {t(`sections.${s.key}`)}
               </button>
             ))}
           </div>
@@ -183,7 +185,7 @@ export function Settings({ sub, onSubChange }: { sub?: string; onSubChange?: (su
             className={`tab ${activeKey === s.key ? "active" : ""}`}
             onClick={() => onSubChange?.(s.key)}
           >
-            {s.label}
+            {t(`sections.${s.key}`)}
           </button>
         ))}
       </div>

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { formatCurrency, formatWatts } from "../../lib/format";
 import { useCostSettings, useCostSummary, useMetrics } from "../../lib/queries";
 import { CompressorSavingsChips } from "../CompressionSavingsChips";
@@ -10,6 +11,7 @@ import { CompressorSavingsChips } from "../CompressionSavingsChips";
 // previously the whole row was fixed at 24h because Overview had no range
 // toggle of its own. On custom pages the window is configurable.
 export function RightNowWidget({ window_ = "24h" }: { window_?: string }) {
+  const { t } = useTranslation("dashboard");
   const metrics = useMetrics();
   const costSettings = useCostSettings();
   const costSummary = useCostSummary(window_);
@@ -24,17 +26,17 @@ export function RightNowWidget({ window_ = "24h" }: { window_?: string }) {
 
   return (
     <>
-      <div className="eyebrow">Right now</div>
+      <div className="eyebrow">{t("right_now.title")}</div>
       <div
         className="stats stats-hero"
         style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 220px))", justifyContent: "center" }}
       >
         <div className="stat">
-          <div className="k">Power</div>
+          <div className="k">{t("right_now.power_k")}</div>
           <div className="v cost">{wallWattsNow != null ? formatWatts(wallWattsNow) : ""}</div>
         </div>
         <div className="stat">
-          <div className="k">Electricity (24h)</div>
+          <div className="k">{t("right_now.electricity_k")}</div>
           <div className="v cost">{energy ? formatCurrency(energy.cost_display, displayCurrency) : ""}</div>
         </div>
         <CompressorSavingsChips window_={window_} />

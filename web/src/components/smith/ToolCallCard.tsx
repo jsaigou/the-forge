@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { SmithToolActivityEvent, SmithToolCallEvidence } from "../../lib/types";
 
 // ToolCallCard — P7 (docs/v5-smith.md §9). Renders one persisted tool_call
@@ -5,11 +6,12 @@ import type { SmithToolActivityEvent, SmithToolCallEvidence } from "../../lib/ty
 // expandable to the args + result summary. No fetches, no images — same
 // CSP-clean posture as SourcesList.tsx, which this deliberately mirrors.
 export function ToolCallCard({ evidence }: { evidence: SmithToolCallEvidence }) {
+  const { t } = useTranslation("common");
   if (evidence.calls.length === 0) return null;
   return (
     <details className="smith-sources smith-toolcall">
       <summary>
-        Round {evidence.round}: {evidence.calls.map((c) => c.name).join(", ")}
+        {t("tool_call_card.round_summary", { round: evidence.round, names: evidence.calls.map((c) => c.name).join(", ") })}
       </summary>
       <div className="smith-sources-list">
         {evidence.calls.map((c, i) => (
@@ -22,7 +24,7 @@ export function ToolCallCard({ evidence }: { evidence: SmithToolCallEvidence }) 
                 borderColor: `color-mix(in srgb, ${c.ok ? "var(--ok)" : "var(--crit)"} 40%, var(--border))`,
               }}
             >
-              {c.ok ? "ok" : "error"}
+              {c.ok ? t("tool_call_card.ok") : t("tool_call_card.error")}
             </span>
             <code style={{ fontSize: 11 }}>{c.name}</code>
             <span style={{ color: "var(--text-mute)", fontSize: 10.5 }}>{c.duration_ms}ms</span>

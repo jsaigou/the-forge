@@ -47,19 +47,19 @@ func (s *Server) handleCatalogBenchmarksList(w http.ResponseWriter, r *http.Requ
 	if st := r.URL.Query().Get("subject_type"); st != "" {
 		sid, err := strconv.ParseInt(r.URL.Query().Get("subject_id"), 10, 64)
 		if err != nil {
-			writeValidationError(w, map[string]string{"subject_id": "must be an integer"})
+			writeValidationErrorCodes(w, map[string]string{"subject_id": "must be an integer"}, map[string]string{"subject_id": "must_be_integer"})
 			return
 		}
 		list, err = cat.ListBenchmarksForSubject(ctx, st, sid)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "benchmarks query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "benchmarks query failed")
 			return
 		}
 	} else {
 		var err error
 		list, err = cat.ListBenchmarks(ctx)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "benchmarks query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "benchmarks query failed")
 			return
 		}
 	}
@@ -73,12 +73,12 @@ func (s *Server) handleCatalogBenchmarksList(w http.ResponseWriter, r *http.Requ
 func (s *Server) handleCatalogBenchmarkGet(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -86,7 +86,7 @@ func (s *Server) handleCatalogBenchmarkGet(w http.ResponseWriter, r *http.Reques
 	b, err := cat.GetBenchmark(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "benchmark not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "benchmark"}, "benchmark not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -98,7 +98,7 @@ func (s *Server) handleCatalogBenchmarkGet(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleCatalogBenchmarkCreate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b benchmarkBody
@@ -106,8 +106,8 @@ func (s *Server) handleCatalogBenchmarkCreate(w http.ResponseWriter, r *http.Req
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := validateBenchmark(b); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := validateBenchmark(b); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -129,12 +129,12 @@ func (s *Server) handleCatalogBenchmarkCreate(w http.ResponseWriter, r *http.Req
 func (s *Server) handleCatalogBenchmarkUpdate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	var b benchmarkBody
@@ -150,14 +150,14 @@ func (s *Server) handleCatalogBenchmarkUpdate(w http.ResponseWriter, r *http.Req
 	existing, err := cat.GetBenchmark(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "benchmark not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "benchmark"}, "benchmark not found")
 			return
 		}
 		writeInternalError(w, err)
 		return
 	}
-	if fields := validateBenchmarkUpdate(b, existing); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := validateBenchmarkUpdate(b, existing); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	err = cat.UpdateBenchmark(ctx, store.Benchmark{
@@ -167,7 +167,7 @@ func (s *Server) handleCatalogBenchmarkUpdate(w http.ResponseWriter, r *http.Req
 	})
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "benchmark not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "benchmark"}, "benchmark not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -181,19 +181,19 @@ func (s *Server) handleCatalogBenchmarkUpdate(w http.ResponseWriter, r *http.Req
 func (s *Server) handleCatalogBenchmarkDelete(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
 	if err := cat.DeleteBenchmark(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "benchmark not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "benchmark"}, "benchmark not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -209,8 +209,8 @@ func (s *Server) handleCatalogBenchmarkValidate(w http.ResponseWriter, r *http.R
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := validateBenchmark(b); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := validateBenchmark(b); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"valid": true})
@@ -234,7 +234,7 @@ type benchmarkBody struct {
 // three — an "offering"-scoped benchmark was validated, stored, and
 // listable, but reached no card anywhere. See validateBenchmarkUpdate for
 // why UPDATE still needs to accept "offering" in one narrow case.
-func validateBenchmark(b benchmarkBody) map[string]string {
+func validateBenchmark(b benchmarkBody) (map[string]string, map[string]string) {
 	return validateBenchmarkFields(b, false)
 }
 
@@ -248,19 +248,31 @@ func validateBenchmark(b benchmarkBody) map[string]string {
 // already goes through the strict path since the new subject isn't
 // "offering". Create never grandfathers; only PUT has an existing row to
 // compare against.
-func validateBenchmarkUpdate(b benchmarkBody, existing store.Benchmark) map[string]string {
+func validateBenchmarkUpdate(b benchmarkBody, existing store.Benchmark) (map[string]string, map[string]string) {
 	grandfathered := existing.SubjectType == "offering" &&
 		b.SubjectType == "offering" && b.SubjectID == existing.SubjectID
 	return validateBenchmarkFields(b, grandfathered)
 }
 
-func validateBenchmarkFields(b benchmarkBody, allowExistingOffering bool) map[string]string {
+// validateBenchmarkFields' second return value is codes' i18n Phase 2
+// companion (field -> stable error code). The source/subject_type enum
+// messages and the source_url/source_date "required when published"
+// messages are deliberately left without a code: must_be_one_of would
+// render the frontend's raw unresolved "{{allowed}}" template
+// (writeValidationErrorCodes' codes map has no per-field params channel —
+// see validateConfig's doc comment in catalog_configs.go for the same
+// constraint), and the "required when published" qualifier carries meaning
+// the bare `required` code's generic text would lose.
+func validateBenchmarkFields(b benchmarkBody, allowExistingOffering bool) (map[string]string, map[string]string) {
 	fields := map[string]string{}
+	codes := map[string]string{}
 	if b.Metric == "" {
 		fields["metric"] = "is required"
+		codes["metric"] = "required"
 	}
 	if b.Value == "" {
 		fields["value"] = "is required"
+		codes["value"] = "required"
 	}
 	switch b.Source {
 	case "published", "self_measured", "provider_reported":
@@ -287,11 +299,12 @@ func validateBenchmarkFields(b benchmarkBody, allowExistingOffering bool) map[st
 	}
 	if b.SubjectID == 0 {
 		fields["subject_id"] = "is required"
+		codes["subject_id"] = "required"
 	}
 	if b.SourceDate != "" {
 		if _, err := time.Parse("2006-01-02", b.SourceDate); err != nil {
 			fields["source_date"] = "must be YYYY-MM-DD"
 		}
 	}
-	return fields
+	return fields, codes
 }

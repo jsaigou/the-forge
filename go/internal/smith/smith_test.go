@@ -194,6 +194,49 @@ func TestGTTCeilingSeverity(t *testing.T) {
 	}
 }
 
+// TestRound1 pins round1's rounding behavior (Phase 3, multilanguage plan)
+// — it must match the %.1f precision the Summary Sprintf already uses, not
+// return the raw many-decimal float.
+func TestRound1(t *testing.T) {
+	cases := []struct {
+		in   float64
+		want float64
+	}{
+		{91.66666666, 91.7},
+		{91.64999, 91.6},
+		{0, 0},
+		{100, 100},
+	}
+	for _, tc := range cases {
+		if got := round1(tc.in); got != tc.want {
+			t.Errorf("round1(%v) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestGTTCeiling_ParamsPctIsRounded is a regression test for a real bug
+// found in review: the first migration pass populated Finding.Params["pct"]
+// with the raw, many-decimal pctOf() result, while Summary's %.1f Sprintf
+// verb always rounds it — since i18next has no printf-style formatting at
+// interpolation time, the FE would have shown a long, ugly float for any
+// GTT usage ratio that isn't already round (i.e. almost always).
+func TestGTTCeiling_ParamsPctIsRounded(t *testing.T) {
+	total := int64(120 << 30)
+	// 11/12 of total is a repeating decimal (~91.666...67%) when expressed
+	// as a percentage — exactly the shape that would expose unrounded output.
+	used := total * 11 / 12
+	snap := snapWith(collector.Metrics{GTTUsedBytes: int64p(used), GTTTotalBytes: int64p(total)})
+	s := newSmith(snap, nil, nil)
+	f := runOne(context.Background(), registry[0], s.checkEnv(context.Background()))
+	pct, ok := f.Params["pct"].(float64)
+	if !ok {
+		t.Fatalf("Params[pct] missing or wrong type: %#v", f.Params)
+	}
+	if pct != round1(pct) {
+		t.Errorf("Params[pct] = %v is not rounded to 1 decimal", pct)
+	}
+}
+
 func TestDiskSpaceSeverity(t *testing.T) {
 	cases := []struct {
 		name string

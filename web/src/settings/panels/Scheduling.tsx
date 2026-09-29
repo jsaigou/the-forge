@@ -9,6 +9,7 @@
 // Exported as SchedulingSettings, not Scheduling, to avoid any confusion
 // with pages/Scheduling.tsx (the page this section mirrors) even though the
 // different directories mean no real import collision.
+import { Trans, useTranslation } from "react-i18next";
 import { SchedulerTunables } from "../../components/SchedulerTunables";
 import { SaveButton } from "../../components/SaveButton";
 import { StepUpModal } from "../../components/StepUpModal";
@@ -20,6 +21,7 @@ import { useSettingsGroup } from "../useSettingsGroup";
 const F = Object.fromEntries(SCHEDULING_FIELDS.map((f) => [f.id, f]));
 
 function SeedCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useSchedulerSeed();
   const update = useUpdateSchedulerSeed();
   const g = useSettingsGroup(cfg.data, update);
@@ -27,27 +29,26 @@ function SeedCard({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError) {
     return (
       <>
-        <div className="eyebrow">Boot seed</div>
-        <div className="card"><div className="empty-note">Operator role required to view the scheduler boot seed.</div></div>
+        <div className="eyebrow">{t("scheduling.seed_title")}</div>
+        <div className="card"><div className="empty-note">{t("scheduling.seed_role_required")}</div></div>
       </>
     );
   }
   if (!g.active) {
     return (
       <>
-        <div className="eyebrow">Boot seed</div>
-        <div className="card"><div className="empty-note">Loading…</div></div>
+        <div className="eyebrow">{t("scheduling.seed_title")}</div>
+        <div className="card"><div className="empty-note">{t("danger_zone.loading")}</div></div>
       </>
     );
   }
 
   return (
     <>
-      <div className="eyebrow">Boot seed</div>
+      <div className="eyebrow">{t("scheduling.seed_title")}</div>
       <div className="card">
         <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, lineHeight: 1.55 }}>
-          These are the defaults the scheduler falls back to only if <b>scheduler.config</b> (the tunables
-          above) has never been set on a fresh boot. Changing this has no effect on the running daemon.
+          <Trans i18nKey="scheduling.seed_description" ns="settings" components={{ b: <b /> }} />
         </div>
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
         <div className="form-grid">
@@ -62,7 +63,7 @@ function SeedCard({ canAdmin }: { canAdmin: boolean }) {
         </div>
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={g.reset}>Reset</button>
+            <button className="btn" onClick={g.reset}>{t("shared.reset")}</button>
             <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
           </div>
         )}
@@ -73,9 +74,10 @@ function SeedCard({ canAdmin }: { canAdmin: boolean }) {
 }
 
 export function SchedulingSettings({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   return (
     <>
-      <div className="eyebrow" id="scheduling-live">Live tunables</div>
+      <div className="eyebrow" id="scheduling-live">{t("scheduling.live_tunables_title")}</div>
       <SchedulerTunables />
       <SeedCard canAdmin={canAdmin} />
     </>

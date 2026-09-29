@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiErrorMessage } from "../lib/api";
+import { appLocale } from "../lib/format";
 import { SaveButton } from "./SaveButton";
 import {
   useAuthConfig,
@@ -473,7 +474,7 @@ function APIKeys({ canAdmin }: { canAdmin: boolean }) {
                 <span style={{ width: 140, fontSize: 12 }}>{k.name}</span>
                 <span style={{ width: 70, fontSize: 12 }}>{k.role ?? "—"}</span>
                 <span style={{ width: 90, fontSize: 12, color: "var(--text-dim)" }}>
-                  {k.last_used_at ? new Date(k.last_used_at * 1000).toLocaleDateString() : "never"}
+                  {k.last_used_at ? new Date(k.last_used_at * 1000).toLocaleDateString(appLocale()) : "never"}
                 </span>
                 <span className="pos">
                   {k.revoked_at ? (
@@ -798,7 +799,7 @@ function WebAuthnSection() {
                 <span style={{ width: 200, fontFamily: "var(--mono)", fontSize: 10 }}>{c.id.slice(0, 24)}…</span>
                 <span style={{ width: 100, fontSize: 12 }}>{c.label || "—"}</span>
                 <span style={{ width: 100, fontSize: 12, color: "var(--text-dim)" }}>
-                  {c.last_used_at ? new Date(c.last_used_at * 1000).toLocaleDateString() : "never"}
+                  {c.last_used_at ? new Date(c.last_used_at * 1000).toLocaleDateString(appLocale()) : "never"}
                 </span>
                 <span className="pos">
                   <ConfirmButton pending={remove.isPending} onConfirm={() => submitDelete(c.id)} label="Remove" warning="Remove this passkey?" />

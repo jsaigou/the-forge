@@ -145,7 +145,7 @@ func (s *Server) handleCompressorPassthrough(w http.ResponseWriter, r *http.Requ
 
 	if b.Scope == "all" {
 		if s.deps.Settings == nil {
-			writeError(w, http.StatusServiceUnavailable, "settings store not wired")
+			writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings"}, "settings store not wired")
 			return
 		}
 		passthroughAll = *b.Enabled
@@ -156,7 +156,7 @@ func (s *Server) handleCompressorPassthrough(w http.ResponseWriter, r *http.Requ
 		}
 	} else {
 		if s.deps.Routing == nil {
-			writeError(w, http.StatusServiceUnavailable, "compressor store not wired")
+			writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "compressor"}, "compressor store not wired")
 			return
 		}
 		proxies, err := s.deps.Routing.Proxies(ctx)
@@ -178,7 +178,7 @@ func (s *Server) handleCompressorPassthrough(w http.ResponseWriter, r *http.Requ
 			break
 		}
 		if !found {
-			writeError(w, http.StatusNotFound, "proxy not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "proxy"}, "proxy not found")
 			return
 		}
 	}
@@ -261,7 +261,7 @@ func (s *Server) handleCompressorLifecycle(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if !found {
-		writeError(w, http.StatusNotFound, "proxy not found")
+		writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "proxy"}, "proxy not found")
 		return
 	}
 
@@ -370,7 +370,7 @@ func (s *Server) handleCompressorProxyCreate(w http.ResponseWriter, r *http.Requ
 	}
 	for _, p := range proxies {
 		if p.Service == b.Service && p.OrphanedAt.IsZero() {
-			writeError(w, http.StatusConflict, "proxy service already exists")
+			writeErrorCode(w, http.StatusConflict, "already_exists", nil, "proxy service already exists")
 			return
 		}
 	}
@@ -476,7 +476,7 @@ func (s *Server) handleCompressorMigrate(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	if !found {
-		writeError(w, http.StatusNotFound, "proxy not found")
+		writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "proxy"}, "proxy not found")
 		return
 	}
 	if !row.OrphanedAt.IsZero() {

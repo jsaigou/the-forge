@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../../lib/api";
 import type { ConfigWritePayload } from "../../lib/configPayload";
 import { formatGB } from "../../lib/format";
@@ -56,10 +57,11 @@ export function ConfigEditView({ configId, onDone, onCancel }: { configId: numbe
   const [showFiles, setShowFiles] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const { t } = useTranslation("models");
   const existing = configs.data?.find((c) => c.id === configId);
 
   if (!existing) {
-    return <div className="empty-note">Loading config…</div>;
+    return <div className="empty-note">{t("config_edit.loading")}</div>;
   }
 
   // id/chat_template_caps/chat_template_caps_probed_at are excluded from
@@ -150,6 +152,7 @@ function ConfigEditForm({
   pending: boolean;
   error: string | null;
 }) {
+  const { t } = useTranslation("models");
   const [reason, setReason] = useState("");
   const [name, setName] = useState(existing.name);
   const [variantId, setVariantId] = useState(existing.variant_id);
@@ -223,14 +226,14 @@ function ConfigEditForm({
     <div className="config-edit-view">
       {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
 
-      <div className="eyebrow" style={{ marginTop: 0 }}>Identity</div>
+      <div className="eyebrow" style={{ marginTop: 0 }}>{t("config_edit.identity")}</div>
       <div className="form-grid">
-        <label className="form-row">Name *
+        <label className="form-row">{t("config_edit.name")}
           <input value={name} onChange={(e) => setName(e.target.value)} />
         </label>
-        <label className="form-row">Variant *
+        <label className="form-row">{t("config_edit.variant")}
           <select value={variantId} onChange={(e) => { const v = Number(e.target.value); setVariantId(v); setWeightArtifactId(0); }}>
-            <option value={0}>— select —</option>
+            <option value={0}>{t("config_edit.variant_select")}</option>
             {variants.map((v) => {
               const m = models.find((m) => m.id === v.model_id);
               return (
@@ -241,27 +244,27 @@ function ConfigEditForm({
             })}
           </select>
         </label>
-        <label className="form-row" style={{ gridColumn: "1 / -1" }}>Weight artifact *
+        <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("config_edit.weight_artifact")}
           <div style={{ display: "flex", gap: 6 }}>
             <select value={weightArtifactId} onChange={(e) => setWeightArtifactId(Number(e.target.value))} style={{ flex: 1 }}>
-              <option value={0}>— select —</option>
+              <option value={0}>{t("config_edit.variant_select")}</option>
               {weightArtifacts.map((a) => (
                 <option key={a.id} value={a.id}>
-                  {a.file_path}{a.shard_set_id ? " (shard set)" : ""}
+                  {a.file_path}{a.shard_set_id ? t("config_edit.shard_set_suffix") : ""}
                 </option>
               ))}
               {weightArtifacts.length === 0 && variant && (
-                <option value={0} disabled>No weight artifacts for this variant</option>
+                <option value={0} disabled>{t("config_edit.no_weight_artifacts")}</option>
               )}
             </select>
             <button type="button" className="btn" style={{ fontSize: 11, padding: "4px 8px", whiteSpace: "nowrap" }} onClick={onToggleFiles}>
-              {showFiles ? "Hide files" : "Browse files"}
+              {showFiles ? t("config_edit.hide_files") : t("config_edit.browse_files")}
             </button>
           </div>
         </label>
-        <label className="form-row">mmproj artifact
+        <label className="form-row">{t("config_edit.mmproj")}
           <select value={mmprojArtifactId} onChange={(e) => setMmprojArtifactId(Number(e.target.value))}>
-            <option value={0}>— none —</option>
+            <option value={0}>{t("config_edit.mmproj_none")}</option>
             {mmprojArtifacts.map((a) => (
               <option key={a.id} value={a.id}>{a.file_path}</option>
             ))}
@@ -272,71 +275,69 @@ function ConfigEditForm({
       {showFiles && (
         <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid var(--border)", borderRadius: 8, padding: 8, marginBottom: 14 }}>
           <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginBottom: 6, textTransform: "uppercase", letterSpacing: ".06em" }}>
-            Model files on disk ({modelFiles.length})
+            {t("config_edit.model_files_on_disk", { count: modelFiles.length })}
           </div>
-          {modelFiles.length === 0 && <div className="empty-note">No GGUF files found in models dir.</div>}
+          {modelFiles.length === 0 && <div className="empty-note">{t("config_edit.no_gguf_files")}</div>}
           {modelFiles.map((f) => (
             <div key={f.path} style={{ display: "flex", gap: 8, fontSize: 11, padding: "4px 0", borderBottom: "1px solid var(--border)", fontFamily: "var(--mono)" }}>
               <span style={{ flex: 1, color: "var(--text-dim)" }}>{f.path}</span>
               <span style={{ color: "var(--text-mute)" }}>{formatGB(f.size_bytes, 1)} GB</span>
               {f.arch && <span style={{ color: "var(--cool)" }}>{f.arch}</span>}
               {f.trained_ctx > 0 && <span style={{ color: "var(--text-mute)" }}>ctx:{f.trained_ctx.toLocaleString()}</span>}
-              {f.is_shard_set && <span className="chip">shard set</span>}
+              {f.is_shard_set && <span className="chip">{t("config_edit.shard_set_chip")}</span>}
             </div>
           ))}
         </div>
       )}
 
-      <div className="eyebrow">Engine</div>
+      <div className="eyebrow">{t("config_edit.engine")}</div>
       <div className="form-grid">
-        <label className="form-row">Engine *
+        <label className="form-row">{t("config_edit.engine_select")}
           <select value={engineId} onChange={(e) => { const v = Number(e.target.value); setEngineId(v); setBuildId(0); }}>
-            <option value={0}>— select —</option>
+            <option value={0}>{t("config_edit.variant_select")}</option>
             {engines.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
         </label>
-        <label className="form-row">Build
+        <label className="form-row">{t("config_edit.build")}
           <select value={buildId} onChange={(e) => setBuildId(Number(e.target.value))}>
-            <option value={0}>— none —</option>
+            <option value={0}>{t("config_edit.build_none")}</option>
             {engineBuilds.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </label>
       </div>
 
-      <div className="eyebrow">Runtime</div>
+      <div className="eyebrow">{t("config_edit.runtime")}</div>
       <div className="form-grid">
-        <label className="form-row">Context (n_ctx)
+        <label className="form-row">{t("config_edit.context")}
           <input type="number" min={0} value={nCtx} onChange={(e) => setNCtx(Number(e.target.value))} />
         </label>
-        <label className="form-row">Capability tier
+        <label className="form-row">{t("config_edit.capability_tier")}
           <select value={capabilityTierId} onChange={(e) => setCapabilityTierId(Number(e.target.value))}>
-            <option value={0}>— none (never substitutes) —</option>
+            <option value={0}>{t("config_edit.capability_tier_none")}</option>
             {capabilityTiers.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
           <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>
-            Lets an already-loaded config stand in for this one — see Settings → Routing & Compressor → Model Behavior.
+            {t("config_edit.capability_tier_hint")}
           </span>
         </label>
         {capabilityTierId !== 0 && (
-          <label className="form-row">Rank within class
+          <label className="form-row">{t("config_edit.capability_rank")}
             <input type="number" value={capabilityRank} onChange={(e) => setCapabilityRank(Number(e.target.value))} />
-            <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>Lower = more capable. Equal ranks are freely interchangeable.</span>
+            <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>{t("config_edit.capability_rank_hint")}</span>
           </label>
         )}
-        <label className="form-row">Default reasoning effort
+        <label className="form-row">{t("config_edit.default_reasoning_effort")}
           <select value={reasoningEffortDefault} onChange={(e) => setReasoningEffortDefault(e.target.value as typeof reasoningEffortDefault)}>
-            <option value="">— none (build default) —</option>
-            <option value="none">none (thinking off)</option>
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
+            <option value="">{t("config_edit.reasoning_none")}</option>
+            <option value="none">{t("config_edit.reasoning_off")}</option>
+            <option value="low">{t("config_edit.reasoning_low")}</option>
+            <option value="medium">{t("config_edit.reasoning_medium")}</option>
+            <option value="high">{t("config_edit.reasoning_high")}</option>
           </select>
           <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>
-            Applied when a request doesn't send its own reasoning_effort. Translated per this
-            config's own build — see the chat template overrides below — and replaces the old
-            launch-time thinking flags.
+            {t("config_edit.default_reasoning_hint")}
           </span>
         </label>
         <ChatTemplateCapsOverrideEditor
@@ -347,27 +348,27 @@ function ConfigEditForm({
       </div>
       <LoadOptionsEditor value={extraArgs} onChange={setExtraArgs} backend={backend} nCtx={nCtx} />
 
-      <div className="eyebrow">Publishing</div>
+      <div className="eyebrow">{t("config_edit.publishing")}</div>
       <div className="form-grid">
-        <label className="form-row">Status
+        <label className="form-row">{t("config_edit.status")}
           <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="unverified">unverified</option>
-            <option value="verified">verified</option>
+            <option value="unverified">{t("config_edit.status_unverified")}</option>
+            <option value="verified">{t("config_edit.status_verified")}</option>
           </select>
         </label>
-        <label className="form-row">Visibility
+        <label className="form-row">{t("config_edit.visibility")}
           <select value={visibility} onChange={(e) => setVisibility(e.target.value)}>
-            <option value="visible">visible</option>
-            <option value="hidden">hidden</option>
+            <option value="visible">{t("config_edit.visibility_visible")}</option>
+            <option value="hidden">{t("config_edit.visibility_hidden")}</option>
           </select>
         </label>
         <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8, gridColumn: "1 / -1" }}>
           <input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} />
-          Default config for this variant
+          {t("config_edit.is_default")}
         </label>
       </div>
 
-      <div className="eyebrow">Icon</div>
+      <div className="eyebrow">{t("config_edit.icon")}</div>
       <IconPicker
         value={existing.logo}
         valueDark={existing.logo_dark}
@@ -377,12 +378,12 @@ function ConfigEditForm({
         onUpload={onUploadIcon}
       />
 
-      <label className="form-row">Why this change? (optional)
-        <input value={reason} placeholder="e.g. raised context after an OOM at full 262K" onChange={(e) => setReason(e.target.value)} />
+      <label className="form-row">{t("config_edit.reason_label")}
+        <input value={reason} placeholder={t("config_edit.reason_placeholder")} onChange={(e) => setReason(e.target.value)} />
       </label>
 
       <div className="form-actions" style={{ marginTop: 20 }}>
-        <button type="button" className="btn" onClick={onCancel}>Cancel</button>
+        <button type="button" className="btn" onClick={onCancel}>{t("config_edit.cancel")}</button>
         <SaveButton className="go" pending={pending} isError={!!error} disabled={pending || !name} onClick={submit} />
       </div>
     </div>

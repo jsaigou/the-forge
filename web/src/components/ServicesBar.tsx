@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useServiceModeToggle } from "../lib/queries";
 import { useSession } from "../lib/session";
 import { Icon } from "./Icon";
@@ -32,6 +33,7 @@ const ALIGNER_STUB: InfraService = {
   mode_key: null,
   detail: "not yet monitored by the backend — stub row, see FE-1 report",
   compressor_passthrough: null,
+  url: null,
   logo: "qwen", // Qwen3-ForcedAligner-0.6B — icon names the model, same as the real backend-fed row
 };
 
@@ -69,6 +71,7 @@ function aggregateCompressorStatus(rows: InfraService[]): "on" | "warn" | "crit"
 }
 
 function CompressorGroupTile({ rows }: { rows: InfraService[] }) {
+  const { t } = useTranslation("console");
   const status = aggregateCompressorStatus(rows);
   const tooltip = rows
     .map((s) => {
@@ -88,7 +91,7 @@ function CompressorGroupTile({ rows }: { rows: InfraService[] }) {
   // border GLOW carries the state (same language as every other chip).
   return (
     <div className={`cchip cchip-${status}`} title={tooltip}>
-      <div className="nm">Compressor</div>
+      <div className="nm">{t("services.compressor")}</div>
     </div>
   );
 }
@@ -98,6 +101,7 @@ function CompressorGroupTile({ rows }: { rows: InfraService[] }) {
 // modes (ComfyUI) keep their start/stop button — restored 2026-08-15 after
 // the QA-undo commit stripped it along with the duplicate rows.
 export function ServiceChip({ s, addon = false }: { s: InfraService; addon?: boolean }) {
+  const { t } = useTranslation("console");
   const { canOperate } = useSession();
   const serviceModeToggle = useServiceModeToggle();
   const isStub = s.detail === "not yet monitored by the backend — stub row, see FE-1 report";
@@ -111,21 +115,26 @@ export function ServiceChip({ s, addon = false }: { s: InfraService; addon?: boo
       {s.logo && <Icon slug={s.logo} name={s.name} sm />}
       <div className="nm">{s.name}</div>
       {isA0 && passthroughOn && (
-        <span className="chip remote" title="Compressor bypassed — requests route uncompressed">
-          passthrough
+        <span className="chip remote" title={t("services.passthrough_title")}>
+          {t("services.passthrough")}
         </span>
       )}
       {/* Operator feedback 2026-08-25: match ProviderCreditTile's layout —
           controls right-justified (flex spacer before them), plus an ↗ link
-          opening the service UI in a new window. ComfyUI serves :3001; the
-          host comes from the dashboard URL so it works over tailnet or
-          localhost alike. */}
-      {toggleable && s.port != null && (
+          opening the service UI in a new window. Default guess is
+          `http://<dashboard-host>:<port>` (works over tailnet or localhost
+          alike when the service really does share the dashboard's host).
+          Correction 2026-09-22: that guess is wrong for a service reachable
+          only through its own dedicated hostname (e.g. ComfyUI, served over
+          its own Tailscale Serve endpoint) — s.url is an operator-set
+          override for exactly that case (Settings → General → Service
+          links, infra.service_links), preferred whenever present. */}
+      {toggleable && (s.url != null || s.port != null) && (
         <a
-          href={`http://${window.location.hostname}:${s.port}`}
+          href={s.url ?? `http://${window.location.hostname}:${s.port}`}
           target="_blank"
           rel="noreferrer"
-          title={`Open ${s.name} in a new window`}
+          title={t("services.open_in_new_window_title", { name: s.name })}
           style={{ marginLeft: "auto", color: "var(--text-mute)", fontSize: 11, flex: "0 0 auto", textDecoration: "none" }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -136,7 +145,7 @@ export function ServiceChip({ s, addon = false }: { s: InfraService; addon?: boo
         <button
           className="icon-btn action"
           style={{ width: 20, height: 20, fontSize: 10, flex: "0 0 auto", ...(s.port == null ? { marginLeft: "auto" } : {}) }}
-          title={s.active ? "Stop" : "Start"}
+          title={s.active ? t("services.stop") : t("services.start")}
           disabled={busy}
           onClick={() => {
             if (s.mode_key) serviceModeToggle.mutate({ name: s.mode_key, action: s.active ? "stop" : "start" });
@@ -158,8 +167,9 @@ export function ServiceChip({ s, addon = false }: { s: InfraService; addon?: boo
 // Operator feedback 2026-08-14: ComfyUI moved out of this strip into the
 // add-on column (Console.tsx renders it via ServiceChip with addon=true).
 export function ServicesBar({ services }: { services: InfraService[] | undefined }) {
+  const { t } = useTranslation("console");
   if (!services) {
-    return <div className="services empty-note">Loading services…</div>;
+    return <div className="services empty-note">{t("services.loading")}</div>;
   }
 
   const hasAligner = services.some((s) => s.name === ALIGNER_NAME);
