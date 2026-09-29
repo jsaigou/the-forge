@@ -35,21 +35,21 @@ func (s *Server) handleSmithKBSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query().Get("q")
 	if q == "" {
-		writeValidationError(w, map[string]string{"q": "required"})
+		writeValidationErrorCodes(w, map[string]string{"q": "required"}, map[string]string{"q": "required"})
 		return
 	}
 	limit := 0
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 0 {
-			writeValidationError(w, map[string]string{"limit": "must be a non-negative integer"})
+			writeValidationErrorCodes(w, map[string]string{"limit": "must be a non-negative integer"}, map[string]string{"limit": "must_be_non_negative_integer"})
 			return
 		}
 		limit = n
 	}
 	results, err := s.deps.Smith.KBSearch(r.Context(), q, limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "kb search failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "kb search failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, smithKBSearchResponse{Count: len(results), Results: results})
@@ -70,7 +70,7 @@ func (s *Server) handleSmithKBRef(w http.ResponseWriter, r *http.Request) {
 	ref := r.PathValue("ref")
 	chunk, ok := s.deps.Smith.KBLookup(ref)
 	if !ok {
-		writeError(w, http.StatusNotFound, "unknown kb ref")
+		writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "kb ref"}, "unknown kb ref")
 		return
 	}
 	writeJSON(w, http.StatusOK, smithKBRefResponse{Chunk: chunk})

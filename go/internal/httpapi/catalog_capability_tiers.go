@@ -37,10 +37,12 @@ type capabilityTierBody struct {
 	Notes string `json:"notes"`
 }
 
-func validateCapabilityTier(b capabilityTierBody) map[string]string {
+func validateCapabilityTier(b capabilityTierBody) (map[string]string, map[string]string) {
 	fields := map[string]string{}
+	codes := map[string]string{}
 	if b.Name == "" {
 		fields["name"] = "is required"
+		codes["name"] = "required"
 	} else if len(b.Name) > 256 {
 		fields["name"] = "must be ≤256 characters"
 	}
@@ -48,8 +50,9 @@ func validateCapabilityTier(b capabilityTierBody) map[string]string {
 	case "", "off", "fallback_only", "prefer_smarter":
 	default:
 		fields["mode"] = "must be one of: (empty), off, fallback_only, prefer_smarter"
+		codes["mode"] = "must_be_one_of"
 	}
-	return fields
+	return fields, codes
 }
 
 func (s *Server) handleCatalogCapabilityTiersList(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +65,7 @@ func (s *Server) handleCatalogCapabilityTiersList(w http.ResponseWriter, r *http
 	defer cancel()
 	list, err := cat.ListCapabilityTiers(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "capability tiers query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "capability tiers query failed")
 		return
 	}
 	out := make([]capabilityTierJSON, 0, len(list))
@@ -75,12 +78,12 @@ func (s *Server) handleCatalogCapabilityTiersList(w http.ResponseWriter, r *http
 func (s *Server) handleCatalogCapabilityTierGet(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -88,7 +91,7 @@ func (s *Server) handleCatalogCapabilityTierGet(w http.ResponseWriter, r *http.R
 	p, err := cat.GetCapabilityTier(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "capability tier not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "capability tier"}, "capability tier not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -100,7 +103,7 @@ func (s *Server) handleCatalogCapabilityTierGet(w http.ResponseWriter, r *http.R
 func (s *Server) handleCatalogCapabilityTierCreate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b capabilityTierBody
@@ -108,8 +111,8 @@ func (s *Server) handleCatalogCapabilityTierCreate(w http.ResponseWriter, r *htt
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := validateCapabilityTier(b); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := validateCapabilityTier(b); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -128,12 +131,12 @@ func (s *Server) handleCatalogCapabilityTierCreate(w http.ResponseWriter, r *htt
 func (s *Server) handleCatalogCapabilityTierUpdate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	var b capabilityTierBody
@@ -141,15 +144,15 @@ func (s *Server) handleCatalogCapabilityTierUpdate(w http.ResponseWriter, r *htt
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := validateCapabilityTier(b); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := validateCapabilityTier(b); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
 	if err := cat.UpdateCapabilityTier(ctx, store.CapabilityTier{ID: id, Name: b.Name, Mode: b.Mode, Notes: b.Notes}); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "capability tier not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "capability tier"}, "capability tier not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -168,19 +171,19 @@ func (s *Server) handleCatalogCapabilityTierUpdate(w http.ResponseWriter, r *htt
 func (s *Server) handleCatalogCapabilityTierDelete(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
 	if err := cat.DeleteCapabilityTier(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "capability tier not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "capability tier"}, "capability tier not found")
 			return
 		}
 		writeInternalError(w, err)

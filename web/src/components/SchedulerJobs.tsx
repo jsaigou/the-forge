@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../lib/api";
+import { appLocale } from "../lib/format";
 import {
   useConfigCards,
   useCreateSchedulerJob,
@@ -19,16 +21,15 @@ import type { SchedulerJob } from "../lib/types";
 // run-now is operator, like the reservation routes it mirrors.
 const SLOT_OPTIONS = ["a1", "a2", "a3", "a4"];
 
-const CRON_HELP =
-  '5 fields: min hour day-of-month month day-of-week — e.g. "0 3 * * *" = daily 03:00, "*/30 * * * *" = every half hour, "0 9-17 * * 1-5" = hourly 09:00–17:00 weekdays.';
-
 function fmtWhen(iso: string | null) {
   if (!iso) return "—";
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString(appLocale());
 }
 
 export function SchedulerJobs() {
+  const { t } = useTranslation("scheduling");
+  const cronHelp = t("jobs.cron_help");
   const { canOperate, canAdmin } = useSession();
   const jobs = useSchedulerJobs();
   const configCards = useConfigCards("7d");
@@ -46,7 +47,7 @@ export function SchedulerJobs() {
   if (jobs.isError) {
     return (
       <div className="card">
-        <div className="empty-note">Operator role required to view scheduled jobs.</div>
+        <div className="empty-note">{t("jobs.role_required")}</div>
       </div>
     );
   }
@@ -56,7 +57,7 @@ export function SchedulerJobs() {
   function submit() {
     setError(null);
     if (!name || !cron || !configName) {
-      setError("Name, cron expression, and config are required.");
+      setError(t("jobs.validation_error"));
       return;
     }
     create.mutate(
@@ -82,16 +83,16 @@ export function SchedulerJobs() {
 
   return (
     <div className="card">
-      <h3><span className="tick" />Scheduled jobs — forced loads at fixed times</h3>
+      <h3><span className="tick" />{t("jobs.title")}</h3>
       {(jobs.data?.jobs ?? []).length === 0 && (
-        <div className="empty-note">No scheduled jobs defined.</div>
+        <div className="empty-note">{t("jobs.no_jobs")}</div>
       )}
       {(jobs.data?.jobs ?? []).map((j) => (
         <div className="qrow" key={j.id}>
           <span className="who">{j.name}</span>
-          <span className="want" title={CRON_HELP}>{j.cron} → {j.config_name}{j.slot ? ` @ ${j.slot}` : ""}</span>
+          <span className="want" title={cronHelp}>{j.cron} → {j.config_name}{j.slot ? ` @ ${j.slot}` : ""}</span>
           <span style={{ fontSize: 11, color: "var(--text-mute)" }}>
-            last {fmtWhen(j.last_run_at)} · next {fmtWhen(j.next_run_at)}
+            {t("jobs.last_next", { last: fmtWhen(j.last_run_at), next: fmtWhen(j.next_run_at) })}
           </span>
           <span className="pos">
             {canAdmin && (
@@ -99,9 +100,9 @@ export function SchedulerJobs() {
                 className="btn"
                 disabled={update.isPending}
                 onClick={() => toggle(j)}
-                title="Toggle enabled"
+                title={t("jobs.toggle_title")}
               >
-                {j.enabled ? "Enabled" : "Disabled"}
+                {j.enabled ? t("jobs.enabled") : t("jobs.disabled")}
               </button>
             )}
             {canOperate && (
@@ -109,9 +110,9 @@ export function SchedulerJobs() {
                 className="btn"
                 style={{ color: "var(--cool)" }}
                 disabled={runNow.isPending}
-                onClick={() => confirm(`Run "${j.name}" now?`) && runNow.mutate(j.id)}
+                onClick={() => confirm(t("jobs.run_now_confirm", { name: j.name })) && runNow.mutate(j.id)}
               >
-                Run now
+                {t("jobs.run_now")}
               </button>
             )}
             {canAdmin && (
@@ -119,9 +120,9 @@ export function SchedulerJobs() {
                 className="btn"
                 style={{ color: "var(--crit)" }}
                 disabled={del.isPending}
-                onClick={() => confirm(`Delete job "${j.name}"?`) && del.mutate(j.id)}
+                onClick={() => confirm(t("jobs.delete_confirm", { name: j.name })) && del.mutate(j.id)}
               >
-                Delete
+                {t("jobs.delete")}
               </button>
             )}
           </span>
@@ -130,40 +131,40 @@ export function SchedulerJobs() {
 
       {canAdmin && (
         <>
-          <div className="eyebrow" style={{ marginTop: 14 }}>New job</div>
+          <div className="eyebrow" style={{ marginTop: 14 }}>{t("jobs.new_job_title")}</div>
           {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
           <div className="form-grid">
             <label className="form-row">
-              Name
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="nightly-batch" />
+              {t("jobs.name")}
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("jobs.name_placeholder")} />
             </label>
-            <label className="form-row" title={CRON_HELP}>
-              Cron
+            <label className="form-row" title={cronHelp}>
+              {t("jobs.cron")}
               <input value={cron} onChange={(e) => setCron(e.target.value)} placeholder="0 3 * * *" />
             </label>
             <label className="form-row">
-              Config
+              {t("jobs.config")}
               <select value={configName} onChange={(e) => setConfigName(e.target.value)}>
-                <option value="">select…</option>
+                <option value="">{t("reservation_modal.select_ellipsis")}</option>
                 {configs.map((c) => (
                   <option key={c.id} value={c.name}>{c.model_name} · {c.name}</option>
                 ))}
               </select>
             </label>
             <label className="form-row">
-              Slot
+              {t("jobs.slot")}
               <select value={slot} onChange={(e) => setSlot(e.target.value)}>
-                <option value="">any (scheduler chooses)</option>
+                <option value="">{t("jobs.slot_any")}</option>
                 {SLOT_OPTIONS.map((s) => (
                   <option key={s} value={s}>{s}</option>
                 ))}
               </select>
             </label>
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-mute)", margin: "6px 0 10", lineHeight: 1.5 }}>{CRON_HELP}</div>
+          <div style={{ fontSize: 11, color: "var(--text-mute)", margin: "6px 0 10", lineHeight: 1.5 }}>{cronHelp}</div>
           <div className="form-actions">
             <button className="btn primary" disabled={create.isPending} onClick={submit}>
-              {create.isPending ? "Creating…" : "+ Add job"}
+              {create.isPending ? t("jobs.creating") : t("jobs.add_job")}
             </button>
           </div>
         </>

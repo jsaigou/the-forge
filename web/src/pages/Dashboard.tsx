@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { DashboardCustomPage } from "../components/DashboardCustomPage";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { CompressorSavingsChips } from "../components/CompressionSavingsChips";
@@ -12,7 +13,7 @@ import { MemoryMeterWidget } from "../components/widgets/MemoryMeterWidget";
 import { PerModelSpendTableWidget } from "../components/widgets/PerModelSpendTableWidget";
 import { ResourceGaugesWidget } from "../components/widgets/ResourceGaugesWidget";
 import { ResourceTrendWidget } from "../components/widgets/ResourceTrendWidget";
-import { formatCurrency, formatCurrencyPrecise, formatPct, formatTokens } from "../lib/format";
+import { appLocale, formatCurrency, formatCurrencyPrecise, formatPct, formatTokens } from "../lib/format";
 import { useCostSummary, useDashboardLayout, useCompressorSummary, useInfraServices, useUpdateDashboardLayout, useUsage } from "../lib/queries";
 import { useSession } from "../lib/session";
 import type { DashboardPage, CompressorSummaryProxy } from "../lib/types";
@@ -38,10 +39,12 @@ import type { DashboardPage, CompressorSummaryProxy } from "../lib/types";
 // the rest of the money picture. Most of Dashboard.tsx's own logic moved out
 // to components/widgets/ at the same time — this file is now mostly
 // composition of those self-contained widgets.
+// Labels come from the "dashboard" translation namespace (tabs.<key>), not
+// from this table.
 const DASHBOARD_TABS = [
-  { key: "overview", label: "Overview" },
-  { key: "cost", label: "Cost" },
-  { key: "resources", label: "Resources" },
+  { key: "overview" },
+  { key: "cost" },
+  { key: "resources" },
 ] as const;
 
 // Cost tab's own range toggle (pre-release feedback round, 2026-08-06) —
@@ -69,6 +72,7 @@ const RESOURCE_RANGES = [
 type ResourceRangeKey = (typeof RESOURCE_RANGES)[number]["key"];
 
 export function Dashboard() {
+  const { t } = useTranslation("dashboard");
   const [tab, setTab] = useState<string>("overview");
   const { canAdmin } = useSession();
   const layout = useDashboardLayout();
@@ -89,7 +93,7 @@ export function Dashboard() {
 
   function createPage() {
     const id = crypto.randomUUID();
-    const newPage: DashboardPage = { id, name: "New Page", widgets: [] };
+    const newPage: DashboardPage = { id, name: t("new_page_default_name"), widgets: [] };
     updateLayout.mutate({ pages: [...customPages, newPage] });
     setTab(id);
   }
@@ -112,11 +116,11 @@ export function Dashboard() {
   return (
     <section className="page">
       <div className="eyebrow" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span>Dashboard</span>
+        <span>{t("eyebrow")}</span>
         <div className="tabs" style={{ marginLeft: "auto" }}>
-          {DASHBOARD_TABS.map((t) => (
-            <button key={t.key} className={`tab ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)}>
-              {t.label}
+          {DASHBOARD_TABS.map((dt) => (
+            <button key={dt.key} className={`tab ${tab === dt.key ? "active" : ""}`} onClick={() => setTab(dt.key)}>
+              {t(`tabs.${dt.key}`)}
             </button>
           ))}
           {customPages.map((p) => (
@@ -125,7 +129,7 @@ export function Dashboard() {
             </button>
           ))}
           {canAdmin && (
-            <button className="tab" onClick={createPage} title="New custom page" style={{ padding: "3px 8px" }}>+</button>
+            <button className="tab" onClick={createPage} title={t("new_page_title")} style={{ padding: "3px 8px" }}>+</button>
           )}
         </div>
       </div>
@@ -144,10 +148,10 @@ export function Dashboard() {
                   className="btn"
                   style={{ fontSize: 11 }}
                   onClick={() => {
-                    if (window.confirm(`Delete page "${activeCustomPage.name}"?`)) deletePage(activeCustomPage.id);
+                    if (window.confirm(t("delete_page_confirm", { name: activeCustomPage.name }))) deletePage(activeCustomPage.id);
                   }}
                 >
-                  Delete Page
+                  {t("delete_page")}
                 </button>
               </div>
             )}
@@ -158,7 +162,7 @@ export function Dashboard() {
             />
           </>
         ) : (
-          <div className="empty-note">Loading…</div>
+          <div className="empty-note">{t("loading")}</div>
         )}
       </ErrorBoundary>
     </section>
@@ -198,6 +202,7 @@ function PageNameInput({ name, onRename }: { name: string; onRename: (name: stri
 // Compressor savings) was removed 2026-08-27 per operator request.
 
 function OverviewTab() {
+  const { t } = useTranslation("dashboard");
   // Operator feedback 2026-08-14: the infra service chips moved here from
   // the Console's Resources & services section — fleet health at a glance
   // belongs on the landing tab.
@@ -210,7 +215,7 @@ function OverviewTab() {
           duplicated from Settings → Routing as a read-only copy whose links
           show each route's REAL compressor state × health — the detail the
           aggregated Compressor chip above can't carry. */}
-      <div className="eyebrow">Routing</div>
+      <div className="eyebrow">{t("overview.routing_title")}</div>
       <div className="card">
         <RoutingTree readOnly />
       </div>
@@ -226,8 +231,10 @@ function OverviewTab() {
 // a snapshot, which was the operator's own complaint about it.
 
 function CostTab() {
+  const { t } = useTranslation("dashboard");
+  const costRangeOptions = COST_RANGES.map((r) => ({ ...r, label: t(`ranges.${r.key}`) }));
   const [rangeKey, setRangeKey] = useState<CostRangeKey>("1mo");
-  const range = COST_RANGES.find((r) => r.key === rangeKey)!;
+  const range = costRangeOptions.find((r) => r.key === rangeKey)!;
   const costSummary = useCostSummary(range.window);
   const usage = useUsage(range.window);
   const compressorSummary = useCompressorSummary(range.window);
@@ -266,67 +273,66 @@ function CostTab() {
   return (
     <>
       <div className="eyebrow" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span>Cost · {range.label}</span>
-        <RangeToggle options={COST_RANGES} value={rangeKey} onChange={setRangeKey} />
+        <span>{t("cost.header", { range: range.label })}</span>
+        <RangeToggle options={costRangeOptions} value={rangeKey} onChange={setRangeKey} />
         {/* Phase 5: dropped the "1:1 (no conversion)" fallback — a chip
             implying FX activity happened when none did was more confusing
             than showing nothing. Only a real conversion gets a chip now. */}
         {fxAsOf != null && (
           <span className="chip" style={{ color: fxStale ? "var(--warn)" : undefined }}>
-            FX as of {new Date(fxAsOf * 1000).toLocaleDateString()}
-            {fxStale ? " · stale" : ""}
+            {t("cost.fx_as_of", { date: new Date(fxAsOf * 1000).toLocaleDateString(appLocale()) })}
+            {fxStale ? t("cost.fx_stale_suffix") : ""}
           </span>
         )}
       </div>
       <div className="stats" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
         <div className="stat">
-          <div className="k">Electricity</div>
+          <div className="k">{t("cost.stat_electricity_k")}</div>
           <div className="v">{energy ? formatCurrency(energy.cost_display, displayCurrency) : "…"}</div>
-          <div className="d">measured — see Resources for the full breakdown</div>
+          <div className="d">{t("cost.stat_electricity_d")}</div>
         </div>
         <div className="stat">
-          <div className="k">Virtual spend</div>
+          <div className="k">{t("cost.stat_virtual_spend_k")}</div>
           <div className="v">{virtualSpend != null ? formatCurrency(virtualSpend, displayCurrency) : "…"}</div>
-          <div className="d">est. per local model — not additive with Electricity</div>
+          <div className="d">{t("cost.stat_virtual_spend_d")}</div>
         </div>
         <div className="stat">
-          <div className="k">API spend</div>
+          <div className="k">{t("cost.stat_api_spend_k")}</div>
           <div className="v">{apiSpend != null ? formatCurrency(apiSpend, displayCurrency) : "…"}</div>
-          <div className="d">real, external providers</div>
+          <div className="d">{t("cost.stat_api_spend_d")}</div>
         </div>
         {Array.from(extByProvider.entries()).map(([name, e]) => (
           <div className="stat" key={`api-spend:${name}`}>
             <div className="k">{name}</div>
             <div className="v">{formatCurrency(e.cost_display, displayCurrency)}</div>
-            <div className="d">{e.requests} req{e.unmetered > 0 ? ` (${e.unmetered} unmetered)` : ""}</div>
+            <div className="d">{t("cost.provider_requests", { count: e.requests })}{e.unmetered > 0 ? t("cost.unmetered_suffix", { count: e.unmetered }) : ""}</div>
           </div>
         ))}
         <div className="stat">
-          <div className="k">Total</div>
+          <div className="k">{t("cost.stat_total_k")}</div>
           <div className="v">{totalCost != null ? formatCurrency(totalCost, displayCurrency) : "…"}</div>
-          <div className="d">electricity + API spend</div>
+          <div className="d">{t("cost.stat_total_d")}</div>
         </div>
         <CompressorSavingsChips window_={range.window} />
       </div>
 
-      <div className="eyebrow">Compressor savings · {range.label}</div>
+      <div className="eyebrow">{t("cost.compressor_savings_title", { range: range.label })}</div>
       <div className="hoom">
         {compressorSummary.isLoading ? (
-          <div className="empty-note">Loading Compressor summary…</div>
+          <div className="empty-note">{t("cost.compressor_loading")}</div>
         ) : compressorProxies.length > 0 ? (
           compressorProxies.map((p) => <ProxyCard key={p.proxy} p={p} displayCurrency={compressorDisplayCurrency} />)
         ) : (
-          <div className="empty-note">No Compressor proxies reporting this window.</div>
+          <div className="empty-note">{t("cost.compressor_none")}</div>
         )}
       </div>
 
       <div className="eyebrow" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span>Virtual spend · local models · {range.label}</span>
+        <span>{t("cost.virtual_spend_section_title", { range: range.label })}</span>
       </div>
       <div className="card">
         <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 10, lineHeight: 1.5 }}>
-          Priced off curated catalog throughput, not measured per-model power — no profiling run has been
-          executed against this hardware yet (destructive; needs a coordinated window).
+          {t("cost.virtual_spend_note")}
         </div>
         {/* Models with no real spend (0 tokens or a $0 estimate) are dropped
             rather than shown as a meaningless zero row — pre-release
@@ -335,11 +341,11 @@ function CostTab() {
           const nonZeroModels = (usage.data?.models ?? []).filter((m) => m.power_cost_display > 0);
           return (
             <>
-              {nonZeroModels.length === 0 && <div className="empty-note">No local usage recorded yet.</div>}
+              {nonZeroModels.length === 0 && <div className="empty-note">{t("cost.no_local_usage")}</div>}
               {nonZeroModels.map((m) => (
                 <div className="qrow" key={`local:${m.model}`}>
                   <span className="want">{m.model}</span>
-                  <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-mute)" }}>{formatTokens(m.prompt_tokens + m.predicted_tokens)} tok</span>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-mute)" }}>{formatTokens(m.prompt_tokens + m.predicted_tokens)} {t("cost.tok_suffix")}</span>
                   <span className="pos">{formatCurrency(m.power_cost_display, usage.data!.display_currency)}</span>
                 </div>
               ))}
@@ -348,7 +354,7 @@ function CostTab() {
         })()}
       </div>
 
-      <div className="eyebrow">Per-model reliability &amp; spend · {range.label}</div>
+      <div className="eyebrow">{t("cost.per_model_title", { range: range.label })}</div>
       <PerModelSpendTableWidget window_={range.window} />
     </>
   );
@@ -368,6 +374,7 @@ function msFmt(v: number): string {
 }
 
 function ProxyCard({ p, displayCurrency }: { p: CompressorSummaryProxy; displayCurrency: string }) {
+  const { t } = useTranslation("dashboard");
   return (
     <div className="prox" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -375,28 +382,28 @@ function ProxyCard({ p, displayCurrency }: { p: CompressorSummaryProxy; displayC
         <span className="pn">{p.proxy}</span>
         <span className="chip">{p.kind}</span>
         <span className="pu" style={{ marginLeft: "auto" }}>
-          {p.cache_hit_rate_pct != null ? `${formatPct(p.cache_hit_rate_pct)} cache-hit` : "no requests"}
+          {p.cache_hit_rate_pct != null ? t("proxy_card.cache_hit", { pct: formatPct(p.cache_hit_rate_pct) }) : t("proxy_card.no_requests")}
         </span>
       </div>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11.5 }}>
-        <span>{p.requests} req · {p.requests_cached} cached · {p.requests_failed} failed · {p.requests_rate_limited} rate-limited</span>
-        <span style={{ color: "var(--text-mute)" }}>{formatTokens(p.tokens_in)} in / {formatTokens(p.tokens_out)} out</span>
+        <span>{t("proxy_card.reqs_line", { requests: p.requests, cached: p.requests_cached, failed: p.requests_failed, rateLimited: p.requests_rate_limited })}</span>
+        <span style={{ color: "var(--text-mute)" }}>{t("proxy_card.tokens_line", { tokensIn: formatTokens(p.tokens_in), tokensOut: formatTokens(p.tokens_out) })}</span>
       </div>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11 }}>
-        <span>TTFB mean {p.ttfb_mean_ms != null ? msFmt(p.ttfb_mean_ms) : "—"} <small style={{ color: "var(--text-mute)" }}>
-          (lifetime {p.ttfb_min_ms_since_start != null ? msFmt(p.ttfb_min_ms_since_start) : "—"}–{p.ttfb_max_ms_since_start != null ? msFmt(p.ttfb_max_ms_since_start) : "—"})
+        <span>{t("proxy_card.ttfb_mean", { value: p.ttfb_mean_ms != null ? msFmt(p.ttfb_mean_ms) : "—" })} <small style={{ color: "var(--text-mute)" }}>
+          {t("proxy_card.lifetime", { min: p.ttfb_min_ms_since_start != null ? msFmt(p.ttfb_min_ms_since_start) : "—", max: p.ttfb_max_ms_since_start != null ? msFmt(p.ttfb_max_ms_since_start) : "—" })}
         </small></span>
-        <span>Latency mean {p.latency_mean_ms != null ? msFmt(p.latency_mean_ms) : "—"} <small style={{ color: "var(--text-mute)" }}>
-          (lifetime {p.latency_min_ms_since_start != null ? msFmt(p.latency_min_ms_since_start) : "—"}–{p.latency_max_ms_since_start != null ? msFmt(p.latency_max_ms_since_start) : "—"})
+        <span>{t("proxy_card.latency_mean", { value: p.latency_mean_ms != null ? msFmt(p.latency_mean_ms) : "—" })} <small style={{ color: "var(--text-mute)" }}>
+          {t("proxy_card.lifetime", { min: p.latency_min_ms_since_start != null ? msFmt(p.latency_min_ms_since_start) : "—", max: p.latency_max_ms_since_start != null ? msFmt(p.latency_max_ms_since_start) : "—" })}
         </small></span>
-        <span>Overhead mean {p.overhead_mean_ms != null ? msFmt(p.overhead_mean_ms) : "—"}</span>
+        <span>{t("proxy_card.overhead_mean", { value: p.overhead_mean_ms != null ? msFmt(p.overhead_mean_ms) : "—" })}</span>
       </div>
       {p.time_saved_seconds_est != null ? (
         <div className="saved" style={{ marginLeft: 0, textAlign: "left" }}>
-          <span className="k">Time saved (est.)</span>
+          <span className="k">{t("proxy_card.time_saved")}</span>
           {Math.round(p.time_saved_seconds_est)}s
           {p.money_saved_display != null && (
-            <> · {formatCurrencyPrecise(p.money_saved_display, displayCurrency)} saved</>
+            <>{t("proxy_card.saved_suffix", { amount: formatCurrencyPrecise(p.money_saved_display, displayCurrency) })}</>
           )}
           {/* Per-model accounting (2026-08-06 local-savings prefill sprint):
               this is a SUM over every model that contributed cached requests
@@ -417,24 +424,23 @@ function ProxyCard({ p, displayCurrency }: { p: CompressorSummaryProxy; displayC
         <>
           {p.compression_saved_display != null ? (
             <div className="saved" style={{ marginLeft: 0, textAlign: "left" }}>
-              <span className="k">Compressor saved (measured)</span>
-              {formatCurrencyPrecise(p.compression_saved_display, displayCurrency)} · {formatTokens(p.tokens_saved)} tokens compressed out of the prompt before it reached {p.proxy}
+              <span className="k">{t("proxy_card.compressor_saved_measured")}</span>
+              {t("proxy_card.compressor_saved_detail", { amount: formatCurrencyPrecise(p.compression_saved_display, displayCurrency), tokens: formatTokens(p.tokens_saved), proxy: p.proxy })}
             </div>
           ) : (
             <div style={{ fontSize: 11, color: "var(--text-mute)" }}>
-              No tokens compressed out of the prompt this window — usually 0 under --lossless, though not
-              always (a real 950-token delta was recorded live 2026-07-31).
+              {t("proxy_card.no_tokens_compressed")}
             </div>
           )}
           {p.cache_discount_saved_display != null && (
             <div style={{ fontSize: 10.5, color: "var(--text-mute)" }}>
-              Provider cache discount (not a Compressor saving — applies with or without Compressor in the path):
-              {" "}{formatCurrencyPrecise(p.cache_discount_saved_display, displayCurrency)} · {formatTokens(p.cache_discount_tokens ?? 0)} tokens billed at {p.proxy}'s discounted rate
+              {t("proxy_card.provider_cache_discount")}
+              {t("proxy_card.provider_cache_discount_detail", { amount: formatCurrencyPrecise(p.cache_discount_saved_display, displayCurrency), tokens: formatTokens(p.cache_discount_tokens ?? 0), proxy: p.proxy })}
             </div>
           )}
         </>
       ) : (
-        <div style={{ fontSize: 11, color: "var(--text-mute)" }}>No cacheable requests (or no TPS basis) this window — no time-saved estimate.</div>
+        <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{t("proxy_card.no_cacheable")}</div>
       )}
     </div>
   );
@@ -448,16 +454,18 @@ function ProxyCard({ p, displayCurrency }: { p: CompressorSummaryProxy; displayC
 // relocated from the deleted Trends tab.
 
 function ResourcesTab() {
+  const { t } = useTranslation("dashboard");
+  const resourceRangeOptions = RESOURCE_RANGES.map((r) => ({ ...r, label: t(`ranges.${r.key}`) }));
   const [rangeKey, setRangeKey] = useState<ResourceRangeKey>("24h");
-  const range = RESOURCE_RANGES.find((r) => r.key === rangeKey)!;
+  const range = resourceRangeOptions.find((r) => r.key === rangeKey)!;
 
   return (
     <>
       <MemoryMeterWidget />
       <ResourceGaugesWidget />
       <div className="eyebrow" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span>History range</span>
-        <RangeToggle options={RESOURCE_RANGES} value={rangeKey} onChange={setRangeKey} />
+        <span>{t("resources.history_range")}</span>
+        <RangeToggle options={resourceRangeOptions} value={rangeKey} onChange={setRangeKey} />
       </div>
       <ResourceTrendWidget window_={range.window} />
       <ElectricityBreakdownWidget window_={range.window} />

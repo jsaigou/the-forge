@@ -61,9 +61,11 @@ func runComfyUIHealth(_ context.Context, env *CheckEnv) Finding {
 		return Finding{CheckID: id, Severity: SeverityInfo,
 			Summary: fmt.Sprintf("ComfyUI unreachable — %s (pruning/GTT checks unavailable until it's running)",
 				comfyUIDownReason(env.ComfyUIUnit, unitActive, unit.ActiveState, unit.Result, unit.ExecMainStatus, env.ComfyUIPort)),
-			Evidence: ev}
+			SummaryKey: "checks.comfyui_health.unreachable",
+			Params:     map[string]any{"reason": comfyUIDownReason(env.ComfyUIUnit, unitActive, unit.ActiveState, unit.Result, unit.ExecMainStatus, env.ComfyUIPort)},
+			Evidence:   ev}
 	}
-	return Finding{CheckID: id, Severity: SeverityOK, Summary: "ComfyUI reachable", Evidence: ev}
+	return Finding{CheckID: id, Severity: SeverityOK, Summary: "ComfyUI reachable", SummaryKey: "checks.comfyui_health.healthy", Evidence: ev}
 }
 
 // comfyUIDownReason explains, in operator language, WHY ComfyUI is
@@ -124,7 +126,8 @@ func runComfyUIPrune(ctx context.Context, env *CheckEnv) Finding {
 	}
 	if len(env.ComfyUIModelRoots) == 0 {
 		return Finding{CheckID: id, Severity: SeverityInfo,
-			Summary: "no comfyui model roots configured (smith.comfyui.model_roots is empty)"}
+			Summary:    "no comfyui model roots configured (smith.comfyui.model_roots is empty)",
+			SummaryKey: "checks.comfyui_prune.no_roots"}
 	}
 
 	res := comfyui.BuildMap(ctx, env.ComfyUI, env.ComfyUIModelRoots, env.ComfyUIWorkflowDirs)
@@ -143,13 +146,17 @@ func runComfyUIPrune(ctx context.Context, env *CheckEnv) Finding {
 	}
 	if !res.Buildable {
 		return Finding{CheckID: id, Severity: SeverityWarn,
-			Summary:  fmt.Sprintf("dependency map unbuildable (%s): %s — no deletion proposal is possible until this clears", res.RefusalReason, res.RefusalDetail),
-			Evidence: ev, KBRefs: []string{"smith:comfyui-pruning-guardrails"}}
+			Summary:    fmt.Sprintf("dependency map unbuildable (%s): %s — no deletion proposal is possible until this clears", res.RefusalReason, res.RefusalDetail),
+			SummaryKey: "checks.comfyui_prune.unbuildable",
+			Params:     map[string]any{"reason": res.RefusalReason, "detail": res.RefusalDetail},
+			Evidence:   ev, KBRefs: []string{"smith:comfyui-pruning-guardrails"}}
 	}
 	if len(res.Candidates) == 0 {
 		return Finding{CheckID: id, Severity: SeverityOK,
-			Summary:  fmt.Sprintf("dependency map built (%d referenced, %d inventoried); nothing unreferenced", res.ReferencedCount, res.InventoryCount),
-			Evidence: ev}
+			Summary:    fmt.Sprintf("dependency map built (%d referenced, %d inventoried); nothing unreferenced", res.ReferencedCount, res.InventoryCount),
+			SummaryKey: "checks.comfyui_prune.clean",
+			Params:     map[string]any{"referenced_count": res.ReferencedCount, "inventory_count": res.InventoryCount},
+			Evidence:   ev}
 	}
 	var totalBytes int64
 	for _, c := range res.Candidates {
@@ -157,6 +164,8 @@ func runComfyUIPrune(ctx context.Context, env *CheckEnv) Finding {
 	}
 	ev["guidance"] = comfyUIKeepGuidance
 	return Finding{CheckID: id, Severity: SeverityInfo,
-		Summary:  fmt.Sprintf("%d unreferenced ComfyUI model file(s) found (%.1f GB reclaimable) — review before approving; see guidance", len(res.Candidates), float64(totalBytes)/(1<<30)),
-		Evidence: ev, KBRefs: []string{"smith:comfyui-pruning-guardrails"}}
+		Summary:    fmt.Sprintf("%d unreferenced ComfyUI model file(s) found (%.1f GB reclaimable) — review before approving; see guidance", len(res.Candidates), float64(totalBytes)/(1<<30)),
+		SummaryKey: "checks.comfyui_prune.candidates_found",
+		Params:     map[string]any{"count": len(res.Candidates), "gb": round1(float64(totalBytes) / (1 << 30))},
+		Evidence:   ev, KBRefs: []string{"smith:comfyui-pruning-guardrails"}}
 }

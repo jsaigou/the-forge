@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { formatGB, formatIdle } from "../lib/format";
+import { useTranslation } from "react-i18next";
+import { appLocale, formatGB, formatIdle } from "../lib/format";
 import { useCatalogModelAliases, useUnloadSlot } from "../lib/queries";
 import { creatorIconSlug } from "../lib/creatorIcon";
 import { useSession } from "../lib/session";
@@ -16,10 +17,10 @@ import { SquareSnake } from "./SquareSnake";
 // the backend has no real phase events for unload; this is a client-side
 // elapsed-time heuristic against known teardown behavior, not a fabricated
 // progress bar.
-function unloadStageLabel(elapsedS: number): string {
-  if (elapsedS < 10) return "Stopping service…";
-  if (elapsedS < 30) return "Waiting for GTT memory to drain…";
-  return "Still draining — large models can take several minutes…";
+function unloadStageLabel(elapsedS: number, t: (key: string) => string): string {
+  if (elapsedS < 10) return t("bay.unload_stage_stopping");
+  if (elapsedS < 30) return t("bay.unload_stage_draining");
+  return t("bay.unload_stage_slow");
 }
 
 // Ticks once a second so the elapsed-time label above actually counts up
@@ -61,6 +62,7 @@ function activeOrNextReservation(reservations: Reservation[] | undefined, slotKe
 }
 
 export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, configCards, reservations, onLoadClick }: BayProps) {
+  const { t } = useTranslation("console");
   const { canOperate } = useSession();
   const unload = useUnloadSlot();
 
@@ -88,7 +90,7 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
         <span className="statusdot dot-busy" />
         <span className="slotid">{slotLabel}</span>
         <div style={{ margin: "auto 0", textAlign: "center" }}>
-          <div style={{ fontSize: 13 }}>Loading {loading.mode}…</div>
+          <div style={{ fontSize: 13 }}>{t("bay.loading_mode", { mode: loading.mode })}</div>
         </div>
       </div>
     );
@@ -101,9 +103,9 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
         <span className="statusdot dot-busy" />
         <span className="slotid">{slotLabel}</span>
         <div style={{ margin: "auto 0", textAlign: "center" }}>
-          <div style={{ fontSize: 13 }}>Unloading {unloading.mode}…</div>
+          <div style={{ fontSize: 13 }}>{t("bay.unloading_mode", { mode: unloading.mode })}</div>
           <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 4 }}>
-            {unloadStageLabel(elapsedS)} ({Math.round(elapsedS)}s)
+            {unloadStageLabel(elapsedS, t)} ({Math.round(elapsedS)}s)
           </div>
         </div>
       </div>
@@ -118,13 +120,13 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
           <span className="slotid">{slotLabel}</span>
           <div style={{ margin: "auto 0" }}>
             <span className="chip rocm" style={{ marginBottom: 8, display: "inline-block" }}>
-              {res.active ? "reserved · active" : "reserved"}
+              {res.active ? t("bay.reserved_active") : t("bay.reserved")}
             </span>
             <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{res.r.label}</div>
             <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--cool)", marginTop: 4 }}>
-              {new Date(res.r.start).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+              {new Date(res.r.start).toLocaleString(appLocale(), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
               {" – "}
-              {new Date(res.r.end).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              {new Date(res.r.end).toLocaleTimeString(appLocale(), { hour: "2-digit", minute: "2-digit" })}
             </div>
           </div>
         </div>
@@ -135,10 +137,10 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
         <span className="statusdot dot-empty" />
         <span className="slotid">{slotLabel}</span>
         <div style={{ margin: "auto 0" }}>
-          <div style={{ fontSize: 13 }}>Bay free</div>
+          <div style={{ fontSize: 13 }}>{t("bay.bay_free")}</div>
           {canOperate && (
             <button className="load-btn" data-tour-id="bay-load" onClick={onLoadClick}>
-              + Load model
+              {t("bay.load_model")}
             </button>
           )}
         </div>
@@ -191,7 +193,7 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
         <button
           className="icon-btn action bay-eject"
           style={{ position: "absolute", top: 10, right: 10, width: 24, height: 24, fontSize: 11 }}
-          title="Unload"
+          title={t("bay.unload_title")}
           disabled={unload.isPending}
           onClick={() => unload.mutate(slotKey)}
         >
@@ -210,7 +212,7 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
         <span className="mn" title={mode ?? undefined}>
           {mode}
         </span>
-        <CopyButton text={mode ?? ""} title="Copy config name" sm />
+        <CopyButton text={mode ?? ""} title={t("bay.copy_config_title")} sm />
       </div>
       {/* Operator feedback (2026-09-14): an "aka" chip requiring a hover to
           learn anything failed "clear and easy to understand" — this says
@@ -218,7 +220,7 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
           required. */}
       {aliasedAs.length > 0 && (
         <div style={{ fontSize: 10, color: "var(--text)", marginTop: -2 }}>
-          Alias: {aliasedAs.map((a) => a.name).join(", ")}
+          {t("bay.alias_prefix", { names: aliasedAs.map((a) => a.name).join(", ") })}
         </div>
       )}
       <div className="state" style={{ color: "var(--ok)", display: "flex", alignItems: "center", gap: 8 }}>
@@ -230,11 +232,11 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
         <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}>
           {active ? (
             <>
-              <SquareSnake title="actively generating" />
-              <span>active</span>
+              <SquareSnake title={t("bay.active_generating_title")} />
+              <span>{t("bay.active")}</span>
             </>
           ) : (
-            <span>● loaded · idle {formatIdle(idleDisplayS)}</span>
+            <span>{t("bay.idle", { idle: formatIdle(idleDisplayS) })}</span>
           )}
           <span className={`chip ${modeInfo?.backend === "rocm" ? "rocm" : "vulkan"}`}>{modeInfo?.backend ?? "vulkan"}</span>
         </span>
@@ -242,11 +244,11 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
       <div className="readout">
         <div className="ro">
           <div className="v">{card?.derived.memory_req_bytes != null ? formatGB(card.derived.memory_req_bytes) : formatGB(undefined)} <small>GB</small></div>
-          <div className="k">footprint</div>
+          <div className="k">{t("bay.footprint")}</div>
         </div>
         <div className="ro">
           <div className="v">{modeInfo?.context ? `${Math.round(modeInfo.context / 1024)}k` : "—"}</div>
-          <div className="k">context</div>
+          <div className="k">{t("bay.context")}</div>
         </div>
         <div className="ro ro-badges">
           {/* product/QA sprint, 2026-07-29: render the actual badges (was
@@ -261,7 +263,7 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
               ? card.badges.map((b) => <BadgeIcon key={b.id} badge={b} />)
               : "—"}
           </div>
-          <div className="k">badges</div>
+          <div className="k">{t("bay.badges")}</div>
         </div>
       </div>
     </div>

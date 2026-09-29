@@ -5,6 +5,7 @@
 // restart action with a health-poll overlay.
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { CopyButton } from "../../components/CopyButton";
 import { apiErrorMessage, api } from "../../lib/api";
 import { useSystemPreflight, useSystemRestart, useSystemSettings, useUpdateSystemSettings } from "../../lib/queries";
@@ -26,6 +27,7 @@ function PortsEditor({
   disabled: boolean;
   onChange: (ports: Record<string, number>) => void;
 }) {
+  const { t } = useTranslation("settings");
   const entries = Object.entries(ports);
   const [newKey, setNewKey] = useState("");
   const [newPort, setNewPort] = useState("");
@@ -48,8 +50,8 @@ function PortsEditor({
   return (
     <div style={{ marginTop: 10 }}>
       <div className="qrow" style={{ color: "var(--text-mute)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em" }}>
-        <span style={{ width: 200 }}>Aux port name</span>
-        <span style={{ width: 100 }}>Port</span>
+        <span style={{ width: 200 }}>{t("danger.ports_editor.name_col")}</span>
+        <span style={{ width: 100 }}>{t("danger.ports_editor.port_col")}</span>
       </div>
       {entries.map(([key, port]) => (
         <div className="qrow" key={key}>
@@ -60,41 +62,35 @@ function PortsEditor({
             onChange={(e) => setEntry(key, Number(e.target.value))}
           />
           {!disabled && (
-            <button type="button" className="btn" style={{ marginLeft: 8 }} onClick={() => removeEntry(key)}>Remove</button>
+            <button type="button" className="btn" style={{ marginLeft: 8 }} onClick={() => removeEntry(key)}>{t("danger.ports_editor.remove")}</button>
           )}
         </div>
       ))}
       {!disabled && (
         <div className="qrow">
-          <input placeholder="name" value={newKey} style={{ width: 200 }} onChange={(e) => setNewKey(e.target.value.toLowerCase())} />
-          <input type="number" min={1} max={65535} placeholder="port" value={newPort} style={{ width: 90 }} onChange={(e) => setNewPort(e.target.value)} />
-          <button type="button" className="btn" style={{ marginLeft: 8 }} onClick={addEntry} disabled={!newKey || !newPort}>Add</button>
+          <input placeholder={t("danger.ports_editor.name_placeholder")} value={newKey} style={{ width: 200 }} onChange={(e) => setNewKey(e.target.value.toLowerCase())} />
+          <input type="number" min={1} max={65535} placeholder={t("danger.ports_editor.port_placeholder")} value={newPort} style={{ width: 90 }} onChange={(e) => setNewPort(e.target.value)} />
+          <button type="button" className="btn" style={{ marginLeft: 8 }} onClick={addEntry} disabled={!newKey || !newPort}>{t("danger.ports_editor.add")}</button>
         </div>
       )}
-      {entries.length === 0 && <div className="empty-note">No auxiliary ports configured.</div>}
+      {entries.length === 0 && <div className="empty-note">{t("danger.ports_editor.no_ports")}</div>}
     </div>
   );
 }
 
 function SystemDangerZone({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useSystemSettings(canAdmin);
   const update = useUpdateSystemSettings();
   const preflight = useSystemPreflight();
 
   return (
     <DangerZone<SystemSettings>
-      title="System"
+      title={t("danger.system_title")}
       canAdmin={canAdmin}
       isError={cfg.isError}
       data={cfg.data}
-      blurb={
-        <>
-          Boot-critical: listen addresses, paths, ports, and the Tailscale hostname. Every field here needs a
-          daemon restart to take effect. Every check runs as the daemon's own user, not yours — a "permission
-          denied" on a path you can <code>ls</code> yourself usually means the daemon's uid can't reach it, not a
-          UI bug.
-        </>
-      }
+      blurb={<Trans i18nKey="danger.system_blurb" ns="settings" components={{ code: <code /> }} />}
       onCheck={(draft) =>
         preflight.mutateAsync({
           listen: draft.listen, router_listen: draft.router_listen, mcp_listen: draft.mcp_listen,
@@ -138,17 +134,17 @@ function SystemDangerZone({ canAdmin }: { canAdmin: boolean }) {
 }
 
 function RestartOverlay({ onDone }: { onDone: (ok: boolean) => void }) {
+  const { t } = useTranslation("settings");
   return (
     <div className="modal-backdrop">
       <div className="modal">
-        <h3>Restarting forge-daemon…</h3>
+        <h3>{t("danger.restart_overlay_title")}</h3>
         <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.6, marginBottom: 14 }}>
-          Waiting for the daemon to come back. This does <b>not</b> unload any loaded model — A1–A4 are separate
-          systemd units. It <b>does</b> drop every in-flight a0 request and SSE subscriber.
+          <Trans i18nKey="danger.restart_overlay_body" ns="settings" components={{ b0: <b />, b1: <b /> }} />
         </div>
         <div className="dot-busy" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--warn)", boxShadow: "0 0 7px var(--warn)", margin: "0 auto" }} />
         <div className="form-actions" style={{ marginTop: 16 }}>
-          <button className="btn" onClick={() => onDone(false)}>Give up waiting</button>
+          <button className="btn" onClick={() => onDone(false)}>{t("danger.give_up")}</button>
         </div>
       </div>
     </div>
@@ -156,6 +152,7 @@ function RestartOverlay({ onDone }: { onDone: (ok: boolean) => void }) {
 }
 
 function RestartAction({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const restart = useSystemRestart();
   const gate = useStepUpGate();
   const qc = useQueryClient();
@@ -188,7 +185,7 @@ function RestartAction({ canAdmin }: { canAdmin: boolean }) {
     }
     if (pollToken.current === token) {
       setPolling(false);
-      setError("Restart did not come back within 60s — check the daemon manually (systemctl status forge-daemon).");
+      setError(t("danger.restart_timeout_error"));
     }
   }
 
@@ -215,15 +212,13 @@ function RestartAction({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow" id="danger-restart">Restart</div>
+      <div className="eyebrow" id="danger-restart">{t("danger.restart_title")}</div>
       <div className="danger-zone">
         <div className="dz-head">
-          <span className="dz-title">Restart forge-daemon</span>
+          <span className="dz-title">{t("danger.restart_zone_title")}</span>
         </div>
         <div className="dz-blurb">
-          Applies every restart-mode change above immediately, without waiting for a natural restart. Does not
-          unload models (A1–A4 are separate units); drops in-flight a0 requests and every SSE subscriber. The
-          literal equivalent, if you'd rather run it yourself:
+          {t("danger.restart_blurb")}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
           <code style={{ fontSize: 12, background: "var(--bg-2)", padding: "6px 10px", borderRadius: 6 }}>
@@ -235,7 +230,7 @@ function RestartAction({ canAdmin }: { canAdmin: boolean }) {
         {canAdmin && (
           <div className="form-actions">
             <button className="btn primary" disabled={restart.isPending || polling} onClick={doRestart}>
-              {restart.isPending ? "Requesting…" : "Restart daemon"}
+              {restart.isPending ? t("danger.requesting") : t("danger.restart_button")}
             </button>
           </div>
         )}

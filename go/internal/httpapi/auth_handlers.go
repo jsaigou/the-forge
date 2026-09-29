@@ -34,12 +34,12 @@ import (
 func (s *Server) handleAuthStepUp(w http.ResponseWriter, r *http.Request) {
 	ident := identity(r)
 	if ident.KeyID != "" {
-		writeError(w, http.StatusBadRequest, "bearer tokens cannot step up")
+		writeErrorCode(w, http.StatusBadRequest, "session_required", nil, "bearer tokens cannot step up")
 		return
 	}
 	sess, ok := r.Context().Value(sessionKey).(store.Session)
 	if !ok || sess.ID == "" {
-		writeError(w, http.StatusForbidden, "step-up requires an active session")
+		writeErrorCode(w, http.StatusForbidden, "session_required", nil, "step-up requires an active session")
 		return
 	}
 
@@ -49,7 +49,7 @@ func (s *Server) handleAuthStepUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b.Factor == "" {
-		writeValidationError(w, map[string]string{"factor": "is required"})
+		writeValidationErrorCodes(w, map[string]string{"factor": "is required"}, map[string]string{"factor": "required"})
 		return
 	}
 
@@ -57,11 +57,11 @@ func (s *Server) handleAuthStepUp(w http.ResponseWriter, r *http.Request) {
 	switch authz.Assurance(b.Factor) {
 	case authz.AssurancePassword:
 		if s.deps.StepUpVerifier == nil {
-			writeError(w, http.StatusServiceUnavailable, "step-up not available")
+			writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "step-up"}, "step-up not available")
 			return
 		}
 		if b.Password == "" {
-			writeValidationError(w, map[string]string{"password": "is required for password factor"})
+			writeValidationErrorCodes(w, map[string]string{"password": "is required for password factor"}, map[string]string{"password": "required_password"})
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -73,11 +73,11 @@ func (s *Server) handleAuthStepUp(w http.ResponseWriter, r *http.Request) {
 		newAssurance = authz.AssurancePassword
 	case authz.AssuranceTOTP:
 		if s.deps.TOTPStore == nil {
-			writeError(w, http.StatusServiceUnavailable, "TOTP not available")
+			writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "TOTP"}, "TOTP not available")
 			return
 		}
 		if b.Code == "" {
-			writeValidationError(w, map[string]string{"code": "is required for totp factor"})
+			writeValidationErrorCodes(w, map[string]string{"code": "is required for totp factor"}, map[string]string{"code": "required_totp"})
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -102,11 +102,11 @@ func (s *Server) handleAuthStepUp(w http.ResponseWriter, r *http.Request) {
 		// It elevates to L1 (password level) so the user can access
 		// Settings to re-enroll TOTP/passkeys after losing a device.
 		if s.deps.RecoveryService == nil {
-			writeError(w, http.StatusServiceUnavailable, "recovery codes not available")
+			writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "recovery codes"}, "recovery codes not available")
 			return
 		}
 		if b.Code == "" {
-			writeValidationError(w, map[string]string{"code": "is required for recovery_code factor"})
+			writeValidationErrorCodes(w, map[string]string{"code": "is required for recovery_code factor"}, map[string]string{"code": "required_recovery_code"})
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -117,26 +117,26 @@ func (s *Server) handleAuthStepUp(w http.ResponseWriter, r *http.Request) {
 		}
 		newAssurance = authz.AssurancePassword
 	default:
-		writeValidationError(w, map[string]string{"factor": "must be one of: password, totp, recovery_code"})
+		writeValidationErrorCodes(w, map[string]string{"factor": "must be one of: password, totp, recovery_code"}, map[string]string{"factor": "must_be_one_of"})
 		return
 	}
 
 	// Rotate session ID + CSRF token (§8: session fixation prevention).
 	newSID, err := authz.RandomToken(32)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "session rotation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "session rotation failed")
 		return
 	}
 	newCSRF, err := authz.RandomToken(32)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "session rotation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "session rotation failed")
 		return
 	}
 	now := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	if err := s.deps.Sessions.ElevateSession(ctx, sess.ID, newSID, newCSRF, string(newAssurance), now); err != nil {
-		writeError(w, http.StatusInternalServerError, "session elevation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "session elevation failed")
 		return
 	}
 	// Set the new cookie so the browser uses the rotated session ID.
@@ -168,12 +168,12 @@ const challengeCookieName = "forge_wa_challenge"
 // challenge cookie.
 func (s *Server) handleWebAuthnRegisterBegin(w http.ResponseWriter, r *http.Request) {
 	if s.deps.WebAuthnService == nil {
-		writeError(w, http.StatusServiceUnavailable, "WebAuthn not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "WebAuthn"}, "WebAuthn not available")
 		return
 	}
 	sess, ok := r.Context().Value(sessionKey).(store.Session)
 	if !ok || sess.ID == "" {
-		writeError(w, http.StatusForbidden, "WebAuthn enrollment requires an active session")
+		writeErrorCode(w, http.StatusForbidden, "session_required", nil, "WebAuthn enrollment requires an active session")
 		return
 	}
 	ident := identity(r)
@@ -209,12 +209,12 @@ func (s *Server) handleWebAuthnRegisterBegin(w http.ResponseWriter, r *http.Requ
 // webauthnFinishRegisterResponse{ credential }.
 func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Request) {
 	if s.deps.WebAuthnService == nil {
-		writeError(w, http.StatusServiceUnavailable, "WebAuthn not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "WebAuthn"}, "WebAuthn not available")
 		return
 	}
 	sess, ok := r.Context().Value(sessionKey).(store.Session)
 	if !ok || sess.ID == "" {
-		writeError(w, http.StatusForbidden, "WebAuthn enrollment requires an active session")
+		writeErrorCode(w, http.StatusForbidden, "session_required", nil, "WebAuthn enrollment requires an active session")
 		return
 	}
 	ident := identity(r)
@@ -231,7 +231,7 @@ func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Req
 	// Re-encode the response body for the WebAuthn library to parse.
 	body, err := json.Marshal(b.Response)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "marshal failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "marshal failed")
 		return
 	}
 	wa, err := s.webAuthnInstance(r)
@@ -267,12 +267,12 @@ func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Req
 // Begins an assertion ceremony for step-up to passkey (L2).
 func (s *Server) handleWebAuthnAssertBegin(w http.ResponseWriter, r *http.Request) {
 	if s.deps.WebAuthnService == nil {
-		writeError(w, http.StatusServiceUnavailable, "WebAuthn not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "WebAuthn"}, "WebAuthn not available")
 		return
 	}
 	sess, ok := r.Context().Value(sessionKey).(store.Session)
 	if !ok || sess.ID == "" {
-		writeError(w, http.StatusForbidden, "WebAuthn assertion requires an active session")
+		writeErrorCode(w, http.StatusForbidden, "session_required", nil, "WebAuthn assertion requires an active session")
 		return
 	}
 	ident := identity(r)
@@ -308,12 +308,12 @@ func (s *Server) handleWebAuthnAssertBegin(w http.ResponseWriter, r *http.Reques
 // session to passkey (L2) assurance.
 func (s *Server) handleWebAuthnAssertFinish(w http.ResponseWriter, r *http.Request) {
 	if s.deps.WebAuthnService == nil {
-		writeError(w, http.StatusServiceUnavailable, "WebAuthn not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "WebAuthn"}, "WebAuthn not available")
 		return
 	}
 	sess, ok := r.Context().Value(sessionKey).(store.Session)
 	if !ok || sess.ID == "" {
-		writeError(w, http.StatusForbidden, "WebAuthn assertion requires an active session")
+		writeErrorCode(w, http.StatusForbidden, "session_required", nil, "WebAuthn assertion requires an active session")
 		return
 	}
 	ident := identity(r)
@@ -329,7 +329,7 @@ func (s *Server) handleWebAuthnAssertFinish(w http.ResponseWriter, r *http.Reque
 	}
 	body, err := json.Marshal(b.Response)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "marshal failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "marshal failed")
 		return
 	}
 	wa, err := s.webAuthnInstance(r)
@@ -353,19 +353,19 @@ func (s *Server) handleWebAuthnAssertFinish(w http.ResponseWriter, r *http.Reque
 	// Elevate the session to passkey (L2).
 	newSID, err := authz.RandomToken(32)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "session rotation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "session rotation failed")
 		return
 	}
 	newCSRF, err := authz.RandomToken(32)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "session rotation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "session rotation failed")
 		return
 	}
 	now := time.Now()
 	elevCtx, elevCancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer elevCancel()
 	if err := s.deps.Sessions.ElevateSession(elevCtx, sess.ID, newSID, newCSRF, string(authz.AssurancePasskey), now); err != nil {
-		writeError(w, http.StatusInternalServerError, "session elevation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "session elevation failed")
 		return
 	}
 	elevatedSess := sess
@@ -386,19 +386,19 @@ func (s *Server) handleWebAuthnAssertFinish(w http.ResponseWriter, r *http.Reque
 // Frozen shape: webauthnCredentialsResponse{ credentials: [...] }.
 func (s *Server) handleWebAuthnCredentialsList(w http.ResponseWriter, r *http.Request) {
 	if s.deps.WebAuthnService == nil {
-		writeError(w, http.StatusServiceUnavailable, "WebAuthn not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "WebAuthn"}, "WebAuthn not available")
 		return
 	}
 	sess, ok := r.Context().Value(sessionKey).(store.Session)
 	if !ok || sess.ID == "" {
-		writeError(w, http.StatusForbidden, "WebAuthn credential list requires an active session")
+		writeErrorCode(w, http.StatusForbidden, "session_required", nil, "WebAuthn credential list requires an active session")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	creds, err := s.deps.WebAuthnService.ListCredentials(ctx, sess.UserID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "credential list failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "credential list failed")
 		return
 	}
 	resp := webauthnCredentialsResponse{Credentials: []webauthnCredentialJSON{}}
@@ -411,12 +411,12 @@ func (s *Server) handleWebAuthnCredentialsList(w http.ResponseWriter, r *http.Re
 // handleWebAuthnCredentialDelete — DELETE /api/v1/auth/webauthn/credentials/{id}.
 func (s *Server) handleWebAuthnCredentialDelete(w http.ResponseWriter, r *http.Request) {
 	if s.deps.WebAuthnService == nil {
-		writeError(w, http.StatusServiceUnavailable, "WebAuthn not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "WebAuthn"}, "WebAuthn not available")
 		return
 	}
 	sess, ok := r.Context().Value(sessionKey).(store.Session)
 	if !ok || sess.ID == "" {
-		writeError(w, http.StatusForbidden, "WebAuthn credential delete requires an active session")
+		writeErrorCode(w, http.StatusForbidden, "session_required", nil, "WebAuthn credential delete requires an active session")
 		return
 	}
 	credID := r.PathValue("id")
@@ -429,22 +429,22 @@ func (s *Server) handleWebAuthnCredentialDelete(w http.ResponseWriter, r *http.R
 	cred, err := s.deps.WebAuthnService.GetCredential(ctx, credID)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "credential not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "credential"}, "credential not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "credential lookup failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "credential lookup failed")
 		return
 	}
 	if cred.UserID != sess.UserID && identity(r).Role != authz.RoleAdmin {
-		writeError(w, http.StatusNotFound, "credential not found")
+		writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "credential"}, "credential not found")
 		return
 	}
 	if err := s.deps.WebAuthnService.DeleteCredential(ctx, credID); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "credential not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "credential"}, "credential not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "credential delete failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "credential delete failed")
 		return
 	}
 	s.audit(r, identity(r).Name, "webauthn_credential_delete", credID, "")
@@ -459,17 +459,17 @@ func (s *Server) handleWebAuthnCredentialDelete(w http.ResponseWriter, r *http.R
 // secret is NOT active until confirmed via /totp/confirm with a valid code.
 func (s *Server) handleTOTPEnroll(w http.ResponseWriter, r *http.Request) {
 	if s.deps.TOTPStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "TOTP not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "TOTP"}, "TOTP not available")
 		return
 	}
 	sess, ok := r.Context().Value(sessionKey).(store.Session)
 	if !ok || sess.ID == "" {
-		writeError(w, http.StatusForbidden, "TOTP enrollment requires an active session")
+		writeErrorCode(w, http.StatusForbidden, "session_required", nil, "TOTP enrollment requires an active session")
 		return
 	}
 	secret, err := authz.GenerateTOTPSecret()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "TOTP secret generation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "TOTP secret generation failed")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -480,7 +480,7 @@ func (s *Server) handleTOTPEnroll(w http.ResponseWriter, r *http.Request) {
 		Confirmed: false,
 		CreatedAt: time.Now(),
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "TOTP save failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "TOTP save failed")
 		return
 	}
 	issuer := "Forge"
@@ -497,12 +497,12 @@ func (s *Server) handleTOTPEnroll(w http.ResponseWriter, r *http.Request) {
 // authenticator app.
 func (s *Server) handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 	if s.deps.TOTPStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "TOTP not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "TOTP"}, "TOTP not available")
 		return
 	}
 	sess, ok := r.Context().Value(sessionKey).(store.Session)
 	if !ok || sess.ID == "" {
-		writeError(w, http.StatusForbidden, "TOTP confirmation requires an active session")
+		writeErrorCode(w, http.StatusForbidden, "session_required", nil, "TOTP confirmation requires an active session")
 		return
 	}
 	var b totpConfirmRequest
@@ -511,7 +511,7 @@ func (s *Server) handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b.Code == "" {
-		writeValidationError(w, map[string]string{"code": "is required"})
+		writeValidationErrorCodes(w, map[string]string{"code": "is required"}, map[string]string{"code": "required"})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -526,7 +526,7 @@ func (s *Server) handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.deps.TOTPStore.Confirm(ctx, sess.UserID); err != nil {
-		writeError(w, http.StatusInternalServerError, "TOTP confirmation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "TOTP confirmation failed")
 		return
 	}
 	s.audit(r, identity(r).Name, "totp_confirm", "", "")
@@ -537,12 +537,12 @@ func (s *Server) handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 // Removes the user's TOTP secret (un-enrolls 2FA).
 func (s *Server) handleTOTPDelete(w http.ResponseWriter, r *http.Request) {
 	if s.deps.TOTPStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "TOTP not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "TOTP"}, "TOTP not available")
 		return
 	}
 	sess, ok := r.Context().Value(sessionKey).(store.Session)
 	if !ok || sess.ID == "" {
-		writeError(w, http.StatusForbidden, "TOTP removal requires an active session")
+		writeErrorCode(w, http.StatusForbidden, "session_required", nil, "TOTP removal requires an active session")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -552,7 +552,7 @@ func (s *Server) handleTOTPDelete(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "no TOTP enrolled")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "TOTP removal failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "TOTP removal failed")
 		return
 	}
 	s.audit(r, identity(r).Name, "totp_delete", "", "")
@@ -566,7 +566,7 @@ func (s *Server) handleTOTPDelete(w http.ResponseWriter, r *http.Request) {
 // Admins see all links; non-admins see only their own.
 func (s *Server) handleIdentityLinksList(w http.ResponseWriter, r *http.Request) {
 	if s.deps.IdentityLinks == nil {
-		writeError(w, http.StatusServiceUnavailable, "identity links not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "identity links"}, "identity links not available")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -585,7 +585,7 @@ func (s *Server) handleIdentityLinksList(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "identity links query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "identity links query failed")
 		return
 	}
 	resp := identityLinksResponse{Links: []identityLinkResponse{}}
@@ -605,7 +605,7 @@ func (s *Server) handleIdentityLinksList(w http.ResponseWriter, r *http.Request)
 // identityLinkResponse.
 func (s *Server) handleIdentityLinkCreate(w http.ResponseWriter, r *http.Request) {
 	if s.deps.IdentityLinks == nil {
-		writeError(w, http.StatusServiceUnavailable, "identity links not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "identity links"}, "identity links not available")
 		return
 	}
 	var b identityLinkCreateRequest
@@ -615,16 +615,20 @@ func (s *Server) handleIdentityLinkCreate(w http.ResponseWriter, r *http.Request
 	}
 	if b.Provider == "" || b.Principal == "" || b.UserID == 0 {
 		fields := map[string]string{}
+		codes := map[string]string{}
 		if b.Provider == "" {
 			fields["provider"] = "is required"
+			codes["provider"] = "required"
 		}
 		if b.Principal == "" {
 			fields["principal"] = "is required"
+			codes["principal"] = "required"
 		}
 		if b.UserID == 0 {
 			fields["user_id"] = "is required"
+			codes["user_id"] = "required"
 		}
-		writeValidationError(w, fields)
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -636,7 +640,7 @@ func (s *Server) handleIdentityLinkCreate(w http.ResponseWriter, r *http.Request
 		CreatedAt: time.Now(),
 	}
 	if err := s.deps.IdentityLinks.Create(ctx, link); err != nil {
-		writeError(w, http.StatusInternalServerError, "identity link create failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "identity link create failed")
 		return
 	}
 	s.audit(r, identity(r).Name, "identity_link_create", b.Provider+":"+b.Principal, "")
@@ -651,7 +655,7 @@ func (s *Server) handleIdentityLinkCreate(w http.ResponseWriter, r *http.Request
 // handleIdentityLinkDelete — DELETE /api/v1/auth/identity-links/{provider}/{principal}.
 func (s *Server) handleIdentityLinkDelete(w http.ResponseWriter, r *http.Request) {
 	if s.deps.IdentityLinks == nil {
-		writeError(w, http.StatusServiceUnavailable, "identity links not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "identity links"}, "identity links not available")
 		return
 	}
 	provider := r.PathValue("provider")
@@ -664,10 +668,10 @@ func (s *Server) handleIdentityLinkDelete(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	if err := s.deps.IdentityLinks.Delete(ctx, provider, principal); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "identity link not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "identity link"}, "identity link not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "identity link delete failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "identity link delete failed")
 		return
 	}
 	s.audit(r, identity(r).Name, "identity_link_delete", provider+":"+principal, "")
@@ -680,7 +684,7 @@ func (s *Server) handleIdentityLinkDelete(w http.ResponseWriter, r *http.Request
 // Frozen shape: apiKeysResponse{ keys: apiKeyResponse[] } (masked; no secret).
 func (s *Server) handleKeysList(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Keys == nil {
-		writeError(w, http.StatusServiceUnavailable, "keys store not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "keys store"}, "keys store not available")
 		return
 	}
 	kind := r.URL.Query().Get("kind")
@@ -689,14 +693,14 @@ func (s *Server) handleKeysList(w http.ResponseWriter, r *http.Request) {
 		kind = "forge"
 	}
 	if kind != "" && kind != "forge" && kind != "router" && kind != "mcp" {
-		writeValidationError(w, map[string]string{"kind": "must be one of: forge, router, mcp"})
+		writeValidationErrorCodes(w, map[string]string{"kind": "must be one of: forge, router, mcp"}, map[string]string{"kind": "must_be_one_of"})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	keys, err := s.deps.Keys.List(ctx, kind)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "keys query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "keys query failed")
 		return
 	}
 	resp := apiKeysResponse{Keys: []apiKeyResponse{}}
@@ -711,7 +715,7 @@ func (s *Server) handleKeysList(w http.ResponseWriter, r *http.Request) {
 // apiKeyCreateResponse{ token, key }.
 func (s *Server) handleKeyCreate(w http.ResponseWriter, r *http.Request) {
 	if s.deps.KeyManager == nil {
-		writeError(w, http.StatusServiceUnavailable, "key manager not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "key manager"}, "key manager not available")
 		return
 	}
 	var b apiKeyCreateRequest
@@ -725,20 +729,24 @@ func (s *Server) handleKeyCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if b.Kind == "" || b.Name == "" {
 		fields := map[string]string{}
+		codes := map[string]string{}
 		if b.Kind == "" {
 			fields["kind"] = "is required"
+			codes["kind"] = "required"
 		} else if b.Kind != "forge" && b.Kind != "router" && b.Kind != "mcp" {
 			fields["kind"] = "must be one of: forge, router, mcp"
+			codes["kind"] = "must_be_one_of"
 		}
 		if b.Name == "" {
 			fields["name"] = "is required"
+			codes["name"] = "required"
 		}
-		writeValidationError(w, fields)
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	role := authz.Role(b.Role)
 	if b.Kind == "forge" && role == "" {
-		writeValidationError(w, map[string]string{"role": "is required for forge keys"})
+		writeValidationErrorCodes(w, map[string]string{"role": "is required for forge keys"}, map[string]string{"role": "required_forge_keys"})
 		return
 	}
 
@@ -763,7 +771,7 @@ func (s *Server) handleKeyCreate(w http.ResponseWriter, r *http.Request) {
 	if !isSelfRotation {
 		allowed, decision, err := s.evaluateAssurance(r.Context(), ident, authz.ResourceAreaSettingsSecurity)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "policy load failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "policy load failed")
 			return
 		}
 		if !allowed {
@@ -777,7 +785,7 @@ func (s *Server) handleKeyCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if b.TTLSeconds < 0 {
-		writeValidationError(w, map[string]string{"ttl_seconds": "must be >= 0"})
+		writeValidationErrorCodes(w, map[string]string{"ttl_seconds": "must be >= 0"}, map[string]string{"ttl_seconds": "must_be_non_negative_integer"})
 		return
 	}
 	var boundIP string
@@ -798,7 +806,7 @@ func (s *Server) handleKeyCreate(w http.ResponseWriter, r *http.Request) {
 	// Fetch the created key row for the response (without the secret).
 	keys, err := s.deps.Keys.List(ctx, b.Kind)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "key list failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "key list failed")
 		return
 	}
 	var keyRow store.APIKey
@@ -818,7 +826,7 @@ func (s *Server) handleKeyCreate(w http.ResponseWriter, r *http.Request) {
 // handleKeyRevoke — DELETE /api/v1/keys/{keyid}.
 func (s *Server) handleKeyRevoke(w http.ResponseWriter, r *http.Request) {
 	if s.deps.KeyManager == nil {
-		writeError(w, http.StatusServiceUnavailable, "key manager not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "key manager"}, "key manager not available")
 		return
 	}
 	keyid := r.PathValue("keyid")
@@ -830,10 +838,10 @@ func (s *Server) handleKeyRevoke(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if err := s.deps.KeyManager.RevokeKey(ctx, keyid); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "key not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "key"}, "key not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "key revoke failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "key revoke failed")
 		return
 	}
 	s.audit(r, identity(r).Name, "key_revoke", keyid, "")
@@ -846,14 +854,14 @@ func (s *Server) handleKeyRevoke(w http.ResponseWriter, r *http.Request) {
 // Frozen shape: authPolicyResponse{ policy: { resourceKey: factor } }.
 func (s *Server) handleAuthPolicyGet(w http.ResponseWriter, r *http.Request) {
 	if s.deps.PolicyStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "policy store not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "policy store"}, "policy store not available")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	policy, err := s.deps.PolicyStore.Load(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "policy load failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "policy load failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, authPolicyResponse{Policy: policy})
@@ -863,7 +871,7 @@ func (s *Server) handleAuthPolicyGet(w http.ResponseWriter, r *http.Request) {
 // Frozen shape: authPolicyPutRequest{ policy } → authPolicyResponse{ policy }.
 func (s *Server) handleAuthPolicyPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.PolicyStore == nil {
-		writeError(w, http.StatusServiceUnavailable, "policy store not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "policy store"}, "policy store not available")
 		return
 	}
 	var b authPolicyPutRequest
@@ -872,7 +880,7 @@ func (s *Server) handleAuthPolicyPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b.Policy == nil {
-		writeValidationError(w, map[string]string{"policy": "is required"})
+		writeValidationErrorCodes(w, map[string]string{"policy": "is required"}, map[string]string{"policy": "required"})
 		return
 	}
 	if invalid := authz.ValidatePolicy(b.Policy); len(invalid) > 0 {
@@ -882,7 +890,7 @@ func (s *Server) handleAuthPolicyPut(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	if err := s.deps.PolicyStore.Save(ctx, b.Policy); err != nil {
-		writeError(w, http.StatusInternalServerError, "policy save failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "policy save failed")
 		return
 	}
 	s.audit(r, identity(r).Name, "policy_update", "", "")
@@ -966,7 +974,7 @@ func (s *Server) handleAuthConfigGet(w http.ResponseWriter, r *http.Request) {
 // Frozen shape: authConfigPutRequest → authConfigResponse.
 func (s *Server) handleAuthConfigPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "settings store"}, "settings store not available")
 		return
 	}
 	var b authConfigPutRequest
@@ -975,7 +983,7 @@ func (s *Server) handleAuthConfigPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b.NetworkProvider != "" && b.NetworkProvider != "tailscale" && b.NetworkProvider != "forward_auth_header" && b.NetworkProvider != "none" {
-		writeValidationError(w, map[string]string{"network_provider": "must be one of: tailscale, forward_auth_header, none"})
+		writeValidationErrorCodes(w, map[string]string{"network_provider": "must be one of: tailscale, forward_auth_header, none"}, map[string]string{"network_provider": "must_be_one_of"})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -1052,7 +1060,7 @@ func (s *Server) handleAuthConfigPut(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if valid != wantValid {
-			writeValidationError(w, map[string]string{"trusted_cidrs": "every comma-separated entry must be a valid CIDR (e.g. 10.0.0.0/8)"})
+			writeValidationErrorCodes(w, map[string]string{"trusted_cidrs": "every comma-separated entry must be a valid CIDR (e.g. 10.0.0.0/8)"}, map[string]string{"trusted_cidrs": "invalid_cidr"})
 			return
 		}
 		// Sprint 12 (was H) Phase 3: the deeper check — does the SAVING
@@ -1095,24 +1103,24 @@ func (s *Server) handleAuthConfigPut(w http.ResponseWriter, r *http.Request) {
 // Returns whether the user has recovery codes and how many are unused.
 func (s *Server) handleRecoveryCodesStatus(w http.ResponseWriter, r *http.Request) {
 	if s.deps.RecoveryService == nil {
-		writeError(w, http.StatusServiceUnavailable, "recovery codes not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "recovery codes"}, "recovery codes not available")
 		return
 	}
 	sess, ok := r.Context().Value(sessionKey).(store.Session)
 	if !ok || sess.ID == "" {
-		writeError(w, http.StatusForbidden, "recovery codes require an active session")
+		writeErrorCode(w, http.StatusForbidden, "session_required", nil, "recovery codes require an active session")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	codes, err := s.deps.RecoveryService.CountUnused(ctx, sess.UserID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "recovery codes query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "recovery codes query failed")
 		return
 	}
 	has, err := s.deps.RecoveryService.HasRecoveryCodes(ctx, sess.UserID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "recovery codes query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "recovery codes query failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, recoveryCodesStatusResponse{
@@ -1127,12 +1135,12 @@ func (s *Server) handleRecoveryCodesStatus(w http.ResponseWriter, r *http.Reques
 // exactly once. Existing codes are replaced.
 func (s *Server) handleRecoveryCodesGenerate(w http.ResponseWriter, r *http.Request) {
 	if s.deps.RecoveryService == nil {
-		writeError(w, http.StatusServiceUnavailable, "recovery codes not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "recovery codes"}, "recovery codes not available")
 		return
 	}
 	sess, ok := r.Context().Value(sessionKey).(store.Session)
 	if !ok || sess.ID == "" {
-		writeError(w, http.StatusForbidden, "recovery codes require an active session")
+		writeErrorCode(w, http.StatusForbidden, "session_required", nil, "recovery codes require an active session")
 		return
 	}
 	// 5s is a generous safety net: generation now hashes each code with
@@ -1142,7 +1150,7 @@ func (s *Server) handleRecoveryCodesGenerate(w http.ResponseWriter, r *http.Requ
 	defer cancel()
 	codes, err := s.deps.RecoveryService.GenerateCodes(ctx, sess.UserID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "recovery code generation failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "recovery code generation failed")
 		return
 	}
 	s.audit(r, identity(r).Name, "recovery_codes_generate", "", "")

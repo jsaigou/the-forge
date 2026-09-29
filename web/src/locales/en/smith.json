@@ -1,0 +1,114 @@
+{
+  "checks": {
+    "gtt_ceiling": {
+      "crit": "GTT at {{pct}}% of ceiling (≥{{threshold}}% crit)",
+      "warn": "GTT at {{pct}}% of ceiling (≥{{threshold}}% warn)",
+      "ok": "GTT at {{pct}}% of ceiling"
+    },
+    "disk_space": {
+      "crit": "disk {{pct}}% used (≥{{threshold}}% crit)",
+      "warn": "disk {{pct}}% used (≥{{threshold}}% warn)",
+      "ok": "disk {{pct}}% used"
+    },
+    "slot_agreement": {
+      "mismatch": "{{count}} slot(s) disagree between unit state and scheduler",
+      "ok": "all {{count}} slot(s) agree between unit state and scheduler"
+    },
+    "capability_tier_coverage": {
+      "ok": "every visible config carries a capability tier",
+      "gap": "{{count}} visible config(s) have no capability tier: {{names}}"
+    },
+    "n_ctx_actual": {
+      "reduced": "slot {{slot}} ({{mode}}): actual n_ctx {{actual}} < configured {{configured}} — kernel silently reduced the context",
+      "reduced_more": "slot {{slot}} ({{mode}}): actual n_ctx {{actual}} < configured {{configured}} — kernel silently reduced the context (+{{extra}} more)",
+      "ok": "actual n_ctx matches configured on {{count}} loaded slot(s)"
+    },
+    "gpu_hang": {
+      "active": "{{count}} GPU hang indicator(s) active",
+      "ok": "no GPU hang indicators"
+    },
+    "gpu_device_lost": {
+      "detected": "{{count}} device-lost signature(s) in journals (last {{minutes}}m)",
+      "ok": "no GPU device-lost signatures in journals (last {{minutes}}m)"
+    },
+    "always_on_ports": {
+      "down": "service \"{{name}}\" not listening on port {{port}}",
+      "down_more": "service \"{{name}}\" not listening on port {{port}} (+{{extra}} more)",
+      "ok": "all {{count}} always-on service port(s) listening"
+    },
+    "forge_self": {
+      "quick_check_failed": "DB integrity: PRAGMA quick_check reported {{detail}}",
+      "fk_unavailable": "DB integrity ok (foreign_key_check unavailable)",
+      "fk_violations": "DB integrity ok; {{count}} known foreign-key violation(s) surfaced (not auto-fixed)",
+      "ok": "DB integrity ok (quick_check + foreign_key_check clean)"
+    },
+    "a0_reachability": {
+      "bad_status": "a0 healthz returned HTTP {{status}}",
+      "ok": "a0 healthy on port {{port}} ({{latency_ms}}ms)"
+    },
+    "compressor_reachability": {
+      "none": "no compressor proxies registered",
+      "unhealthy": "{{down}} of {{total}} compressor prox(ies) unhealthy — remote routing may black-hole",
+      "ok": "all {{count}} compressor prox(ies) healthy"
+    },
+    "compressor_health": {
+      "none": "no compressor proxies registered",
+      "growth": "{{warn}} of {{total}} compressor(s) show leak-shaped growth or restart churn over {{hours}}h",
+      "ok": "all {{count}} compressor(s) resource-healthy over {{hours}}h"
+    },
+    "compressor_failopen": {
+      "exceeded": "{{warn}} of {{total}} compressor(s) exceed {{threshold}}% fail-open rate over 1h",
+      "no_traffic": "no compressor proxies with traffic in the last hour",
+      "ok": "all {{count}} compressor(s) below {{threshold}}% fail-open rate over 1h"
+    },
+    "brain_resolvable": {
+      "unset": "smith.model is unset — brain unresolvable",
+      "empty": "smith.model is empty — brain unresolvable",
+      "local": "brain resolves to local config {{model}}",
+      "not_loaded": "configured brain {{model}} is not currently loaded on any slot",
+      "remote": "brain resolves to remote offering via {{provider}}",
+      "unresolved": "smith.model {{model}} resolves to no local config or enabled offering"
+    },
+    "kernel_params": {
+      "missing": "kernel boot params missing: {{params}} (GPU eviction mitigations not applied)",
+      "ok": "kernel boot params carry the amdgpu mitigations"
+    },
+    "binary_versions": {
+      "no_tracked": "no tracked binaries configured (smith.binaries.tracked is empty)",
+      "nightly_unrecorded": "{{count}} nightly-tracked fork(s) have no recorded upstream build sha yet: {{names}}",
+      "ok": "{{count}} tracked binaries checked; source tree matches (or is unmeasurable against) the installed build for all"
+    },
+    "blocked_work_recheck": {
+      "none_open": "no open externally-blocked items with a where-to-check URL",
+      "possibly_unblocked": "{{unblocked_count}} of {{open_count}} open blocked item(s) may have unblocked — verify manually",
+      "no_change": "{{open_count}} open blocked item(s); {{checked_count}} rechecked ({{fetch_count}} network fetch(es)); no change detected"
+    },
+    "comfyui_health": {
+      "unreachable": "ComfyUI unreachable — {{reason}} (pruning/GTT checks unavailable until it's running)",
+      "healthy": "ComfyUI reachable"
+    },
+    "comfyui_prune": {
+      "no_roots": "no comfyui model roots configured (smith.comfyui.model_roots is empty)",
+      "unbuildable": "dependency map unbuildable ({{reason}}): {{detail}} — no deletion proposal is possible until this clears",
+      "clean": "dependency map built ({{referenced_count}} referenced, {{inventory_count}} inventoried); nothing unreferenced",
+      "candidates_found": "{{count}} unreferenced ComfyUI model file(s) found ({{gb}} GB reclaimable) — review before approving; see guidance"
+    },
+    "binary_paths": {
+      "missing": "{{missing_count}} of {{total_count}} tracked binary path(s) missing or not executable: {{names}}",
+      "ok": "{{count}} binary path(s) checked, all present and executable"
+    },
+    "slot_model_identity": {
+      "ok": "engine-configured alias matches the actually-running process on {{count}} loaded slot(s)"
+    },
+    "tailscale_peers": {
+      "not_configured": "no watched tailscale peers configured (smith.tailscale.watch_peers is empty)",
+      "unreachable": "could not reach tailscaled's LocalAPI to check peer status",
+      "offline": "{{offline_count}} of {{watch_count}} watched tailscale peer(s) offline or unreachable: {{names}}",
+      "online": "all {{count}} watched tailscale peer(s) online"
+    }
+  },
+  "status": {
+    "loading_brain": "loading brain model {{model}}… — first load typically takes 20–90s",
+    "brain_ready": "brain ready — thinking"
+  }
+}

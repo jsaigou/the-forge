@@ -1,0 +1,60 @@
+{
+  "provider": {
+    "source": "ソース: {{source}}",
+    "no_api": "APIなし",
+    "balance": "残高",
+    "balance_as_of": "残高 · {{when}} 時点",
+    "spend_period": "利用額 · {{period}}",
+    "spend_period_fallback": "期間内利用額",
+    "disabled": "無効",
+    "stop_routing_title": "このプロバイダーへのルーティングを停止(キーとオファリングは保持されます)",
+    "resume_routing_title": "このプロバイダーへのルーティングを再開",
+    "billing_page_title": "{{name}} の請求ページを開く"
+  },
+  "resource_bar": {
+    "vram": "VRAM"
+  },
+  "alerts": {
+    "ask_smith_title": "{{code}} について smith に質問",
+    "investigate": "調査する →"
+  },
+  "bays": {
+    "loading_status": "スロットの状態を読み込み中…"
+  },
+  "gallery": {
+    "title": "コンフィグを選択",
+    "sort_alpha": "A–Z",
+    "sort_most_used": "利用頻度順",
+    "sort_newest": "新着順",
+    "loading": "コンフィグカタログを読み込み中…"
+  },
+  "bay": {
+    "unload_stage_stopping": "サービスを停止中…",
+    "unload_stage_draining": "GTTメモリの解放を待機中…",
+    "unload_stage_slow": "解放処理が継続中です — 大きなモデルは数分かかることがあります…",
+    "loading_mode": "{{mode}} を読み込み中…",
+    "unloading_mode": "{{mode}} を解放中…",
+    "reserved_active": "予約済み · 実行中",
+    "reserved": "予約済み",
+    "bay_free": "空きスロット",
+    "load_model": "+ モデルを読み込み",
+    "unload_title": "解放",
+    "copy_config_title": "コンフィグ名をコピー",
+    "alias_prefix": "エイリアス: {{names}}",
+    "idle": "● 読み込み済み · アイドル {{idle}}",
+    "active_generating_title": "生成中",
+    "active": "実行中",
+    "footprint": "使用量",
+    "context": "コンテキスト",
+    "badges": "バッジ"
+  },
+  "services": {
+    "loading": "サービスを読み込み中…",
+    "start": "開始",
+    "stop": "停止",
+    "open_in_new_window_title": "{{name}} を新しいウィンドウで開く",
+    "compressor": "圧縮",
+    "passthrough": "バイパス中",
+    "passthrough_title": "圧縮がバイパスされています — 未圧縮のままリクエストが送信されます"
+  }
+}

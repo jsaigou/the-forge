@@ -1,0 +1,11 @@
+{
+  "tabs": {
+    "console": "コンソール",
+    "dashboard": "ダッシュボード",
+    "models": "モデル",
+    "scheduling": "スケジューリング",
+    "settings": "設定",
+    "help": "ヘルプ",
+    "attributions": "クレジット"
+  }
+}

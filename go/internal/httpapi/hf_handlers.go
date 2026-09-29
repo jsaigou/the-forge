@@ -35,7 +35,7 @@ func intQueryParam(r *http.Request, name string, def int) int {
 
 func (s *Server) hfOK(w http.ResponseWriter) bool {
 	if s.deps.HFDownload == nil {
-		writeError(w, http.StatusServiceUnavailable, "hf model acquisition not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "hf model acquisition"}, "hf model acquisition not wired")
 		return false
 	}
 	return true
@@ -69,12 +69,12 @@ type hfSearchResponse struct {
 // handleHFSearch — GET /api/v1/hf/search?q=&limit=
 func (s *Server) handleHFSearch(w http.ResponseWriter, r *http.Request) {
 	if s.deps.HFClient == nil {
-		writeError(w, http.StatusServiceUnavailable, "hf client not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "hf client"}, "hf client not wired")
 		return
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
-		writeValidationError(w, map[string]string{"q": "required"})
+		writeValidationErrorCodes(w, map[string]string{"q": "required"}, map[string]string{"q": "required"})
 		return
 	}
 	ctx, cancel := hfCtx(r)
@@ -107,12 +107,12 @@ type hfTreeResponse struct {
 // over that endpoint's root-of-main-only listing.
 func (s *Server) handleHFTree(w http.ResponseWriter, r *http.Request) {
 	if s.deps.HFClient == nil {
-		writeError(w, http.StatusServiceUnavailable, "hf client not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "hf client"}, "hf client not wired")
 		return
 	}
 	repo := strings.TrimSpace(r.URL.Query().Get("repo"))
 	if repo == "" {
-		writeValidationError(w, map[string]string{"repo": "required"})
+		writeValidationErrorCodes(w, map[string]string{"repo": "required"}, map[string]string{"repo": "required"})
 		return
 	}
 	revision := r.URL.Query().Get("revision")
@@ -152,7 +152,7 @@ func (s *Server) handleHFPreflight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b.Repo == "" || len(b.Files) == 0 {
-		writeValidationError(w, map[string]string{"repo": "required", "files": "at least one file is required"})
+		writeValidationErrorCodes(w, map[string]string{"repo": "required", "files": "at least one file is required"}, map[string]string{"repo": "required", "files": "required"})
 		return
 	}
 	if b.DestDir == "" {
@@ -242,7 +242,7 @@ func (s *Server) handleHFDownloadGet(w http.ResponseWriter, r *http.Request) {
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := hfCtx(r)
@@ -250,7 +250,7 @@ func (s *Server) handleHFDownloadGet(w http.ResponseWriter, r *http.Request) {
 	job, err := s.deps.HFDownload.Get(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "download not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "download"}, "download not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -297,7 +297,7 @@ func (s *Server) handleHFDownloadStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b.Repo == "" || len(b.Files) == 0 {
-		writeValidationError(w, map[string]string{"repo": "required", "files": "at least one file is required"})
+		writeValidationErrorCodes(w, map[string]string{"repo": "required", "files": "at least one file is required"}, map[string]string{"repo": "required", "files": "required"})
 		return
 	}
 	ctx, cancel := hfCtx(r)
@@ -307,7 +307,7 @@ func (s *Server) handleHFDownloadStart(w http.ResponseWriter, r *http.Request) {
 		// finishes (registerAndFinish) — a typo here would otherwise waste
 		// a possibly multi-GB, multi-hour download before failing.
 		if _, err := s.deps.Catalog.ConfigByName(ctx, b.ConfigName); err != nil {
-			writeValidationError(w, map[string]string{"config_name": "no config with this name exists"})
+			writeValidationErrorCodes(w, map[string]string{"config_name": "no config with this name exists"}, map[string]string{"config_name": "no_config_with_name"})
 			return
 		}
 	}
@@ -329,14 +329,14 @@ func (s *Server) handleHFDownloadApprove(w http.ResponseWriter, r *http.Request)
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := hfCtx(r)
 	defer cancel()
 	if err := s.deps.HFDownload.ApproveJob(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "download not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "download"}, "download not found")
 			return
 		}
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -353,7 +353,7 @@ func (s *Server) handleHFDownloadPause(w http.ResponseWriter, r *http.Request) {
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	paused := s.deps.HFDownload.Pause(id)
@@ -368,7 +368,7 @@ func (s *Server) handleHFDownloadResume(w http.ResponseWriter, r *http.Request) 
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	s.deps.HFDownload.Start(id)
@@ -383,14 +383,14 @@ func (s *Server) handleHFDownloadCancel(w http.ResponseWriter, r *http.Request) 
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := hfCtx(r)
 	defer cancel()
 	if err := s.deps.HFDownload.Cancel(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "download not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "download"}, "download not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -408,14 +408,14 @@ func (s *Server) handleHFDownloadDelete(w http.ResponseWriter, r *http.Request) 
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := hfCtx(r)
 	defer cancel()
 	if err := s.deps.HFDownload.Delete(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "download not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "download"}, "download not found")
 			return
 		}
 		writeError(w, http.StatusConflict, err.Error())
@@ -439,7 +439,7 @@ type hfTokenResponse struct {
 // handleHFTokenGet — GET /api/v1/hf/token. Never returns the real value.
 func (s *Server) handleHFTokenGet(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings"}, "settings not wired")
 		return
 	}
 	ctx, cancel := hfCtx(r)
@@ -454,7 +454,7 @@ func (s *Server) handleHFTokenGet(w http.ResponseWriter, r *http.Request) {
 // same struct back) can never clobber a real token with its own mask.
 func (s *Server) handleHFTokenPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings"}, "settings not wired")
 		return
 	}
 	var b hfTokenBody

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../lib/api";
 import { useCreateReservation } from "../lib/queries";
 import type { Status } from "../lib/types";
@@ -6,6 +7,7 @@ import type { Status } from "../lib/types";
 const SLOT_OPTIONS = ["a1", "a2", "a3", "a4"];
 
 export function ReservationModal({ status, onClose }: { status: Status; onClose: () => void }) {
+  const { t } = useTranslation("scheduling");
   const create = useCreateReservation();
   const [label, setLabel] = useState("");
   const [model, setModel] = useState("");
@@ -20,7 +22,7 @@ export function ReservationModal({ status, onClose }: { status: Status; onClose:
   async function submit() {
     setError(null);
     if (!label || !model || !start || !end) {
-      setError("Label, model, start, and end are required.");
+      setError(t("reservation_modal.validation_error"));
       return;
     }
     try {
@@ -51,40 +53,40 @@ export function ReservationModal({ status, onClose }: { status: Status; onClose:
       }}
     >
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>New reservation</h3>
+        <h3>{t("reservation_modal.heading")}</h3>
         <div className="form-grid">
           <label className="form-row">
-            Label
-            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="nightly eval" />
+            {t("reservation_modal.label")}
+            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("reservation_modal.label_placeholder")} />
           </label>
           <label className="form-row">
-            Model
+            {t("reservation_modal.model")}
             <select value={model} onChange={(e) => setModel(e.target.value)}>
-              <option value="">select…</option>
+              <option value="">{t("reservation_modal.select_ellipsis")}</option>
               {modeOptions.map(([key, m]) => (
                 <option key={key} value={key}>{m.label}</option>
               ))}
             </select>
           </label>
           <label className="form-row">
-            Start
+            {t("reservation_modal.start")}
             <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
           </label>
           <label className="form-row">
-            End
+            {t("reservation_modal.end")}
             <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} />
           </label>
           <label className="form-row">
-            Scope
+            {t("reservation_modal.scope")}
             <select value={scope} onChange={(e) => setScope(e.target.value as typeof scope)}>
-              <option value="bay">Bay hold</option>
-              <option value="whole_box">Whole box</option>
-              <option value="comfyui">ComfyUI</option>
+              <option value="bay">{t("reservation_modal.scope_bay")}</option>
+              <option value="whole_box">{t("reservation_modal.scope_whole_box")}</option>
+              <option value="comfyui">{t("reservation_modal.scope_comfyui")}</option>
             </select>
           </label>
           {scope === "bay" && (
             <label className="form-row">
-              Bay
+              {t("reservation_modal.bay")}
               <select value={bay} onChange={(e) => setBay(e.target.value)}>
                 {SLOT_OPTIONS.map((s) => (
                   <option key={s} value={s}>{status.slot_labels[s] ?? s}</option>
@@ -95,9 +97,9 @@ export function ReservationModal({ status, onClose }: { status: Status; onClose:
         </div>
         {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
         <div className="form-actions">
-          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn" onClick={onClose}>{t("reservation_modal.cancel")}</button>
           <button className="btn primary" disabled={create.isPending} onClick={submit}>
-            {create.isPending ? "Creating…" : "Create"}
+            {create.isPending ? t("reservation_modal.creating") : t("reservation_modal.create")}
           </button>
         </div>
       </div>

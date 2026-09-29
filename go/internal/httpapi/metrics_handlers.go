@@ -361,7 +361,7 @@ func (s *Server) handleMetricsHistory(w http.ResponseWriter, r *http.Request) {
 		from := to.Add(-window)
 		samples, err := s.deps.Metrics.Range(ctx, from, to)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "metrics history read failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "metrics history read failed")
 			return
 		}
 		resp.Points = downsampleMetrics(samples, from, resolutionS, series, s.wallWatts)
@@ -642,7 +642,7 @@ func (s *Server) handleMetricsExport(w http.ResponseWriter, r *http.Request) {
 		format = "json"
 	}
 	if format != "csv" && format != "json" {
-		writeValidationError(w, map[string]string{"format": "must be \"csv\" or \"json\""})
+		writeValidationErrorCodes(w, map[string]string{"format": "must be \"csv\" or \"json\""}, map[string]string{"format": "must_be_one_of"})
 		return
 	}
 
@@ -664,7 +664,7 @@ func (s *Server) handleMetricsExport(w http.ResponseWriter, r *http.Request) {
 		from := to.Add(-window)
 		samples, err = s.deps.Metrics.Range(ctx, from, to)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "metrics export read failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "metrics export read failed")
 			return
 		}
 	}

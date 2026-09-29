@@ -1,7 +1,8 @@
 import { lazy, Suspense, useState, type KeyboardEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../lib/api";
 import { formatGB, formatCurrency } from "../lib/format";
-import { hazardsFor } from "../lib/llamaFlags";
+import { translatedHazardsFor } from "../lib/hazardLabels";
 import { useAddFavorite, useCatalogModelAliases, useFavorites, useProfiles, useRemoveFavorite } from "../lib/queries";
 import { useSession } from "../lib/session";
 import { useLoadConfig } from "../lib/useLoadConfig";
@@ -43,6 +44,7 @@ export function ConfigCardView({
   displayCurrency?: string;
   interactive?: boolean;
 }) {
+  const { t } = useTranslation("common");
   const { canOperate } = useSession();
   const [showDetail, setShowDetail] = useState(false);
   const loadState = useLoadConfig(card, status);
@@ -99,7 +101,7 @@ export function ConfigCardView({
   // rather than multiplies context) get a badge on the compact face, not
   // just an explanation buried in the expanded view — an operator scanning
   // the gallery should be able to see it without opening anything.
-  const hazards = hazardsFor(card);
+  const hazards = translatedHazardsFor(t, card);
 
   // T3 follow-up (2026-09-14, operator feedback): a config's aliases must
   // be visible on the compact card, not just its expanded detail view — an
@@ -147,7 +149,7 @@ export function ConfigCardView({
             {interactive && <CopyButton text={card.name} title="Copy config name" />}
             {hazards.length > 0 && (
               <span onClick={(e) => e.stopPropagation()}>
-                <InfoTip text={hazards.map((h) => h.message).join(" ")} className="hazard-tip">
+                <InfoTip text={hazards.map((h) => h.translated).join(" ")} className="hazard-tip">
                   <span className="hazard-badge" aria-hidden="true">⚠</span>
                 </InfoTip>
               </span>

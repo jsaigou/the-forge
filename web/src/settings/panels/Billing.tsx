@@ -4,6 +4,7 @@
 // pages/Settings.tsx unedited (their own eyebrow+card chrome, own query/
 // mutation hooks, own 700ms delayed-close pattern all untouched).
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { SaveButton } from "../../components/SaveButton";
 import { apiErrorMessage } from "../../lib/api";
 import { localeCurrencyGuess } from "../../lib/format";
@@ -12,6 +13,7 @@ import type { BillingSettings, CostSettings } from "../../lib/types";
 import { CURRENCIES } from "../constants";
 
 function Currency({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useBillingSettings();
   const update = useUpdateBillingSettings();
   const [draft, setDraft] = useState<BillingSettings | null>(null);
@@ -32,27 +34,27 @@ function Currency({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError) {
     return (
       <>
-        <div className="eyebrow" id="billing-currency">Currency</div>
-        <div className="card"><div className="empty-note">Operator role required to view billing settings.</div></div>
+        <div className="eyebrow" id="billing-currency">{t("billing.currency_title")}</div>
+        <div className="card"><div className="empty-note">{t("shared.role_required", { resource: t("billing.resource_billing") })}</div></div>
       </>
     );
   }
   if (!active) {
     return (
       <>
-        <div className="eyebrow" id="billing-currency">Currency</div>
-        <div className="card"><div className="empty-note">Loading billing settings…</div></div>
+        <div className="eyebrow" id="billing-currency">{t("billing.currency_title")}</div>
+        <div className="card"><div className="empty-note">{t("shared.loading", { resource: t("billing.resource_billing") })}</div></div>
       </>
     );
   }
 
   return (
     <>
-      <div className="eyebrow" id="billing-currency">Currency</div>
+      <div className="eyebrow" id="billing-currency">{t("billing.currency_title")}</div>
       <div className="card">
         {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
         <div className="form-grid">
-          <label className="form-row">Display currency (ISO 4217)
+          <label className="form-row">{t("billing.display_currency_label")}
             <select
               value={active.display_currency}
               disabled={!canAdmin}
@@ -61,7 +63,7 @@ function Currency({ canAdmin }: { canAdmin: boolean }) {
               {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </label>
-          <label className="form-row">FX source URL (optional)
+          <label className="form-row">{t("billing.fx_source_label")}
             <input
               value={active.fx_source_url ?? ""}
               placeholder="https://open.er-api.com/v6/latest/USD"
@@ -69,7 +71,7 @@ function Currency({ canAdmin }: { canAdmin: boolean }) {
               onChange={(e) => setDraft({ ...active, fx_source_url: e.target.value })}
             />
           </label>
-          <label className="form-row">FX refresh (minutes, optional)
+          <label className="form-row">{t("billing.fx_refresh_label")}
             <input
               type="number"
               min={1}
@@ -85,7 +87,7 @@ function Currency({ canAdmin }: { canAdmin: boolean }) {
         </div>
         {canAdmin && draft && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={() => { setDraft(null); setError(null); }}>Reset</button>
+            <button className="btn" onClick={() => { setDraft(null); setError(null); }}>{t("shared.reset")}</button>
             <SaveButton pending={update.isPending} isError={update.isError} onClick={save} />
           </div>
         )}
@@ -99,6 +101,7 @@ function Currency({ canAdmin }: { canAdmin: boolean }) {
 // own query/mutation hooks, canAdmin as a prop, isError/loading branches
 // that repeat the eyebrow so the section header never disappears.
 function CostSettingsPanel({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useCostSettings();
   const update = useUpdateCostSettings();
   const [draft, setDraft] = useState<CostSettings | null>(null);
@@ -116,27 +119,27 @@ function CostSettingsPanel({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError) {
     return (
       <>
-        <div className="eyebrow" id="billing-cost">Cost &amp; power</div>
-        <div className="card"><div className="empty-note">Operator role required to view cost settings.</div></div>
+        <div className="eyebrow" id="billing-cost">{t("billing.cost_title")}</div>
+        <div className="card"><div className="empty-note">{t("shared.role_required", { resource: t("billing.resource_cost") })}</div></div>
       </>
     );
   }
   if (!active) {
     return (
       <>
-        <div className="eyebrow" id="billing-cost">Cost &amp; power</div>
-        <div className="card"><div className="empty-note">Loading cost settings…</div></div>
+        <div className="eyebrow" id="billing-cost">{t("billing.cost_title")}</div>
+        <div className="card"><div className="empty-note">{t("shared.loading", { resource: t("billing.resource_cost") })}</div></div>
       </>
     );
   }
 
   return (
     <>
-      <div className="eyebrow" id="billing-cost">Cost &amp; power</div>
+      <div className="eyebrow" id="billing-cost">{t("billing.cost_title")}</div>
       <div className="card">
         {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
         <div className="form-grid">
-          <label className="form-row">Electricity rate (per kWh)
+          <label className="form-row">{t("billing.electricity_rate_label")}
             <input
               type="number" step="0.01" min={0}
               value={active.rate_per_kwh}
@@ -146,16 +149,16 @@ function CostSettingsPanel({ canAdmin }: { canAdmin: boolean }) {
           </label>
           <label className="form-row">
             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              Rate currency (ISO 4217)
+              {t("billing.rate_currency_label")}
               {canAdmin && localeGuess && localeGuess !== active.rate_currency && (
                 <button
                   type="button"
                   className="chip"
                   style={{ cursor: "pointer", fontSize: 10 }}
-                  title="Set from your browser's locale"
+                  title={t("billing.use_locale_title")}
                   onClick={() => setDraft({ ...active, rate_currency: localeGuess })}
                 >
-                  use {localeGuess}
+                  {t("billing.use_locale_button", { code: localeGuess })}
                 </button>
               )}
             </span>
@@ -165,7 +168,7 @@ function CostSettingsPanel({ canAdmin }: { canAdmin: boolean }) {
               onChange={(e) => setDraft({ ...active, rate_currency: e.target.value.toUpperCase() })}
             />
           </label>
-          <label className="form-row" title="Added to measured package watts, then divided by PSU efficiency to get wall watts.">Rest-of-system overhead (W)
+          <label className="form-row" title={t("billing.overhead_title")}>{t("billing.overhead_label")}
             <input
               type="number" step="1" min={0}
               value={active.overhead_w}
@@ -173,7 +176,7 @@ function CostSettingsPanel({ canAdmin }: { canAdmin: boolean }) {
               onChange={(e) => setDraft({ ...active, overhead_w: Number(e.target.value) })}
             />
           </label>
-          <label className="form-row" title="Wall watts = (package watts + overhead) ÷ PSU efficiency. Uncalibrated estimate until checked against a plug meter.">PSU efficiency (0–1]
+          <label className="form-row" title={t("billing.psu_title")}>{t("billing.psu_label")}
             <input
               type="number" step="0.01" min={0.01} max={1}
               value={active.psu_efficiency}
@@ -181,7 +184,7 @@ function CostSettingsPanel({ canAdmin }: { canAdmin: boolean }) {
               onChange={(e) => setDraft({ ...active, psu_efficiency: Number(e.target.value) })}
             />
           </label>
-          <label className="form-row" title="Scales the Overview power chart/tile against a real hardware limit only — never feeds cost math.">Overview power-chart ceiling (W, package max draw)
+          <label className="form-row" title={t("billing.ceiling_title")}>{t("billing.ceiling_label")}
             <input
               type="number" step="1" min={0}
               value={active.max_power_w}
@@ -189,7 +192,7 @@ function CostSettingsPanel({ canAdmin }: { canAdmin: boolean }) {
               onChange={(e) => setDraft({ ...active, max_power_w: Number(e.target.value) })}
             />
           </label>
-          <label className="form-row" title="Flat 'if this model ran alone, flat-out' hypothetical rate used only for model/config card power estimates — does not feed measured-energy figures.">Per-model card constant (kW, counterfactual)
+          <label className="form-row" title={t("billing.power_kw_title")}>{t("billing.power_kw_label")}
             <input
               type="number" step="0.01" min={0}
               value={active.power_kw}
@@ -200,7 +203,7 @@ function CostSettingsPanel({ canAdmin }: { canAdmin: boolean }) {
         </div>
         {canAdmin && draft && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={() => { setDraft(null); setError(null); }}>Reset</button>
+            <button className="btn" onClick={() => { setDraft(null); setError(null); }}>{t("shared.reset")}</button>
             <SaveButton pending={update.isPending} isError={update.isError} onClick={save} />
           </div>
         )}

@@ -67,19 +67,19 @@ func (s *Server) handleCatalogOfferingsList(w http.ResponseWriter, r *http.Reque
 	if mid := r.URL.Query().Get("model_id"); mid != "" {
 		id, err := strconv.ParseInt(mid, 10, 64)
 		if err != nil {
-			writeValidationError(w, map[string]string{"model_id": "must be an integer"})
+			writeValidationErrorCodes(w, map[string]string{"model_id": "must be an integer"}, map[string]string{"model_id": "must_be_integer"})
 			return
 		}
 		list, err = cat.ListOfferingsForModel(ctx, id)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "offerings query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "offerings query failed")
 			return
 		}
 	} else {
 		var err error
 		list, err = cat.ListOfferings(ctx)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "offerings query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "offerings query failed")
 			return
 		}
 	}
@@ -93,12 +93,12 @@ func (s *Server) handleCatalogOfferingsList(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleCatalogOfferingGet(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -106,7 +106,7 @@ func (s *Server) handleCatalogOfferingGet(w http.ResponseWriter, r *http.Request
 	o, err := cat.GetOffering(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "offering not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "offering"}, "offering not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -118,7 +118,7 @@ func (s *Server) handleCatalogOfferingGet(w http.ResponseWriter, r *http.Request
 func (s *Server) handleCatalogOfferingCreate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b offeringBody
@@ -126,8 +126,8 @@ func (s *Server) handleCatalogOfferingCreate(w http.ResponseWriter, r *http.Requ
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateOffering(r.Context(), b, 0); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateOffering(r.Context(), b, 0); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -163,12 +163,12 @@ func (s *Server) handleCatalogOfferingCreate(w http.ResponseWriter, r *http.Requ
 func (s *Server) handleCatalogOfferingUpdate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	var b offeringBody
@@ -176,8 +176,8 @@ func (s *Server) handleCatalogOfferingUpdate(w http.ResponseWriter, r *http.Requ
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateOffering(r.Context(), b, id); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateOffering(r.Context(), b, id); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
@@ -185,7 +185,7 @@ func (s *Server) handleCatalogOfferingUpdate(w http.ResponseWriter, r *http.Requ
 	existing, err := cat.GetOffering(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "offering not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "offering"}, "offering not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -222,19 +222,19 @@ func (s *Server) handleCatalogOfferingUpdate(w http.ResponseWriter, r *http.Requ
 func (s *Server) handleCatalogOfferingDelete(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
 	if err := cat.DeleteOffering(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "offering not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "offering"}, "offering not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -248,7 +248,7 @@ func (s *Server) handleCatalogOfferingDelete(w http.ResponseWriter, r *http.Requ
 func (s *Server) handleCatalogOfferingValidate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b offeringBody
@@ -256,8 +256,8 @@ func (s *Server) handleCatalogOfferingValidate(w http.ResponseWriter, r *http.Re
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateOffering(r.Context(), b, 0); len(fields) > 0 {
-		writeValidationError(w, fields)
+	if fields, codes := s.validateOffering(r.Context(), b, 0); len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"valid": true})
@@ -309,19 +309,23 @@ func (s *Server) resolveOfferingProviderID(ctx context.Context, name string) (in
 	return p.ID, true
 }
 
-func (s *Server) validateOffering(ctx context.Context, b offeringBody, excludeID int64) map[string]string {
+func (s *Server) validateOffering(ctx context.Context, b offeringBody, excludeID int64) (map[string]string, map[string]string) {
 	fields := map[string]string{}
+	codes := map[string]string{}
 	cat := s.deps.Catalog
 
 	if b.WireModel == "" {
 		fields["wire_model"] = "is required"
+		codes["wire_model"] = "required"
 	}
 	if b.Provider == "" {
 		fields["provider"] = "is required"
+		codes["provider"] = "required"
 	}
 	if cat != nil {
 		if b.ModelID == 0 {
 			fields["model_id"] = "is required"
+			codes["model_id"] = "required"
 		} else if _, err := cat.GetModel(ctx, b.ModelID); err != nil {
 			fields["model_id"] = "does not exist"
 		}
@@ -346,6 +350,7 @@ func (s *Server) validateOffering(ctx context.Context, b offeringBody, excludeID
 				for _, o := range all {
 					if o.ID != excludeID && o.ProviderName == b.Provider && o.WireModel == b.WireModel {
 						fields["wire_model"] = "already offered by this provider (offering " + strconv.FormatInt(o.ID, 10) + ")"
+						codes["wire_model"] = "already_exists"
 						break
 					}
 				}
@@ -354,6 +359,7 @@ func (s *Server) validateOffering(ctx context.Context, b offeringBody, excludeID
 	}
 	if b.Priority != nil && *b.Priority < 0 {
 		fields["priority"] = "must be >= 0"
+		codes["priority"] = "must_be_non_negative_integer"
 	}
 	if b.Currency != "" && !currencyRE.MatchString(b.Currency) {
 		fields["currency"] = "must be a 3-letter ISO 4217 code"
@@ -371,5 +377,5 @@ func (s *Server) validateOffering(ctx context.Context, b offeringBody, excludeID
 	if b.PriceCachedInPer1MPeak != nil && *b.PriceCachedInPer1MPeak < 0 {
 		fields["price_cached_in_per_1m_peak"] = "must be >= 0"
 	}
-	return fields
+	return fields, codes
 }

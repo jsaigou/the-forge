@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../../lib/api";
+import { appLocale } from "../../lib/format";
 import { useSmithActionApprove, useSmithActionHandoff } from "../../lib/queries";
 import { useStepUpGate } from "../../lib/useStepUpGate";
 import type { SmithAction, SmithHandoffCandidate } from "../../lib/types";
@@ -25,6 +27,7 @@ import { RunbookCard } from "./RunbookCard";
 // full alternative to acknowledging the runbook, not an extra step on top
 // of it.
 export function HandoffPanel({ action }: { action: SmithAction }) {
+  const { t } = useTranslation("common");
   const handoff = action.handoff!;
   const handoffMut = useSmithActionHandoff(action.id);
   const approve = useSmithActionApprove(action.id);
@@ -63,13 +66,13 @@ export function HandoffPanel({ action }: { action: SmithAction }) {
       }}
     >
       <div style={{ fontSize: 12, fontWeight: 600, color: "var(--warn)", marginBottom: 4 }}>
-        Handoff required — approving this evicts smith's own brain
+        {t("handoff_panel.title")}
       </div>
       <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 8 }}>{handoff.reason}</div>
       <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 10, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <span>brain slot: <span style={{ fontFamily: "var(--mono)" }}>{handoff.brain_slot || "—"}</span></span>
-        <span>brain model: <span style={{ fontFamily: "var(--mono)" }}>{handoff.brain_model || "—"}</span></span>
-        <span className="chip">{handoff.state.replace(/_/g, " ")}</span>
+        <span>{t("handoff_panel.brain_slot_label")} <span style={{ fontFamily: "var(--mono)" }}>{handoff.brain_slot || "—"}</span></span>
+        <span>{t("handoff_panel.brain_model_label")} <span style={{ fontFamily: "var(--mono)" }}>{handoff.brain_model || "—"}</span></span>
+        <span className="chip">{t(`handoff_panel.state_chip.${handoff.state}`, { defaultValue: handoff.state.replace(/_/g, " ") })}</span>
       </div>
 
       {handoffError && <div className="error-note" style={{ marginBottom: 8 }}>{handoffError}</div>}
@@ -77,13 +80,13 @@ export function HandoffPanel({ action }: { action: SmithAction }) {
       {handoff.state === "required" && (
         <div style={{ marginBottom: 10 }}>
           <button className="btn primary" disabled={handoffMut.isPending} onClick={() => resolve("runbook")}>
-            {handoffMut.isPending ? "Issuing…" : "Get handoff runbook"}
+            {handoffMut.isPending ? t("handoff_panel.issuing") : t("handoff_panel.get_runbook_button")}
           </button>
 
           {handoff.candidates.length > 0 && (
             <div style={{ marginTop: 10 }}>
               <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginBottom: 6 }}>
-                Or hand off to a remote brain for this operation:
+                {t("handoff_panel.remote_prompt")}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
                 {handoff.candidates.map((c) => (
@@ -95,18 +98,18 @@ export function HandoffPanel({ action }: { action: SmithAction }) {
                       }}
                     />
                     <span style={{ fontFamily: "var(--mono)", color: "var(--text-dim)" }}>{c.model}</span>
-                    <span style={{ color: "var(--text-mute)" }}>via {c.provider}</span>
-                    {!c.healthy && <span style={{ color: "var(--text-mute)" }}>(unreachable)</span>}
+                    <span style={{ color: "var(--text-mute)" }}>{t("handoff_panel.via_prefix")}{c.provider}</span>
+                    {!c.healthy && <span style={{ color: "var(--text-mute)" }}>{t("handoff_panel.unreachable")}</span>}
                   </div>
                 ))}
               </div>
               {remoteCandidate ? (
                 <button className="btn" disabled={handoffMut.isPending} onClick={() => resolve("remote")}>
-                  {handoffMut.isPending ? "Switching…" : `Switch brain to ${remoteCandidate.model}`}
+                  {handoffMut.isPending ? t("handoff_panel.switching") : t("handoff_panel.switch_brain_button", { model: remoteCandidate.model })}
                 </button>
               ) : (
                 <div style={{ fontSize: 10.5, color: "var(--text-mute)" }}>
-                  No candidate is currently reachable — use the runbook path instead.
+                  {t("handoff_panel.no_candidate_reachable")}
                 </div>
               )}
             </div>
@@ -122,28 +125,28 @@ export function HandoffPanel({ action }: { action: SmithAction }) {
 
       {handoff.state === "runbook_issued" && (
         <button className="btn primary" disabled={handoffMut.isPending} onClick={() => resolve("acknowledge")}>
-          {handoffMut.isPending ? "…" : "Acknowledge — I've read this"}
+          {handoffMut.isPending ? t("handoff_panel.acknowledging") : t("handoff_panel.acknowledge_button")}
         </button>
       )}
 
       {resolved && (
         <div style={{ marginTop: 4 }}>
           <div style={{ fontSize: 11.5, color: "var(--ok)", marginBottom: 8 }}>
-            {handoff.state === "remote_swapped" ? "Brain swapped to a remote candidate" : "Handoff acknowledged"}
-            {handoff.acknowledged_by ? ` by ${handoff.acknowledged_by}` : ""}
-            {handoff.acknowledged_at ? ` at ${new Date(handoff.acknowledged_at * 1000).toLocaleString()}` : ""}. Approval can now proceed.
-            {handoff.state === "remote_swapped" && " A swap-back proposal will appear once this operation finishes."}
+            {handoff.state === "remote_swapped" ? t("handoff_panel.resolved_remote") : t("handoff_panel.resolved_ack")}
+            {handoff.acknowledged_by ? t("handoff_panel.by_prefix") + handoff.acknowledged_by : ""}
+            {handoff.acknowledged_at ? t("handoff_panel.at_prefix") + new Date(handoff.acknowledged_at * 1000).toLocaleString(appLocale()) : ""}{t("handoff_panel.approval_can_proceed")}
+            {handoff.state === "remote_swapped" && t("handoff_panel.swap_back_notice")}
           </div>
           {approveError && <div className="error-note" style={{ marginBottom: 8 }}>{approveError}</div>}
           <button className="btn primary" disabled={approve.isPending} onClick={handleApprove}>
-            {approve.isPending ? "Approving…" : "Approve"}
+            {approve.isPending ? t("handoff_panel.approving") : t("action_card.approve")}
           </button>
         </div>
       )}
 
       <div style={{ marginTop: 10 }}>
         <button className="btn" disabled={handoffMut.isPending} onClick={() => resolve("cancel")} style={{ fontSize: 11 }}>
-          Cancel this action
+          {t("handoff_panel.cancel_button")}
         </button>
       </div>
 

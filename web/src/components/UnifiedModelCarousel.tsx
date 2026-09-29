@@ -2,6 +2,7 @@ import {
   lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type PointerEvent,
 } from "react";
+import { useTranslation } from "react-i18next";
 import type { ConfigCard, ModelCard, Status } from "../lib/types";
 import { ConfigCardView } from "./ConfigCardView";
 import { ModelCardView } from "./ModelCardView";
@@ -40,7 +41,9 @@ const DetailModal = lazy(() => import("./detail/DetailModal").then((m) => ({ def
 //     only after the drag crosses the click threshold (capturing on
 //     pointerdown retargets the gesture's click and kills real taps).
 
-const UNGROUPED = "Other";
+// Internal grouping sentinel — never shown raw. Display-side code maps this
+// to the translated "carousel.ungrouped" label (displayFamily(), below).
+const UNGROUPED = "__ungrouped__";
 
 interface FamilyEntry {
   family: string;
@@ -143,7 +146,10 @@ export function UnifiedModelCarousel({
   // is the original Models-page behavior.
   variant?: "model" | "config";
 }) {
-  const noun = variant === "model" ? "model" : "config";
+  const { t } = useTranslation("common");
+  const noun = variant === "model" ? t("carousel.noun.model") : t("carousel.noun.config");
+  const nounPlural = variant === "model" ? t("carousel.noun.model_plural") : t("carousel.noun.config_plural");
+  const displayFamily = (family: string) => (family === UNGROUPED ? t("carousel.ungrouped") : family);
   // Operator feedback 2026-08-14: the config deck is FLAT — one slide per
   // config, no family grouping/fan (the Console's sort toggle orders it);
   // the model deck keeps genealogy→family grouping.
@@ -640,18 +646,19 @@ export function UnifiedModelCarousel({
 
   function renderFamilyFace(entry: FamilyEntry, hint: string) {
     const first = entry.sorted[0];
-    const redundant = entry.genealogy !== "" && entry.family.toLowerCase() === entry.genealogy.toLowerCase();
+    const familyName = displayFamily(entry.family);
+    const redundant = entry.genealogy !== "" && familyName.toLowerCase() === entry.genealogy.toLowerCase();
     const memberNames = entry.sorted.slice(0, 3).map((m) => m.name).join("  ·  ");
     return (
       <PlayingCard
-        name={entry.family}
+        name={familyName}
         logo={first.logo}
         logoDark={first.logo_dark}
         watermarkName={first.creator}
         className="umc-card"
       >
         {entry.genealogy && !redundant && <div className="umc-genealogy">{entry.genealogy}</div>}
-        <div className="umc-count">{entry.cards.length} {noun}{entry.cards.length === 1 ? "" : "s"}</div>
+        <div className="umc-count">{t("carousel.count", { count: entry.cards.length, noun })}</div>
         {entry.cards.length > 1 && (
           <div className="umc-members">{memberNames}{entry.cards.length > 3 ? " · …" : ""}</div>
         )}
@@ -666,7 +673,7 @@ export function UnifiedModelCarousel({
       className={`umc${fanIndex !== null ? " fanned" : ""}`}
       tabIndex={0}
       role="region"
-      aria-label={variant === "model" ? "Model families" : "Config families"}
+      aria-label={variant === "model" ? t("carousel.region_label_models") : t("carousel.region_label_configs")}
     >
       <div
         ref={viewportRef}
@@ -724,7 +731,11 @@ export function UnifiedModelCarousel({
                 onClick={() => slideClick(i)}
                 role="button"
                 tabIndex={0}
-                aria-label={active ? `${entry.family}: ${entry.cards.length} ${noun}s. Tap to fan out.` : `${entry.family}: ${entry.cards.length} ${noun}s. Tap to center.`}
+                aria-label={
+                  active
+                    ? t("carousel.slide_aria_active", { family: displayFamily(entry.family), countPhrase: t("carousel.count", { count: entry.cards.length, noun }) })
+                    : t("carousel.slide_aria_inactive", { family: displayFamily(entry.family), countPhrase: t("carousel.count", { count: entry.cards.length, noun }) })
+                }
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
@@ -748,7 +759,7 @@ export function UnifiedModelCarousel({
                       </div>
                     ))}
                     <div className="umc-stack-face">
-                      {renderFamilyFace(entry, active ? "Tap to fan out" : "Tap to center")}
+                      {renderFamilyFace(entry, active ? t("carousel.tap_to_fan_out") : t("carousel.tap_to_center"))}
                     </div>
                   </div>
                 </div>
@@ -765,7 +776,7 @@ export function UnifiedModelCarousel({
             className="umc-arrow umc-arrow-left"
             onClick={() => advance(-1)}
             disabled={safeActive === 0}
-            aria-label="Previous family"
+            aria-label={t("carousel.prev_family")}
           >
             ‹
           </button>
@@ -774,7 +785,7 @@ export function UnifiedModelCarousel({
             className="umc-arrow umc-arrow-right"
             onClick={() => advance(1)}
             disabled={safeActive === entries.length - 1}
-            aria-label="Next family"
+            aria-label={t("carousel.next_family")}
           >
             ›
           </button>
@@ -785,7 +796,7 @@ export function UnifiedModelCarousel({
                 type="button"
                 className={`umc-dot${i === safeActive ? " active" : ""}`}
                 onClick={() => { if (i !== safeActive) landFamily(i, "snap"); }}
-                aria-label={`Go to ${entry.family}`}
+                aria-label={t("carousel.go_to_family", { family: displayFamily(entry.family) })}
               />
             ))}
           </div>
@@ -801,7 +812,7 @@ export function UnifiedModelCarousel({
             ref={stageRef}
             className="umc-fan-stage"
             role="region"
-            aria-label={`${fanEntry.family} ${noun}s — swipe to browse, tap the front card to zoom`}
+            aria-label={t("carousel.fan_stage_aria", { family: displayFamily(fanEntry.family), nounPlural })}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -816,7 +827,7 @@ export function UnifiedModelCarousel({
               onClick={userCollapse}
               role="button"
               tabIndex={0}
-              aria-label={`Collapse the ${fanEntry.family} fan`}
+              aria-label={t("carousel.collapse_fan_aria", { family: displayFamily(fanEntry.family) })}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") { e.preventDefault(); userCollapse(); }
               }}
@@ -835,7 +846,7 @@ export function UnifiedModelCarousel({
                   style={{ zIndex: pose.zIndex }}
                   role="button"
                   tabIndex={fanPhase === "open" && j === Math.round(fanFocus) ? 0 : -1}
-                  aria-label={`${m.name}${up ? " — up card, tap to zoom" : ""}`}
+                  aria-label={t("carousel.card_aria", { name: m.name, suffix: up ? t("carousel.up_card_suffix") : "" })}
                   onClick={(e) => {
                     if (drag.current.moved) return;
                     if (!up) { landFan(j, "snap"); return; }
@@ -864,7 +875,7 @@ export function UnifiedModelCarousel({
                 className="umc-arrow umc-arrow-left"
                 onClick={() => fanAdvance(-1)}
                 disabled={fanFocus <= 0}
-                aria-label={`Previous ${noun}`}
+                aria-label={t("carousel.prev_noun", { noun })}
               >
                 ‹
               </button>
@@ -873,7 +884,7 @@ export function UnifiedModelCarousel({
                 className="umc-arrow umc-arrow-right"
                 onClick={() => fanAdvance(1)}
                 disabled={fanFocus >= fanEntry.sorted.length - 1}
-                aria-label={`Next ${noun}`}
+                aria-label={t("carousel.next_noun", { noun })}
               >
                 ›
               </button>
@@ -884,7 +895,7 @@ export function UnifiedModelCarousel({
                     type="button"
                     className={`umc-dot${i === Math.round(fanFocus) ? " active" : ""}`}
                     onClick={() => { if (i !== fanFocus) landFan(i, "snap"); }}
-                    aria-label={`Go to ${m.name}`}
+                    aria-label={t("carousel.go_to_card", { name: m.name })}
                   />
                 ))}
               </div>

@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { formatGB } from "../../lib/format";
-import { depthLabel, STALE_EXPLANATION } from "../../lib/profileFormat";
+import { useTranslation } from "react-i18next";
+import { appLocale, formatGB } from "../../lib/format";
+import { depthLabel, staleExplanation } from "../../lib/profileFormat";
 import type { ConfigGroup, ScopedBenchmark } from "../../lib/benchmarkGrouping";
 import type { CatalogBenchmark } from "../../lib/types";
 import { Icon } from "../Icon";
@@ -38,6 +39,7 @@ function BenchmarkRow({
   onDelete: (b: CatalogBenchmark) => void;
   deletePending: boolean;
 }) {
+  const { t } = useTranslation("settings");
   const b = row.benchmark;
   const inherited = row.scope !== "config";
   return (
@@ -60,7 +62,7 @@ function BenchmarkRow({
       </span>
       {canAdmin && (
         <div className="actions" style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => onEdit(b)}>Edit</button>
+          <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => onEdit(b)}>{t("benchmarks.page.edit")}</button>
           <ConfirmButton
             className="btn"
             style={{ fontSize: 11, padding: "4px 8px" }}
@@ -68,8 +70,8 @@ function BenchmarkRow({
             onConfirm={() => onDelete(b)}
             warning={
               inherited
-                ? `Delete "${b.metric}"? It's scoped to ${row.scope} ${row.ownerLabel}, so this removes it everywhere that scope is shown, not just here.`
-                : `Delete "${b.metric}" from this config?`
+                ? t("benchmarks.group.delete_confirm_inherited", { metric: b.metric, scope: row.scope, owner: row.ownerLabel })
+                : t("benchmarks.group.delete_confirm_own", { metric: b.metric })
             }
           />
         </div>
@@ -95,6 +97,7 @@ export function ConfigBenchmarkGroup({
   onAddBenchmark: (configId: number) => void;
   onDeleteBenchmark: (b: CatalogBenchmark) => void;
 }) {
+  const { t } = useTranslation("settings");
   const [expanded, setExpanded] = useState(false);
   const { config, model, variant, profile, benchmarks } = group;
 
@@ -110,71 +113,71 @@ export function ConfigBenchmarkGroup({
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         {model?.logo && <Icon slug={model.logo} name={model.name} />}
         <span style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600 }}>{config.name}</span>
-        {config.is_default && <span className="chip">default</span>}
-        {config.visibility === "hidden" && <span className="chip" style={{ color: "var(--text-mute)" }}>hidden</span>}
+        {config.is_default && <span className="chip">{t("benchmarks.group.default_chip")}</span>}
+        {config.visibility === "hidden" && <span className="chip" style={{ color: "var(--text-mute)" }}>{t("benchmarks.group.hidden_chip")}</span>}
         {!profile ? (
-          <span className="chip" style={{ color: "var(--text-mute)" }} title="This config didn't convert into a runnable mode (usually a missing build backend) — see the server log.">no mode</span>
+          <span className="chip" style={{ color: "var(--text-mute)" }} title={t("benchmarks.group.no_mode_title")}>{t("benchmarks.group.no_mode_chip")}</span>
         ) : profile.stale ? (
-          <span className="chip" style={{ color: "var(--warn)" }} title={STALE_EXPLANATION}>stale</span>
+          <span className="chip" style={{ color: "var(--warn)" }} title={staleExplanation(t)}>{t("benchmarks.group.stale_chip")}</span>
         ) : profile.measured_at > 0 ? (
-          <span className="chip" style={{ color: "var(--ok)" }}>profiled</span>
+          <span className="chip" style={{ color: "var(--ok)" }}>{t("benchmarks.group.profiled_chip")}</span>
         ) : (
-          <span className="chip" style={{ color: "var(--text-mute)" }}>unprofiled</span>
+          <span className="chip" style={{ color: "var(--text-mute)" }}>{t("benchmarks.group.unprofiled_chip")}</span>
         )}
         <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
           {depths.length > 1 && (
             <button className="btn" style={{ fontSize: 11 }} onClick={() => setExpanded((v) => !v)}>
-              {expanded ? "Show less" : "Show curve"}
+              {expanded ? t("benchmarks.group.show_less") : t("benchmarks.group.show_curve")}
             </button>
           )}
           {canAdmin && (
             <button className="btn" style={{ fontSize: 11 }} onClick={() => onAddBenchmark(config.id)}>
-              + Benchmark
+              {t("benchmarks.group.add_benchmark")}
             </button>
           )}
           {canAdmin && profile && (
             <button
               className="btn"
               disabled={someoneElseRunning}
-              title={someoneElseRunning ? `A profile run is already in progress (${profileController.activeMode}) — only one can run at a time.` : undefined}
+              title={someoneElseRunning ? t("benchmarks.group.someone_else_running", { mode: profileController.activeMode }) : undefined}
               onClick={() => profileController.requestProfile(config.name)}
               style={{ fontSize: 11 }}
             >
-              {running ? "Profiling…" : "Profile…"}
+              {running ? t("benchmarks.group.profiling_ellipsis") : t("benchmarks.group.profile_ellipsis")}
             </button>
           )}
         </span>
       </div>
       <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
-        {model ? `${model.name}${variant ? ` / ${variant.name}` : ""}` : `variant #${config.variant_id}`}
+        {model ? `${model.name}${variant ? ` / ${variant.name}` : ""}` : t("benchmarks.group.variant_fallback", { id: config.variant_id })}
       </div>
 
       <div style={{ marginTop: 8, fontSize: 12 }}>
         {!profile ? null : (
           <div style={{ color: "var(--text-dim)" }}>
             {profile.safe_memory_bytes > 0 ? `${formatGB(profile.safe_memory_bytes, 1)} GB` : "—"}
-            {" · typical "}
+            {" · "}{t("benchmarks.group.typical")}{" "}
             {typical ? `${typical.pp2048_tps.toFixed(0)} pf / ${typical.tg128_tps.toFixed(1)} dec`
               : profile.prefill_tps > 0 || profile.decode_tps > 0 ? `${profile.prefill_tps.toFixed(0)} pf / ${profile.decode_tps.toFixed(1)} dec` : "—"}
-            {worst && ` · worst ${worst.pp2048_tps.toFixed(0)} pf / ${worst.tg128_tps.toFixed(1)} dec`}
-            {profile.measured_at > 0 && ` · measured ${new Date(profile.measured_at * 1000).toLocaleDateString()}`}
+            {worst && ` · ${t("benchmarks.group.worst")} ${worst.pp2048_tps.toFixed(0)} pf / ${worst.tg128_tps.toFixed(1)} dec`}
+            {profile.measured_at > 0 && ` · ${t("benchmarks.group.measured", { date: new Date(profile.measured_at * 1000).toLocaleDateString(appLocale()) })}`}
           </div>
         )}
         {profile && !profile.stale && profile.measured_at === 0 && (
-          <div style={{ color: "var(--text-mute)" }}>Not profiled — no measured memory or throughput.</div>
+          <div style={{ color: "var(--text-mute)" }}>{t("benchmarks.group.not_profiled")}</div>
         )}
       </div>
 
       {expanded && depths.length > 1 && (
         <div style={{ margin: "8px 0", padding: 10, background: "var(--panel-2, var(--panel))", borderRadius: 6 }}>
           <div className="qrow" style={{ color: "var(--text-mute)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em" }}>
-            <span style={{ width: 120 }}>Depth</span>
-            <span style={{ width: 100 }}>Prefill T/s</span>
-            <span style={{ width: 100 }}>Decode T/s</span>
+            <span style={{ width: 120 }}>{t("benchmarks.group.depth_col")}</span>
+            <span style={{ width: 100 }}>{t("benchmarks.group.prefill_col")}</span>
+            <span style={{ width: 100 }}>{t("benchmarks.group.decode_col")}</span>
           </div>
           {depths.map((d) => (
             <div className="qrow" key={d.depth_tokens} style={{ fontSize: 12 }}>
-              <span style={{ width: 120 }}>{depthLabel(d.depth_tokens, profile?.n_ctx ?? 0)} ({d.depth_tokens} tok)</span>
+              <span style={{ width: 120 }}>{depthLabel(d.depth_tokens, profile?.n_ctx ?? 0, t)} ({d.depth_tokens} tok)</span>
               <span style={{ width: 100 }}>{d.pp2048_tps.toFixed(0)}</span>
               <span style={{ width: 100 }}>{d.tg128_tps.toFixed(1)}</span>
             </div>
@@ -184,7 +187,7 @@ export function ConfigBenchmarkGroup({
 
       <div style={{ marginTop: 8 }}>
         {benchmarks.length === 0 ? (
-          <div style={{ fontSize: 11, color: "var(--text-mute)" }}>No curated benchmarks — the model has none either.</div>
+          <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{t("benchmarks.group.no_curated")}</div>
         ) : (
           benchmarks.map((row) => (
             <BenchmarkRow

@@ -59,7 +59,7 @@ func (s *Server) handleCatalogModelsList(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	list, err := cat.ListModels(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "models query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "models query failed")
 		return
 	}
 	out := make([]modelJSON, 0, len(list))
@@ -72,7 +72,7 @@ func (s *Server) handleCatalogModelsList(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleCatalogModelGet(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
@@ -85,7 +85,7 @@ func (s *Server) handleCatalogModelGet(w http.ResponseWriter, r *http.Request) {
 	m, err := cat.GetModel(ctx, id)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "model not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "model"}, "model not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -97,7 +97,7 @@ func (s *Server) handleCatalogModelGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCatalogModelCreate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b modelBody
@@ -131,7 +131,7 @@ func (s *Server) handleCatalogModelCreate(w http.ResponseWriter, r *http.Request
 func (s *Server) handleCatalogModelUpdate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
@@ -159,7 +159,7 @@ func (s *Server) handleCatalogModelUpdate(w http.ResponseWriter, r *http.Request
 	})
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "model not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "model"}, "model not found")
 			return
 		}
 		writeInternalError(w, err)
@@ -174,7 +174,7 @@ func (s *Server) handleCatalogModelUpdate(w http.ResponseWriter, r *http.Request
 func (s *Server) handleCatalogModelDelete(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	id, ok := parseID(r)
@@ -186,10 +186,10 @@ func (s *Server) handleCatalogModelDelete(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	if err := cat.DeleteModel(ctx, id); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "model not found")
+			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "model"}, "model not found")
 			return
 		}
-		writeError(w, http.StatusConflict, "model has dependent variants — delete those first")
+		writeErrorCode(w, http.StatusConflict, "has_dependents", map[string]any{"resource": "variants"}, "model has dependent variants — delete those first")
 		return
 	}
 	s.audit(r, identity(r).Name, "catalog_model_delete", strconv.FormatInt(id, 10), withReason("", r.URL.Query().Get("reason")))
@@ -200,7 +200,7 @@ func (s *Server) handleCatalogModelDelete(w http.ResponseWriter, r *http.Request
 func (s *Server) handleCatalogModelValidate(w http.ResponseWriter, r *http.Request) {
 	cat := s.deps.Catalog
 	if cat == nil {
-		writeError(w, http.StatusServiceUnavailable, "catalog not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b modelBody

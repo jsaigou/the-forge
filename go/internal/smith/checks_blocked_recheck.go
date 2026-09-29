@@ -115,7 +115,8 @@ func runBlockedWorkRecheckItems(ctx context.Context, env *CheckEnv, items []Bloc
 	}
 	if len(candidates) == 0 {
 		return Finding{CheckID: id, Severity: SeverityOK,
-			Summary: "no open externally-blocked items with a where-to-check URL"}
+			Summary:    "no open externally-blocked items with a where-to-check URL",
+			SummaryKey: "checks.blocked_work_recheck.none_open"}
 	}
 
 	prevHashes := map[string]string{}
@@ -183,10 +184,14 @@ outer:
 		// Info, deliberately not warn: "possibly unblocked" is good news,
 		// and warn would light up the Console alert path for a non-problem.
 		return Finding{CheckID: id, Severity: SeverityInfo,
-			Summary:  fmt.Sprintf("%d of %d open blocked item(s) may have unblocked — verify manually", len(items), len(candidates)),
-			Evidence: evMap}
+			Summary:    fmt.Sprintf("%d of %d open blocked item(s) may have unblocked — verify manually", len(items), len(candidates)),
+			SummaryKey: "checks.blocked_work_recheck.possibly_unblocked",
+			Params:     map[string]any{"unblocked_count": len(items), "open_count": len(candidates)},
+			Evidence:   evMap}
 	}
 	return Finding{CheckID: id, Severity: SeverityInfo,
-		Summary:  fmt.Sprintf("%d open blocked item(s); %d rechecked (%d network fetch(es)); no change detected", len(candidates), checkedItems, networkFetches),
-		Evidence: evMap}
+		Summary:    fmt.Sprintf("%d open blocked item(s); %d rechecked (%d network fetch(es)); no change detected", len(candidates), checkedItems, networkFetches),
+		SummaryKey: "checks.blocked_work_recheck.no_change",
+		Params:     map[string]any{"open_count": len(candidates), "checked_count": checkedItems, "fetch_count": networkFetches},
+		Evidence:   evMap}
 }

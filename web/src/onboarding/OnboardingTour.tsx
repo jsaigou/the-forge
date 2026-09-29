@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import { Trans, useTranslation } from "react-i18next";
 import { SpotlightCutout, useTrackedRect, type Rect } from "./Spotlight";
 import { useOnboarding } from "./useOnboarding";
 
@@ -27,67 +28,48 @@ import { useOnboarding } from "./useOnboarding";
 // hatch instead.
 
 interface TourStep {
-  title: string;
-  body: ReactNode;
+  // i18n: title/body are onboarding.json key paths (under "tour.steps."),
+  // resolved via t()/<Trans> at render time — see StepBody below. Keeping
+  // these as key paths (not rendered ReactNode) lets a single STEPS array
+  // stay static module-scope data instead of being rebuilt per-render/per-
+  // language, matching the chatTemplateCaps.ts/widgetRegistry.ts convention
+  // used elsewhere in this app for the same reason.
+  titleKey: string;
+  bodyKey: string;
   hash?: string;
   targets?: string[];
 }
 
 const STEPS: TourStep[] = [
   {
-    title: "Load bays",
+    titleKey: "tour.steps.bays.title",
+    bodyKey: "tour.steps.bays.body",
     hash: "console",
     targets: ['[data-tour-id="bays"]'],
-    body: (
-      <p>
-        The Forge loads models onto this box's GPU across four load bays (A1–A4). Request a model through a0
-        and the scheduler places it here automatically — you don't normally need to load anything by hand.
-      </p>
-    ),
   },
   {
-    title: "Loading one by hand",
+    titleKey: "tour.steps.bay_load.title",
+    bodyKey: "tour.steps.bay_load.body",
     hash: "console",
     targets: ['[data-tour-id="bay-load"]', '[data-tour-id="bays"]'],
-    body: (
-      <p>
-        A free bay shows a <b>+ Load model</b> button. Clicking it doesn't load anything by itself — it scrolls
-        down to the config picker below, where the real Load button lives.
-      </p>
-    ),
   },
   {
-    title: "Pick a config",
+    titleKey: "tour.steps.pick_config.title",
+    bodyKey: "tour.steps.pick_config.body",
     hash: "console",
     targets: ["#model-gallery"],
-    body: (
-      <p>
-        This carousel is the config picker — one card per loadable model configuration. Each card's own{" "}
-        <b>Load</b> button opens a confirm dialog and picks (or lets you choose) which bay it lands in.
-      </p>
-    ),
   },
   {
-    title: "Ask smith",
+    titleKey: "tour.steps.ask_smith.title",
+    bodyKey: "tour.steps.ask_smith.body",
     hash: "console",
     targets: ['[data-tour-id="smith-tray"]'],
-    body: (
-      <p>
-        <b>Smith</b> is the built-in maintenance agent: it runs checks on a schedule, watches for drift and
-        failures, and proposes fixes. Click here to expand the chat and ask it anything in plain language.
-      </p>
-    ),
   },
   {
-    title: "Add a model",
+    titleKey: "tour.steps.add_model.title",
+    bodyKey: "tour.steps.add_model.body",
     hash: "models",
     targets: ['[data-tour-id="models-add-tab"]'],
-    body: (
-      <p>
-        On the Models page, <b>Add Model</b> searches Hugging Face directly, runs a pre-flight check against
-        this hardware, and downloads + auto-registers the result into the catalog.
-      </p>
-    ),
   },
 ];
 
@@ -181,6 +163,7 @@ function cardStyle(rect: Rect | null, cardSize: { width: number; height: number 
 }
 
 export function OnboardingTour() {
+  const { t } = useTranslation("onboarding");
   const { open, dismiss } = useOnboarding();
   const [stepIdx, setStepIdx] = useState(0);
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -238,31 +221,35 @@ export function OnboardingTour() {
         style={cardStyle(rect, cardSize)}
       >
         <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 6 }}>
-          Getting started · {clampedIdx + 1} of {STEPS.length}
+          {t("tour.progress", { current: clampedIdx + 1, total: STEPS.length })}
         </div>
-        <h3 id="onboarding-title" style={{ marginBottom: 8 }}>{step.title}</h3>
-        <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.6 }}>{step.body}</div>
+        <h3 id="onboarding-title" style={{ marginBottom: 8 }}>{t(step.titleKey)}</h3>
+        <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.6 }}>
+          <p>
+            <Trans i18nKey={step.bodyKey} ns="onboarding" components={{ b: <b /> }} />
+          </p>
+        </div>
         <div className="form-actions" style={{ marginTop: 14 }}>
           {clampedIdx > 0 && (
             <button className="btn" onClick={() => setStepIdx(clampedIdx - 1)}>
-              Back
+              {t("tour.back")}
             </button>
           )}
           {!isFinal && (
             <button className="btn primary" onClick={() => setStepIdx(clampedIdx + 1)}>
-              Next
+              {t("tour.next")}
             </button>
           )}
           {isFinal && (
             <button className="btn primary" autoFocus onClick={dismiss}>
-              Done
+              {t("tour.done")}
             </button>
           )}
           {!isFinal && (
             <button
               className="icon-btn"
-              title="Skip tour"
-              aria-label="Skip tour"
+              title={t("tour.skip")}
+              aria-label={t("tour.skip")}
               style={{ marginLeft: "auto" }}
               onClick={dismiss}
             >

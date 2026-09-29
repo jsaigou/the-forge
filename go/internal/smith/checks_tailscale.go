@@ -41,12 +41,14 @@ func runTailscalePeers(ctx context.Context, env *CheckEnv) Finding {
 	watch := env.TailscaleWatchPeers
 	if len(watch) == 0 {
 		return Finding{CheckID: id, Severity: SeverityOK,
-			Summary: "no watched tailscale peers configured (smith.tailscale.watch_peers is empty)"}
+			Summary:    "no watched tailscale peers configured (smith.tailscale.watch_peers is empty)",
+			SummaryKey: "checks.tailscale_peers.not_configured"}
 	}
 	peers, ok := env.TailscalePeers(ctx)
 	if !ok {
 		return Finding{CheckID: id, Severity: SeverityWarn,
-			Summary: "could not reach tailscaled's LocalAPI to check peer status"}
+			Summary:    "could not reach tailscaled's LocalAPI to check peer status",
+			SummaryKey: "checks.tailscale_peers.unreachable"}
 	}
 
 	statuses := make([]tailscalePeerStatus, 0, len(watch))
@@ -70,9 +72,14 @@ func runTailscalePeers(ctx context.Context, env *CheckEnv) Finding {
 	ev := map[string]any{"watched": statuses}
 	if len(offline) > 0 {
 		return Finding{CheckID: id, Severity: SeverityWarn,
-			Summary:  fmt.Sprintf("%d of %d watched tailscale peer(s) offline or unreachable: %s", len(offline), len(watch), strings.Join(offline, ", ")),
-			Evidence: ev, KBRefs: []string{"infrastructure:tailscale-mesh"}}
+			Summary:    fmt.Sprintf("%d of %d watched tailscale peer(s) offline or unreachable: %s", len(offline), len(watch), strings.Join(offline, ", ")),
+			SummaryKey: "checks.tailscale_peers.offline",
+			Params:     map[string]any{"offline_count": len(offline), "watch_count": len(watch), "names": strings.Join(offline, ", ")},
+			Evidence:   ev, KBRefs: []string{"infrastructure:tailscale-mesh"}}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary: fmt.Sprintf("all %d watched tailscale peer(s) online", len(watch)), Evidence: ev}
+		Summary:    fmt.Sprintf("all %d watched tailscale peer(s) online", len(watch)),
+		SummaryKey: "checks.tailscale_peers.online",
+		Params:     map[string]any{"count": len(watch)},
+		Evidence:   ev}
 }

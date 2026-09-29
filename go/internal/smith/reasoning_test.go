@@ -509,7 +509,7 @@ func TestRunReasoningTurn_DegradesOnFailure(t *testing.T) {
 
 	// Direct, synchronous call — exercises the retry-then-degrade path
 	// without the Chat()/goroutine indirection.
-	s.runReasoningTurn(ctx, convID, msgID, "why is the box slow?", nil, nil, true)
+	s.runReasoningTurn(ctx, convID, msgID, "why is the box slow?", nil, nil, true, "en")
 
 	_, msgs, err := s.GetConversation(ctx, convID)
 	if err != nil {
@@ -566,7 +566,7 @@ func TestRunReasoningTurn_BudgetExceededSkipsA0Entirely(t *testing.T) {
 	if err != nil {
 		t.Fatalf("appendMessage: %v", err)
 	}
-	s.runReasoningTurn(ctx, convID, msgID, "hello", nil, nil, true)
+	s.runReasoningTurn(ctx, convID, msgID, "hello", nil, nil, true, "en")
 
 	if called {
 		t.Error("a0 should never have been called once the retry budget is exceeded")
@@ -600,7 +600,7 @@ func TestBuildContext_RedactsFindingEvidence(t *testing.T) {
 		t.Fatalf("persistFindings: %v", err)
 	}
 
-	got := s.buildContext(ctx, "what's wrong with compressor?", nil, nil, "")
+	got := s.buildContext(ctx, "what's wrong with compressor?", nil, nil, "", "")
 	if strings.Contains(got, "sk-router-shouldnotleak") {
 		t.Errorf("buildContext leaked a secret: %s", got)
 	}
@@ -630,7 +630,7 @@ func TestBuildContext_DropsLowestPriorityBlocksOverBudget(t *testing.T) {
 		}
 	}
 
-	got := s.buildContext(ctx, "mentions ornith-35b by name", nil, nil, "")
+	got := s.buildContext(ctx, "mentions ornith-35b by name", nil, nil, "", "")
 	if len(got) > contextCharBudget+2000 { // header + self-context always survive whole
 		t.Errorf("buildContext len = %d, want it capped near contextCharBudget (%d)", len(got), contextCharBudget)
 	}
@@ -652,7 +652,7 @@ func TestBuildContext_WebBlockPositionedSecond(t *testing.T) {
 	}
 
 	docs := []*web.Document{{Provider: "direct", URL: "https://example.com", Title: "Example", Text: "web content here"}}
-	got := s.buildContext(ctx, "x", docs, nil, "")
+	got := s.buildContext(ctx, "x", docs, nil, "", "")
 
 	selfIdx := strings.Index(got, "Self context")
 	webIdx := strings.Index(got, "Web sources")
@@ -691,7 +691,7 @@ func TestBuildContext_WebBlockSurvivesBudgetPressureOverKB(t *testing.T) {
 	}
 
 	docs := []*web.Document{{Provider: "direct", URL: "https://example.com", Title: "Example", Text: strings.Repeat("w", webDocContextChars)}}
-	got := s.buildContext(ctx, "x", docs, nil, "")
+	got := s.buildContext(ctx, "x", docs, nil, "", "")
 	if !strings.Contains(got, "Web sources") {
 		t.Error("web block should survive budget trimming — it's inserted second, not appended last")
 	}
@@ -706,7 +706,7 @@ func TestBuildContext_EmbeddedPromptPresent(t *testing.T) {
 	s := New(Deps{Store: db})
 	ctx := context.Background()
 
-	got := s.buildContext(ctx, "x", nil, nil, "")
+	got := s.buildContext(ctx, "x", nil, nil, "", "")
 	if !strings.Contains(got, "You are the smith") {
 		t.Errorf("buildContext missing the embedded prompt header: %s", got[:min(len(got), 200)])
 	}
@@ -811,7 +811,7 @@ func TestRunToolLoop_DemotionSignalA_ClientErrorRetriesFenced(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "kb_search")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "demote-model", toolModeNative, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "demote-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -844,7 +844,7 @@ func TestRunToolLoop_DemotionSignalB_FenceInContentRecordsFenced(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "kb_search")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "leaky-model", toolModeNative, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "leaky-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -858,5 +858,82 @@ func TestRunToolLoop_DemotionSignalB_FenceInContentRecordsFenced(t *testing.T) {
 	}
 	if got := s.lastToolMode("leaky-model"); got != toolModeFenced {
 		t.Errorf("recorded mode for leaky-model = %q, want %q", got, toolModeFenced)
+	}
+}
+
+// TestPublishStatus_KeyAndParamsAdditive proves publishStatus's Phase 3
+// status_key/params (multilanguage plan) are only present on the wire when
+// a key is actually passed, and that the always-English status text is
+// unchanged either way — a status line with no natural small-enum key
+// (most of smith's SSE prose) must render byte-identically to before this
+// phase.
+func TestPublishStatus_KeyAndParamsAdditive(t *testing.T) {
+	pub := &stubPublisher{}
+	s := New(Deps{Publisher: pub})
+
+	s.publishStatus(1, 2, "brain ready — thinking", "status.brain_ready", nil)
+	s.publishStatus(1, 2, "loading brain model qwen38… — first load typically takes 20–90s",
+		"status.loading_brain", map[string]any{"model": "qwen38"})
+	s.publishStatus(1, 2, "some未-keyed status text", "", nil)
+
+	if len(pub.events) != 3 {
+		t.Fatalf("events = %d, want 3", len(pub.events))
+	}
+
+	ev0 := pub.events[0].Data.(map[string]any)
+	if ev0["status_key"] != "status.brain_ready" {
+		t.Errorf("event 0 status_key = %v, want status.brain_ready", ev0["status_key"])
+	}
+
+	ev1 := pub.events[1].Data.(map[string]any)
+	if ev1["status_key"] != "status.loading_brain" {
+		t.Errorf("event 1 status_key = %v, want status.loading_brain", ev1["status_key"])
+	}
+	params, ok := ev1["params"].(map[string]any)
+	if !ok || params["model"] != "qwen38" {
+		t.Errorf("event 1 params = %v, want {model: qwen38}", ev1["params"])
+	}
+
+	ev2 := pub.events[2].Data.(map[string]any)
+	if _, ok := ev2["status_key"]; ok {
+		t.Errorf("event 2 (no key) should not carry status_key at all, got %v", ev2["status_key"])
+	}
+	if ev2["status"] != "some未-keyed status text" {
+		t.Errorf("event 2 status = %v, want the unchanged English/mixed text", ev2["status"])
+	}
+}
+
+// TestResolveChatLang covers the Phase 3 language gate's decision table
+// (docs/adr/0016-localization.md): "ja" only actually takes effect once
+// JapaneseEnabled is true, and the downgrade notice only fires for a turn
+// that would otherwise have escalated to the reasoning tier in Japanese —
+// never for "en"/unset, and never for a deterministic-tier turn (which
+// never consults lang at all).
+func TestResolveChatLang(t *testing.T) {
+	cases := []struct {
+		name       string
+		requested  string
+		enabled    bool
+		tier       string
+		wantLang   string
+		wantNotice bool
+	}{
+		{"unset defaults to english", "", false, TierReasoning, "en", false},
+		{"explicit english", "en", true, TierReasoning, "en", false},
+		{"ja requested, not enabled, reasoning tier", "ja", false, TierReasoning, "en", true},
+		{"ja requested, not enabled, deterministic tier", "ja", false, TierDeterministic, "en", false},
+		{"ja requested and enabled", "ja", true, TierReasoning, "ja", false},
+		{"ja requested and enabled, deterministic tier", "ja", true, TierDeterministic, "ja", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lang, notice := resolveChatLang(tc.requested, tc.enabled, tc.tier)
+			if lang != tc.wantLang {
+				t.Errorf("lang = %q, want %q", lang, tc.wantLang)
+			}
+			if (notice != "") != tc.wantNotice {
+				t.Errorf("notice = %q (present=%v), want present=%v", notice, notice != "", tc.wantNotice)
+			}
+		})
 	}
 }

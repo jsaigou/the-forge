@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../../lib/api";
 import { familyInheritedIcon } from "../../lib/iconInheritance";
 import {
@@ -27,9 +28,10 @@ export function ModelEditView({ modelId, onDone, onCancel }: { modelId: string; 
   const uploadIcon = useUploadModelIcon();
   const [error, setError] = useState<string | null>(null);
 
+  const { t } = useTranslation("models");
   const existing = models.data?.find((m) => String(m.id) === modelId);
   if (!existing) {
-    return <div className="empty-note">Loading model…</div>;
+    return <div className="empty-note">{t("model_edit.loading")}</div>;
   }
 
   return (
@@ -79,6 +81,7 @@ function ModelEditForm({
   pending: boolean;
   error: string | null;
 }) {
+  const { t } = useTranslation("models");
   const [reason, setReason] = useState("");
   const [familyId, setFamilyId] = useState(existing.family_id);
   const [name, setName] = useState(existing.name);
@@ -120,30 +123,30 @@ function ModelEditForm({
     <div className="model-edit-view">
       {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
 
-      <div className="eyebrow" style={{ marginTop: 0 }}>Identity</div>
+      <div className="eyebrow" style={{ marginTop: 0 }}>{t("model_edit.identity")}</div>
       <div className="form-grid">
-        <label className="form-row">Name *
+        <label className="form-row">{t("model_edit.name")}
           <input value={name} onChange={(e) => setName(e.target.value)} />
         </label>
-        <label className="form-row">Family
+        <label className="form-row">{t("model_edit.family")}
           <select value={familyId} onChange={(e) => setFamilyId(Number(e.target.value))}>
-            <option value={0}>— none —</option>
+            <option value={0}>{t("model_edit.family_none")}</option>
             {families.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
           </select>
         </label>
-        <label className="form-row">Architecture
+        <label className="form-row">{t("model_edit.architecture")}
           <input value={architecture} placeholder="llama" onChange={(e) => setArchitecture(e.target.value)} />
         </label>
-        <label className="form-row">Parameter count
+        <label className="form-row">{t("model_edit.parameter_count")}
           <input value={parameterCount} placeholder="31B" onChange={(e) => setParameterCount(e.target.value)} />
         </label>
-        <label className="form-row">Creator
+        <label className="form-row">{t("model_edit.creator")}
           <input value={creator} placeholder="Qwen" onChange={(e) => setCreator(e.target.value)} />
         </label>
-        <label className="form-row">HF repo
+        <label className="form-row">{t("model_edit.hf_repo")}
           <input value={hfRepo} placeholder="Qwen/Qwen3-Coder-Next" onChange={(e) => setHfRepo(e.target.value)} />
         </label>
-        <label className="form-row" style={{ gridColumn: "1 / -1" }}>Description
+        <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("model_edit.description")}
           <textarea
             value={description}
             rows={3}
@@ -151,7 +154,7 @@ function ModelEditForm({
             onChange={(e) => setDescription(e.target.value)}
           />
         </label>
-        <label className="form-row" style={{ gridColumn: "1 / -1" }}>Key features (one per line)
+        <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("model_edit.key_features_label")}
           <textarea
             value={keyFeaturesText}
             rows={3}
@@ -161,17 +164,17 @@ function ModelEditForm({
         </label>
       </div>
 
-      <div className="eyebrow">License</div>
+      <div className="eyebrow">{t("model_edit.license")}</div>
       <div className="form-grid">
-        <label className="form-row">License name
+        <label className="form-row">{t("model_edit.license_name")}
           <input value={licenseName} placeholder="Apache-2.0" onChange={(e) => setLicenseName(e.target.value)} />
         </label>
-        <label className="form-row">License URL
+        <label className="form-row">{t("model_edit.license_url")}
           <input value={licenseUrl} placeholder="https://…" onChange={(e) => setLicenseUrl(e.target.value)} />
         </label>
       </div>
 
-      <div className="eyebrow">Icon</div>
+      <div className="eyebrow">{t("model_edit.icon")}</div>
       <IconPicker
         value={existing.logo}
         valueDark={existing.logo_dark}
@@ -181,12 +184,12 @@ function ModelEditForm({
         onUpload={onUploadIcon}
       />
 
-      <label className="form-row">Why this change? (optional)
-        <input value={reason} placeholder="e.g. corrected creator after Sprint A logo audit" onChange={(e) => setReason(e.target.value)} />
+      <label className="form-row">{t("model_edit.reason_label")}
+        <input value={reason} placeholder={t("model_edit.reason_placeholder")} onChange={(e) => setReason(e.target.value)} />
       </label>
 
       <div className="form-actions" style={{ marginTop: 20 }}>
-        <button type="button" className="btn" onClick={onCancel}>Cancel</button>
+        <button type="button" className="btn" onClick={onCancel}>{t("model_edit.cancel")}</button>
         <SaveButton className="go" pending={pending} isError={!!error} disabled={pending || !name} onClick={submit} />
       </div>
     </div>

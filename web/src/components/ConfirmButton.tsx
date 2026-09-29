@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 
 // ConfirmButton — Sprint K, amicro "Delete" (Shake Interaction), reworked
 // as an inline arm-then-confirm control (operator's call, replacing every
@@ -15,9 +16,9 @@ export function ConfirmButton({
   onConfirm,
   warning,
   pending = false,
-  label = "Delete",
-  confirmLabel = "Confirm?",
-  pendingLabel = "…",
+  label,
+  confirmLabel,
+  pendingLabel,
   className = "btn",
   style,
   disarmMs = 3000,
@@ -32,6 +33,7 @@ export function ConfirmButton({
   style?: CSSProperties;
   disarmMs?: number;
 }) {
+  const { t } = useTranslation("common");
   const [armed, setArmed] = useState(false);
   const [shaking, setShaking] = useState(false);
   const [fading, setFading] = useState(false);
@@ -77,7 +79,11 @@ export function ConfirmButton({
         disabled={pending}
         onClick={onClick}
       >
-        {pending ? pendingLabel : armed ? confirmLabel : label}
+        {pending
+          ? (pendingLabel ?? t("confirm_button.pending"))
+          : armed
+            ? (confirmLabel ?? t("confirm_button.confirm_question"))
+            : (label ?? t("confirm_button.delete"))}
       </button>
       {armed && warning && <span className="confirm-warning">{warning}</span>}
     </span>

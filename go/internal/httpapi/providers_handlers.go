@@ -63,7 +63,7 @@ func (s *Server) handleProvidersList(w http.ResponseWriter, r *http.Request) {
 		// Catalog read failure (DB error) is a real 500 — distinct from
 		// "no providers configured" (an empty list). Per-provider fetch
 		// failures never reach here; they degrade to unknown/supported:false.
-		writeError(w, http.StatusInternalServerError, "providers query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "providers query failed")
 		return
 	}
 	for _, p := range list {

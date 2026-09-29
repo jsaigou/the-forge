@@ -65,7 +65,7 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	since := time.Now().Add(-dur)
 	events, err := s.deps.Usage.Events(ctx, since, 1_000_000)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "usage query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "usage query failed")
 		return
 	}
 
@@ -346,7 +346,7 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 	since := time.Now().Add(-dur)
 	events, err := s.deps.Usage.Events(ctx, since, limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "usage events query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "usage events query failed")
 		return
 	}
 	for _, ev := range events {
@@ -437,7 +437,7 @@ func (s *Server) handleUsageHeatmap(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	rows, err := s.deps.Usage.TokenActivity(ctx, startDay)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "usage heatmap query failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "usage heatmap query failed")
 		return
 	}
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { ApiError, apiErrorMessage } from "../lib/api";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { StepUpModal } from "../components/StepUpModal";
@@ -85,6 +86,7 @@ export function DangerZone<T>({
   onSave: (draft: T) => Promise<unknown>;
   extraActions?: ReactNode;
 }) {
+  const { t } = useTranslation("settings");
   const [phase, setPhase] = useState<Phase>("collapsed");
   const [draft, setDraft] = useState<T | null>(null);
   const [checks, setChecks] = useState<PreflightCheck[] | null>(null);
@@ -193,7 +195,7 @@ export function DangerZone<T>({
     return (
       <>
         <div className="eyebrow">{title}</div>
-        <div className="card"><div className="empty-note">Admin role required to view this section.</div></div>
+        <div className="card"><div className="empty-note">{t("danger_zone.role_required")}</div></div>
       </>
     );
   }
@@ -201,7 +203,7 @@ export function DangerZone<T>({
     return (
       <>
         <div className="eyebrow">{title}</div>
-        <div className="card"><div className="empty-note">Loading…</div></div>
+        <div className="card"><div className="empty-note">{t("danger_zone.loading")}</div></div>
       </>
     );
   }
@@ -219,15 +221,15 @@ export function DangerZone<T>({
       <div className="eyebrow">{title}</div>
       <div className="danger-zone">
         <div className="dz-head">
-          <span className="dz-title">{armed ? "Unlocked — editing enabled" : "Locked"}</span>
+          <span className="dz-title">{armed ? t("danger_zone.unlocked") : t("danger_zone.locked")}</span>
           {canAdmin && (
             armed ? (
-              <button className="btn" onClick={collapse}>Lock</button>
+              <button className="btn" onClick={collapse}>{t("danger_zone.lock")}</button>
             ) : (
               <ConfirmButton
-                label="Unlock"
-                confirmLabel="Confirm?"
-                warning="This is boot-critical infrastructure config — a bad save can take the daemon down."
+                label={t("danger_zone.unlock")}
+                confirmLabel={t("danger_zone.unlock_confirm")}
+                warning={t("danger_zone.unlock_warning")}
                 onConfirm={unlock}
               />
             )
@@ -241,19 +243,18 @@ export function DangerZone<T>({
         {checks && checks.length > 0 && <Checklist checks={checks} />}
         {phase === "checked-failed" && (
           <div className="error-note" style={{ marginBottom: 12 }}>
-            Nothing was written. Fix the failing field(s) above and re-check, or use{" "}
-            <code>forge config set</code> directly if you need to bypass validation entirely.
+            <Trans i18nKey="danger_zone.check_failed_note" ns="settings" components={{ code: <code /> }} />
           </div>
         )}
         {armed && canAdmin && (
           <div className="form-actions" style={{ marginTop: 12 }}>
             {onCheck && (
               <button className="btn" disabled={phase === "preflighting" || phase === "saving"} onClick={runCheck}>
-                {phase === "preflighting" ? "Checking…" : "Check"}
+                {phase === "preflighting" ? t("danger_zone.checking") : t("danger_zone.check")}
               </button>
             )}
             <button className="btn primary" disabled={!canApply() || phase === "saving"} onClick={save}>
-              {phase === "saving" ? "Applying…" : phase === "saved" ? "✓ Applied" : "Apply"}
+              {phase === "saving" ? t("danger_zone.applying") : phase === "saved" ? t("danger_zone.applied") : t("danger_zone.apply")}
             </button>
           </div>
         )}

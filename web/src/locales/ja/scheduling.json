@@ -1,0 +1,69 @@
+{
+  "calendar": {
+    "title": "予約 · 7日間表示",
+    "cancel_confirm": "予約「{{label}}」をキャンセルしますか?",
+    "cancel_title": "クリックでキャンセル",
+    "bay_hold_suffix": "{{slot}} · スロット確保",
+    "new_reservation": "+ 新しい予約"
+  },
+  "scheduled_jobs_title": "スケジュールジョブ",
+  "smart_queue": {
+    "title": "スマートキュー · MCP",
+    "heading": "ライブキュー — 1つのスケジューラーを複数の利用元が共有",
+    "empty": "キューは空です。",
+    "note": "キューに入ったリクエストがメモリを必要とする場合、アイドル状態のスロットは設定されたタイムアウト後に自動的に解放されます。予約はインタラクティブな読み込みより優先されます。"
+  },
+  "settings_title": "設定",
+  "reservation_modal": {
+    "heading": "新しい予約",
+    "label": "ラベル",
+    "label_placeholder": "夜間評価",
+    "model": "モデル",
+    "select_ellipsis": "選択…",
+    "start": "開始",
+    "end": "終了",
+    "scope": "範囲",
+    "scope_bay": "スロット確保",
+    "scope_whole_box": "ホスト全体",
+    "scope_comfyui": "ComfyUI",
+    "bay": "スロット",
+    "cancel": "キャンセル",
+    "create": "作成",
+    "creating": "作成中…",
+    "validation_error": "ラベル、モデル、開始、終了は必須です。"
+  },
+  "jobs": {
+    "title": "スケジュールジョブ — 指定時刻での強制読み込み",
+    "role_required": "スケジュールジョブを表示するには運用者権限が必要です。",
+    "validation_error": "名前、cron式、コンフィグは必須です。",
+    "no_jobs": "スケジュールジョブは定義されていません。",
+    "last_next": "前回 {{last}} · 次回 {{next}}",
+    "toggle_title": "有効/無効を切り替え",
+    "enabled": "有効",
+    "disabled": "無効",
+    "run_now": "今すぐ実行",
+    "run_now_confirm": "「{{name}}」を今すぐ実行しますか?",
+    "delete": "削除",
+    "delete_confirm": "ジョブ「{{name}}」を削除しますか?",
+    "new_job_title": "新しいジョブ",
+    "name": "名前",
+    "name_placeholder": "nightly-batch",
+    "cron": "Cron",
+    "config": "コンフィグ",
+    "slot": "スロット",
+    "slot_any": "指定なし(スケジューラーが選択)",
+    "add_job": "+ ジョブを追加",
+    "creating": "作成中…",
+    "cron_help": "5つのフィールド: 分 時 日 月 曜日 — 例: \"0 3 * * *\" = 毎日03:00、\"*/30 * * * *\" = 30分ごと、\"0 9-17 * * 1-5\" = 平日09:00–17:00の毎時。"
+  },
+  "tunables": {
+    "role_required": "スケジューラー設定を表示するには運用者権限が必要です。",
+    "loading": "スケジューラー設定を読み込み中…",
+    "heading": "スケジューラー調整値",
+    "field_idle_unload": "アイドル解放時間(秒)",
+    "field_small_job_threshold": "小規模ジョブのトークン閾値",
+    "field_priority_jump_cap": "優先度引き上げ上限",
+    "field_reservation_soon": "予約直前ウィンドウ(分)",
+    "reset": "リセット"
+  }
+}

@@ -47,7 +47,7 @@ func (s *Server) handleSmithSourcingEvaluate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if b.HFRepo == "" {
-		writeValidationError(w, map[string]string{"hf_repo": "required"})
+		writeValidationErrorCodes(w, map[string]string{"hf_repo": "required"}, map[string]string{"hf_repo": "required"})
 		return
 	}
 	eval, err := s.deps.Smith.Evaluate(r.Context(), b.HFRepo, b.BudgetBytes)

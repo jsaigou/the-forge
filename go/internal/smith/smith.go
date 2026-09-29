@@ -122,6 +122,17 @@ const (
 	// only, same posture as the other smith.* toggles.
 	SettingAutoRecoverDeviceLost = "smith.auto_recover_device_lost"
 
+	// SettingJapaneseEnabled ("smith.language_ja_enabled", JSON bool) gates
+	// whether a Lang:"ja" chat request actually gets a Japanese-directed
+	// prompt (multilanguage plan Phase 3, docs/adr/0016-localization.md).
+	// Default false: a ja request degrades to an English answer plus a
+	// one-line notice until the Japanese braineval gate confirms grounding
+	// doesn't regress against the production brain (gemma4-e4b-qat) and the
+	// operator explicitly turns this on — never flipped unilaterally by
+	// code, same posture as the smith.model switch in the efficiency
+	// initiative. Never seeded by migration, code default only.
+	SettingJapaneseEnabled = "smith.language_ja_enabled"
+
 	// SettingAutoHandoffCloud is the graceful-failover toggle
 	// ("smith.auto_handoff_cloud", JSON bool). When true (default), a
 	// crash-looping local brain (device-lost that recurs within the
@@ -296,6 +307,17 @@ type Finding struct {
 	// leaves it unset.
 	Confidence     Confidence `json:"confidence"`
 	ConfidenceNote string     `json:"confidence_note,omitempty"`
+	// SummaryKey/Params (Phase 3, multilanguage plan,
+	// docs/adr/0016-localization.md) let the FE render a translated version
+	// of Summary via t("smith:"+SummaryKey, Params), falling back to the raw
+	// (always-English) Summary when SummaryKey is "" — a check that hasn't
+	// been migrated yet, or a Summary built from operator-entered data that
+	// can't be templated. Summary itself never changes and stays the
+	// ground truth for logs, audit, and the CLI. Additive, both omitted from
+	// JSON when unset. Persisted via smith_findings.summary_key/params
+	// (migration 0089).
+	SummaryKey string         `json:"summary_key,omitempty"`
+	Params     map[string]any `json:"params,omitempty"`
 }
 
 // normalize returns the finding with non-nil slice/map fields so its JSON is
@@ -334,10 +356,14 @@ type StoredFinding struct {
 	CreatedAt       time.Time `json:"created_at"`
 	KBRefs          []string  `json:"kb_refs"`
 	RepeatCount     int       `json:"repeat_count"` // >1 when dedup collapsed repeat crits (migration 0045)
-	// Confidence/ConfidenceNote (migration <next>, Tier 1 Sprint 4) mirror
+	// Confidence/ConfidenceNote (migration 0075, Tier 1 Sprint 4) mirror
 	// Finding's fields of the same name.
 	Confidence     Confidence `json:"confidence"`
 	ConfidenceNote string     `json:"confidence_note,omitempty"`
+	// SummaryKey/Params (migration 0089, Phase 3 multilanguage plan) mirror
+	// Finding's fields of the same name.
+	SummaryKey string         `json:"summary_key,omitempty"`
+	Params     map[string]any `json:"params,omitempty"`
 }
 
 // BrainResolution is where smith's own inference would run (docs/v5-smith.md
@@ -1416,6 +1442,13 @@ func (s *Smith) AutoRecoverDeviceLost(ctx context.Context) bool {
 		return true
 	}
 	return v
+}
+
+// JapaneseEnabled reads smith.language_ja_enabled, defaulting to false (see
+// SettingJapaneseEnabled's doc comment — off until the braineval gate and an
+// explicit operator decision).
+func (s *Smith) JapaneseEnabled(ctx context.Context) bool {
+	return s.settingBool(ctx, SettingJapaneseEnabled, false)
 }
 
 // AutoHandoffCloud reads smith.auto_handoff_cloud (JSON bool), defaulting to

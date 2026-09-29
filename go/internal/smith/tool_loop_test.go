@@ -160,7 +160,7 @@ func TestRunToolLoop_HappyPath_ToolRoundThenAnswer(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "kb_search")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -208,7 +208,7 @@ func TestRunToolLoop_MaxRoundsExhaustion_FinalRequestOmitsTools(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "kb_search")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -245,7 +245,7 @@ func TestRunToolLoop_UnknownToolContinues(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "kb_search")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -285,7 +285,7 @@ func TestRunToolLoop_NetworkBudgetExhausted(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "web_search")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -324,7 +324,7 @@ func TestRunToolLoop_RepeatCallDedupeEventuallyForcesToolsOff(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "kb_search")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -395,7 +395,7 @@ func TestRunToolLoop_VerifyRoundFencedModeKeepsToolInstructions(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "kb_search")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeFenced, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeFenced, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -434,7 +434,7 @@ func TestRunToolLoop_SuccessfulNativeRoundRecordsMode(t *testing.T) {
 	if got := s.lastToolMode("clean-model"); got != "" {
 		t.Fatalf("precondition: lastToolMode should start empty, got %q", got)
 	}
-	_, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "clean-model", toolModeNative, tools, batcher, true, "")
+	_, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "clean-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -452,7 +452,7 @@ func TestRunToolLoop_OffModeIsSingleRoundNoTools(t *testing.T) {
 	ctx := context.Background()
 	batcher := s.newTokenBatcher(convID, msgID)
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeOff, nil, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeOff, nil, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -490,7 +490,7 @@ func TestRunToolLoop_VerifyNudgeInjectedAfterToolUse(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "kb_search")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -532,7 +532,7 @@ func TestRunToolLoop_VerifyRoundSwapsToAuditorPrompt(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "kb_search")}
 
-	_, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "")
+	_, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -559,6 +559,44 @@ func TestRunToolLoop_VerifyRoundSwapsToAuditorPrompt(t *testing.T) {
 	}
 }
 
+// TestRunToolLoop_JapaneseDirectiveReachesVerifyRound is Phase 3 of the
+// multilanguage plan's own guarantee (docs/adr/0016-localization.md):
+// "the same directive goes into the verify-round audit.md swap and the
+// nudge, so every prompt the brain sees agrees." Proves both the injected
+// nudge and the swapped-in auditor system prompt carry languageDirective's
+// text when lang=="ja" — a brain that only saw the executor prompt's
+// directive (round 1) but lost it on the auditor swap (round 3) would
+// silently answer in English on the verify round.
+func TestRunToolLoop_JapaneseDirectiveReachesVerifyRound(t *testing.T) {
+	ts, rec := fakeA0Rounds(t, [][]string{
+		nativeToolCallFrames("call_1", "kb_search", `{"query":"gtt"}`),
+		contentFrames("preliminary answer"),
+		nativeToolCallFrames("call_2", "kb_search", `{"query":"gtt"}`),
+		contentFrames("verified answer"),
+	})
+	defer ts.Close()
+
+	s, convID, msgID := setupToolLoopConv(t, ts)
+	ctx := context.Background()
+	batcher := s.newTokenBatcher(convID, msgID)
+	tools := []Tool{mustFindTool(t, "kb_search")}
+
+	_, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "", "ja")
+	batcher.flush()
+	if err != nil {
+		t.Fatalf("runToolLoop: %v", err)
+	}
+
+	reqs := rec.all()
+	if len(reqs) < 3 {
+		t.Fatalf("need at least 3 requests, got %d", len(reqs))
+	}
+	round3Body, _ := json.Marshal(reqs[2])
+	if !strings.Contains(string(round3Body), "Answer in Japanese") {
+		t.Error("round 3 (verify nudge + auditor prompt) should carry the Japanese language directive")
+	}
+}
+
 // TestRunToolLoop_NoVerifyNudgeForImmediateAnswer proves a model that answers
 // without any tool calls is accepted immediately — the verify gate only
 // fires after tools were used.
@@ -573,7 +611,7 @@ func TestRunToolLoop_NoVerifyNudgeForImmediateAnswer(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "kb_search")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -602,7 +640,7 @@ func TestRunToolLoop_UnverifiedMarkerWhenNoVerifyRound(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "kb_search")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -631,7 +669,7 @@ func TestRunToolLoop_NoMarkerWhenVerified(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "kb_search")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -673,7 +711,7 @@ func TestRunToolLoop_LocalBrainCapsCallsPerRound(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "kb_search")}
 
-	_, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "")
+	_, err := s.runToolLoop(ctx, convID, msgID, "sys", "why?", "test-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -726,7 +764,7 @@ func TestRunToolLoop_PrecheckConfirmsSkipsAuditor(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "run_check")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "is gtt ok?", "test-model", toolModeNative, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "is gtt ok?", "test-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -814,7 +852,7 @@ func TestRunToolLoop_PrecheckContradictionAsksForReconciliation(t *testing.T) {
 	batcher := s.newTokenBatcher(convID, msgID)
 	tools := []Tool{mustFindTool(t, "run_check")}
 
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "is gtt ok?", "test-model", toolModeNative, tools, batcher, true, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "is gtt ok?", "test-model", toolModeNative, tools, batcher, true, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)
@@ -863,7 +901,7 @@ func TestRunToolLoop_MixedRoundStillUsesFullAuditor(t *testing.T) {
 	tools := []Tool{mustFindTool(t, "run_check"), mustFindTool(t, "kb_search")}
 
 	// brainLocal=false so callsPerRound allows both calls in round 1.
-	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "is gtt ok?", "test-model", toolModeNative, tools, batcher, false, "")
+	result, err := s.runToolLoop(ctx, convID, msgID, "sys", "is gtt ok?", "test-model", toolModeNative, tools, batcher, false, "", "")
 	batcher.flush()
 	if err != nil {
 		t.Fatalf("runToolLoop: %v", err)

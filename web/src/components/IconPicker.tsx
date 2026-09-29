@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { ICON_MANIFEST } from "../assets/icons/manifest";
 import { Icon } from "./Icon";
 import type { InheritedIcon } from "../lib/iconInheritance";
@@ -51,6 +52,7 @@ export function IconPicker({
   onClear?: (dark: boolean) => void;
   pending?: boolean;
 }) {
+  const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [variant, setVariant] = useState<"light" | "dark">("light");
   const dark = variant === "dark";
@@ -66,30 +68,35 @@ export function IconPicker({
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <span title="Light theme">
+          <span title={t("catalog_form.icon_picker.light_theme_title")}>
             {effectiveLight ? <Icon slug={effectiveLight} name={value || prettySlug(effectiveLight)} /> : <span className="icon" />}
           </span>
-          <span title="Dark theme">
+          <span title={t("catalog_form.icon_picker.dark_theme_title")}>
             {effectiveDark ? <Icon slug={effectiveDark} name={valueDark || prettySlug(effectiveDark)} /> : <span className="icon" />}
           </span>
         </div>
         <div style={{ fontSize: 11, color: "var(--text-mute)", flex: 1 }}>
           {value ? (
-            <>Light set to <code>{value.startsWith("data:") ? "(uploaded image)" : value}</code></>
+            <>{t("catalog_form.icon_picker.light_set_to")} <code>{value.startsWith("data:") ? t("catalog_form.icon_picker.uploaded_image") : value}</code></>
           ) : inherited ? (
             inherited.logo ? (
-              <>Light inherits <code>{inherited.logo.startsWith("data:") ? "(uploaded image)" : inherited.logo}</code> from {inherited.label}</>
+              <Trans
+                i18nKey="catalog_form.icon_picker.light_inherits_from"
+                ns="common"
+                values={{ icon: inherited.logo.startsWith("data:") ? t("catalog_form.icon_picker.uploaded_image") : inherited.logo, label: inherited.label }}
+                components={{ 1: <code /> }}
+              />
             ) : (
-              <>No light icon set — inherits from {inherited.label}, which has none either</>
+              <>{t("catalog_form.icon_picker.light_inherits_none", { label: inherited.label })}</>
             )
           ) : (
-            <>No light icon set</>
+            <>{t("catalog_form.icon_picker.light_not_set")}</>
           )}
           {" · "}
           {valueDark ? (
-            <>dark set to <code>{valueDark.startsWith("data:") ? "(uploaded image)" : valueDark}</code></>
+            <>{t("catalog_form.icon_picker.dark_set_to")} <code>{valueDark.startsWith("data:") ? t("catalog_form.icon_picker.uploaded_image") : valueDark}</code></>
           ) : (
-            <>dark same as light</>
+            <>{t("catalog_form.icon_picker.dark_same_as_light")}</>
           )}
         </div>
         <div className="seg" style={{ display: "flex", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
@@ -100,7 +107,7 @@ export function IconPicker({
             aria-pressed={variant === "light"}
             onClick={() => setVariant("light")}
           >
-            ☀ Light
+            {t("catalog_form.icon_picker.light_tab")}
           </button>
           <button
             type="button"
@@ -109,7 +116,7 @@ export function IconPicker({
             aria-pressed={variant === "dark"}
             onClick={() => setVariant("dark")}
           >
-            ☾ Dark
+            {t("catalog_form.icon_picker.dark_tab")}
           </button>
         </div>
         <button
@@ -119,13 +126,16 @@ export function IconPicker({
           onClick={() => setOpen((o) => !o)}
           disabled={pending}
         >
-          {open ? "Close" : "Change icon"}
+          {open ? t("catalog_form.icon_picker.close") : t("catalog_form.icon_picker.change_icon")}
         </button>
       </div>
       {open && (
         <div style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: 8, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: "var(--text-mute)", marginBottom: 8, textTransform: "uppercase", letterSpacing: ".06em" }}>
-            Editing the {dark ? "dark" : "light"} mark{!dark && !value && !valueDark ? "" : dark && !valueDark ? " (currently: same as light)" : ""}
+            {t("catalog_form.icon_picker.editing_mark", {
+              variant: dark ? t("catalog_form.icon_picker.editing_mark_dark") : t("catalog_form.icon_picker.editing_mark_light"),
+              suffix: !dark && !value && !valueDark ? "" : dark && !valueDark ? t("catalog_form.icon_picker.editing_mark_same_as_light_suffix") : "",
+            })}
           </div>
           <div
             style={{
@@ -183,12 +193,12 @@ export function IconPicker({
                 }}
               >
                 {dark
-                  ? "Clear dark (fall back to light)"
-                  : `Clear${inherited ? ` (inherit from ${inherited.label})` : ""}`}
+                  ? t("catalog_form.icon_picker.clear_dark")
+                  : `${t("catalog_form.icon_picker.clear")}${inherited ? t("catalog_form.icon_picker.clear_inherit_suffix", { label: inherited.label }) : ""}`}
               </button>
             )}
             <label className="form-row" style={{ margin: 0, fontSize: 11, flex: 1 }}>
-              or upload {dark ? "a dark-theme mark" : ""} (WebM/JPG/PNG/WebP/SVG, ≤1 MB)
+              {t("catalog_form.icon_picker.upload_label", { suffix: dark ? t("catalog_form.icon_picker.upload_dark_suffix") : "" })}
               <input
                 type="file"
                 accept="image/webp,image/png,image/jpeg,image/svg+xml,video/webm"

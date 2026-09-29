@@ -30,7 +30,7 @@ func (s *Server) handleFavoritesList(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.deps.Favorites.List(r.Context(), identity(r).Name, subjectType)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list favorites")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "failed to list favorites")
 		return
 	}
 	ids := make([]int64, len(list))
@@ -43,16 +43,16 @@ func (s *Server) handleFavoritesList(w http.ResponseWriter, r *http.Request) {
 // handleFavoriteAdd — PUT /api/v1/favorites/{subject_type}/{id} (star).
 func (s *Server) handleFavoriteAdd(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Favorites == nil {
-		writeError(w, http.StatusServiceUnavailable, "favorites not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "favorites"}, "favorites not wired")
 		return
 	}
 	subjectType, id, ok := favoriteSubject(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	if err := s.deps.Favorites.Add(r.Context(), identity(r).Name, subjectType, id); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to add favorite")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "failed to add favorite")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -61,16 +61,16 @@ func (s *Server) handleFavoriteAdd(w http.ResponseWriter, r *http.Request) {
 // handleFavoriteRemove — DELETE /api/v1/favorites/{subject_type}/{id} (un-star).
 func (s *Server) handleFavoriteRemove(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Favorites == nil {
-		writeError(w, http.StatusServiceUnavailable, "favorites not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "favorites"}, "favorites not wired")
 		return
 	}
 	subjectType, id, ok := favoriteSubject(r)
 	if !ok {
-		writeValidationError(w, map[string]string{"id": "must be an integer"})
+		writeValidationErrorCodes(w, map[string]string{"id": "must be an integer"}, map[string]string{"id": "must_be_integer"})
 		return
 	}
 	if err := s.deps.Favorites.Remove(r.Context(), identity(r).Name, subjectType, id); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to remove favorite")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "failed to remove favorite")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

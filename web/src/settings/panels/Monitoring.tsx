@@ -4,6 +4,7 @@
 // — retention_days is live, sample_interval_s is restart, on the SAME
 // endpoint; see MetricsSettings's doc comment in types.ts for why they're
 // badged differently despite being adjacent fields).
+import { useTranslation } from "react-i18next";
 import { SaveButton } from "../../components/SaveButton";
 import { StepUpModal } from "../../components/StepUpModal";
 import { useMetricsSettings, useMonitorSettings, useUpdateMetricsSettings, useUpdateMonitorSettings } from "../../lib/queries";
@@ -14,6 +15,7 @@ import { useSettingsGroup } from "../useSettingsGroup";
 const F = Object.fromEntries(MONITORING_FIELDS.map((f) => [f.id, f]));
 
 function MonitorCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useMonitorSettings();
   const update = useUpdateMonitorSettings();
   const g = useSettingsGroup(cfg.data, update);
@@ -21,23 +23,23 @@ function MonitorCard({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError) {
     return (
       <>
-        <div className="eyebrow">Monitor</div>
-        <div className="card"><div className="empty-note">Operator role required to view monitor settings.</div></div>
+        <div className="eyebrow">{t("monitoring.monitor_title")}</div>
+        <div className="card"><div className="empty-note">{t("shared.role_required", { resource: t("monitoring.monitor_resource") })}</div></div>
       </>
     );
   }
   if (!g.active) {
     return (
       <>
-        <div className="eyebrow">Monitor</div>
-        <div className="card"><div className="empty-note">Loading monitor settings…</div></div>
+        <div className="eyebrow">{t("monitoring.monitor_title")}</div>
+        <div className="card"><div className="empty-note">{t("shared.loading", { resource: t("monitoring.monitor_resource") })}</div></div>
       </>
     );
   }
 
   return (
     <>
-      <div className="eyebrow">Monitor</div>
+      <div className="eyebrow">{t("monitoring.monitor_title")}</div>
       <div className="card">
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
         <div className="form-grid">
@@ -54,7 +56,7 @@ function MonitorCard({ canAdmin }: { canAdmin: boolean }) {
         </div>
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={g.reset}>Reset</button>
+            <button className="btn" onClick={g.reset}>{t("shared.reset")}</button>
             <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
           </div>
         )}
@@ -65,6 +67,7 @@ function MonitorCard({ canAdmin }: { canAdmin: boolean }) {
 }
 
 function MetricsCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const cfg = useMetricsSettings();
   const update = useUpdateMetricsSettings();
   const g = useSettingsGroup(cfg.data, update);
@@ -72,23 +75,23 @@ function MetricsCard({ canAdmin }: { canAdmin: boolean }) {
   if (cfg.isError) {
     return (
       <>
-        <div className="eyebrow">Metrics</div>
-        <div className="card"><div className="empty-note">Operator role required to view metrics settings.</div></div>
+        <div className="eyebrow">{t("monitoring.metrics_title")}</div>
+        <div className="card"><div className="empty-note">{t("shared.role_required", { resource: t("monitoring.metrics_resource") })}</div></div>
       </>
     );
   }
   if (!g.active) {
     return (
       <>
-        <div className="eyebrow">Metrics</div>
-        <div className="card"><div className="empty-note">Loading metrics settings…</div></div>
+        <div className="eyebrow">{t("monitoring.metrics_title")}</div>
+        <div className="card"><div className="empty-note">{t("shared.loading", { resource: t("monitoring.metrics_resource") })}</div></div>
       </>
     );
   }
 
   return (
     <>
-      <div className="eyebrow">Metrics</div>
+      <div className="eyebrow">{t("monitoring.metrics_title")}</div>
       <div className="card">
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
         <div className="form-grid">
@@ -99,7 +102,7 @@ function MetricsCard({ canAdmin }: { canAdmin: boolean }) {
         </div>
         {canAdmin && g.dirty && (
           <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={g.reset}>Reset</button>
+            <button className="btn" onClick={g.reset}>{t("shared.reset")}</button>
             <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
           </div>
         )}

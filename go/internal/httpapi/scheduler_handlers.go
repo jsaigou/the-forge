@@ -74,7 +74,7 @@ func (s *Server) handleReservationCreate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if s.deps.Sched == nil {
-		writeError(w, http.StatusServiceUnavailable, "scheduler not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "scheduler"}, "scheduler not wired")
 		return
 	}
 
@@ -119,7 +119,7 @@ func (s *Server) handleReservationCreate(w http.ResponseWriter, r *http.Request)
 // handleReservationUpdate updates a reservation (Contract 1 §2 PUT).
 func (s *Server) handleReservationUpdate(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Sched == nil {
-		writeError(w, http.StatusServiceUnavailable, "scheduler not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "scheduler"}, "scheduler not wired")
 		return
 	}
 	label := r.PathValue("label")
@@ -175,7 +175,7 @@ func (s *Server) handleReservationUpdate(w http.ResponseWriter, r *http.Request)
 // handleReservationCancel cancels a reservation (Contract 1 §2 #15).
 func (s *Server) handleReservationCancel(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Sched == nil {
-		writeError(w, http.StatusServiceUnavailable, "scheduler not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "scheduler"}, "scheduler not wired")
 		return
 	}
 	label := r.PathValue("label")
@@ -229,7 +229,7 @@ type couldLoadResponse struct {
 func (s *Server) handleSchedulerCouldLoad(w http.ResponseWriter, r *http.Request) {
 	model := r.URL.Query().Get("model")
 	if model == "" {
-		writeValidationError(w, map[string]string{"model": "is required"})
+		writeValidationErrorCodes(w, map[string]string{"model": "is required"}, map[string]string{"model": "required"})
 		return
 	}
 	if s.deps.Sched == nil {
@@ -240,7 +240,7 @@ func (s *Server) handleSchedulerCouldLoad(w http.ResponseWriter, r *http.Request
 	if raw := r.URL.Query().Get("horizon_s"); raw != "" {
 		var secs float64
 		if _, err := fmt.Sscanf(raw, "%f", &secs); err != nil || secs <= 0 {
-			writeValidationError(w, map[string]string{"horizon_s": "must be a positive number"})
+			writeValidationErrorCodes(w, map[string]string{"horizon_s": "must be a positive number"}, map[string]string{"horizon_s": "must_be_positive_number"})
 			return
 		}
 		horizon = time.Duration(secs * float64(time.Second))
@@ -297,7 +297,7 @@ func (s *Server) handleSchedulerConfigPut(w http.ResponseWriter, r *http.Request
 		b = b2
 	}
 	if s.deps.Sched == nil {
-		writeError(w, http.StatusServiceUnavailable, "scheduler not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "scheduler"}, "scheduler not wired")
 		return
 	}
 	cfg := sched.Config{
@@ -326,7 +326,7 @@ func (s *Server) handleSchedulerConfigPut(w http.ResponseWriter, r *http.Request
 // and returns 200 accepted.
 func (s *Server) handleSwitch(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Engine == nil {
-		writeError(w, http.StatusServiceUnavailable, "engine not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "engine"}, "engine not wired")
 		return
 	}
 	mode := r.PathValue("mode")
@@ -336,6 +336,8 @@ func (s *Server) handleSwitch(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{
 				"success": false,
 				"message": fmt.Sprintf("Unknown mode: %s", mode),
+				"code":    "unknown_mode",
+				"params":  map[string]any{"mode": mode},
 			})
 			return
 		}
@@ -348,6 +350,7 @@ func (s *Server) handleSwitch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"success": false,
 			"message": fmt.Sprintf("Switch already in progress to %s", target),
+			"code":    "already_in_progress",
 		})
 		return
 	}
@@ -417,7 +420,7 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.deps.Engine == nil {
-		writeError(w, http.StatusServiceUnavailable, "engine not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "engine"}, "engine not wired")
 		return
 	}
 	if s.deps.Config != nil {
@@ -657,7 +660,7 @@ func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.deps.Engine == nil {
-		writeError(w, http.StatusServiceUnavailable, "engine not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "engine"}, "engine not wired")
 		return
 	}
 
@@ -835,7 +838,7 @@ func (s *Server) handleRouterSettingsGet(w http.ResponseWriter, r *http.Request)
 // request, so a save here is immediate, no restart or ReloadConfig needed.
 func (s *Server) handleRouterSettingsPut(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings store not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "settings"}, "settings store not available")
 		return
 	}
 	var body routerSettingsBody
@@ -908,13 +911,13 @@ func (s *Server) handleRouterSettingsPut(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleServiceMode(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if s.deps.Config == nil {
-		writeError(w, http.StatusServiceUnavailable, "config not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "config"}, "config not available")
 		return
 	}
 	cfg := s.deps.Config()
 	mode, ok := cfg.Modes[name]
 	if !ok {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("unknown mode: %s", name))
+		writeErrorCode(w, http.StatusNotFound, "unknown_mode", map[string]any{"mode": name}, fmt.Sprintf("unknown mode: %s", name))
 		return
 	}
 	if mode.Type != "service" {
@@ -951,7 +954,7 @@ func (s *Server) handleTTS(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleFixedInfraService(name, unit string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.deps.Config == nil {
-			writeError(w, http.StatusServiceUnavailable, "config not available")
+			writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "config"}, "config not available")
 			return
 		}
 		if _, ok := s.deps.Config().Ports[name]; !ok {
@@ -966,7 +969,7 @@ func (s *Server) handleFixedInfraService(name, unit string) http.HandlerFunc {
 // engine's aux-unit control and writes the uniform lifecycle response.
 func (s *Server) runUnitOp(w http.ResponseWriter, r *http.Request, unit, action, target string) {
 	if s.deps.Engine == nil {
-		writeError(w, http.StatusServiceUnavailable, "engine not available")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "engine"}, "engine not available")
 		return
 	}
 	start := strings.HasSuffix(r.URL.Path, "/start")

@@ -52,12 +52,16 @@ func (s *Smith) persistFindings(ctx context.Context, findings []Finding, sweepKi
 		if confidence == "" {
 			confidence = ConfidenceHigh
 		}
+		paramsJSON, err := json.Marshal(f.Params)
+		if err != nil || f.Params == nil {
+			paramsJSON = []byte("{}") // never block a finding's own persistence over this
+		}
 		res, err := s.d.Store.SQL().ExecContext(ctx,
 			`INSERT INTO smith_findings
-				(investigation_id, check_id, severity, summary, evidence, sweep_kind, created_at, kb_refs, confidence, confidence_note)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				(investigation_id, check_id, severity, summary, evidence, sweep_kind, created_at, kb_refs, confidence, confidence_note, summary_key, params)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			invID, f.CheckID, string(f.Severity), f.Summary, evidenceJSON(f.Evidence), sweepKind, at.Unix(), string(kbRefsJSON),
-			string(confidence), f.ConfidenceNote)
+			string(confidence), f.ConfidenceNote, f.SummaryKey, string(paramsJSON))
 		if err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("insert finding %s: %w", f.CheckID, err)
@@ -82,7 +86,7 @@ func (s *Smith) ListFindings(ctx context.Context, since time.Time, severity stri
 		limit = defaultFindingsLimit
 	}
 
-	query := `SELECT id, investigation_id, check_id, severity, summary, evidence, sweep_kind, created_at, kb_refs, repeat_count, confidence, confidence_note
+	query := `SELECT id, investigation_id, check_id, severity, summary, evidence, sweep_kind, created_at, kb_refs, repeat_count, confidence, confidence_note, summary_key, params
 	          FROM smith_findings`
 	args := []any{}
 	wheres := []string{}
@@ -117,9 +121,10 @@ func (s *Smith) ListFindings(ctx context.Context, since time.Time, severity stri
 		var sf StoredFinding
 		var invID sql.NullInt64
 		var createdAt int64
-		var kbRefsJSON string
+		var kbRefsJSON, paramsJSON string
 		if err := rows.Scan(&sf.ID, &invID, &sf.CheckID, &sf.Severity, &sf.Summary,
-			&sf.Evidence, &sf.SweepKind, &createdAt, &kbRefsJSON, &sf.RepeatCount, &sf.Confidence, &sf.ConfidenceNote); err != nil {
+			&sf.Evidence, &sf.SweepKind, &createdAt, &kbRefsJSON, &sf.RepeatCount, &sf.Confidence, &sf.ConfidenceNote,
+			&sf.SummaryKey, &paramsJSON); err != nil {
 			return nil, fmt.Errorf("smith: scan finding: %w", err)
 		}
 		if invID.Valid {
@@ -127,6 +132,7 @@ func (s *Smith) ListFindings(ctx context.Context, since time.Time, severity stri
 		}
 		sf.CreatedAt = time.Unix(createdAt, 0).UTC()
 		sf.KBRefs = unmarshalKBRefs(kbRefsJSON)
+		sf.Params = unmarshalParams(paramsJSON)
 		out = append(out, sf)
 	}
 	return out, rows.Err()
@@ -145,6 +151,19 @@ func unmarshalKBRefs(raw string) []string {
 		refs = []string{}
 	}
 	return refs
+}
+
+// unmarshalParams parses a smith_findings.params JSON column — malformed/
+// empty JSON degrades to nil (SummaryKey then has no interpolation values;
+// the FE's t() call still renders the key's non-interpolated text, same
+// nil-tolerance posture as unmarshalKBRefs).
+func unmarshalParams(raw string) map[string]any {
+	if raw == "" {
+		return nil
+	}
+	var params map[string]any
+	_ = json.Unmarshal([]byte(raw), &params)
+	return params
 }
 
 // PurgeFindings manually deletes standalone findings older than maxAge, or

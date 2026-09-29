@@ -15,12 +15,14 @@ type profileRunBody struct {
 	Mode string `json:"mode"`
 }
 
-func (b profileRunBody) validate() (profile.RunRequest, map[string]string) {
+func (b profileRunBody) validate() (profile.RunRequest, map[string]string, map[string]string) {
 	fields := map[string]string{}
+	codes := map[string]string{}
 	if b.Mode == "" {
 		fields["mode"] = "required"
+		codes["mode"] = "required"
 	}
-	return profile.RunRequest{Mode: b.Mode}, fields
+	return profile.RunRequest{Mode: b.Mode}, fields, codes
 }
 
 // handleProfileRun starts a profile run (PROFILE track,
@@ -31,7 +33,7 @@ func (b profileRunBody) validate() (profile.RunRequest, map[string]string) {
 func (s *Server) handleProfileRun(w http.ResponseWriter, r *http.Request) {
 	runner, ok := s.profileRunner()
 	if !ok {
-		writeError(w, http.StatusServiceUnavailable, "profiling not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "profiling"}, "profiling not wired")
 		return
 	}
 
@@ -40,9 +42,9 @@ func (s *Server) handleProfileRun(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, fields)
 		return
 	}
-	req, fields := b.validate()
+	req, fields, codes := b.validate()
 	if len(fields) > 0 {
-		writeValidationError(w, fields)
+		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 
@@ -95,7 +97,7 @@ func (s *Server) handleProfileRun(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleProfileGet(w http.ResponseWriter, r *http.Request) {
 	runner, ok := s.profileRunner()
 	if !ok {
-		writeError(w, http.StatusServiceUnavailable, "profiling not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "profiling"}, "profiling not wired")
 		return
 	}
 	mode := r.PathValue("mode")
@@ -286,12 +288,12 @@ func (s *Server) probeAndPush() {
 func (s *Server) handleProfileDelete(w http.ResponseWriter, r *http.Request) {
 	runner, ok := s.profileRunner()
 	if !ok {
-		writeError(w, http.StatusServiceUnavailable, "profiling not wired")
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "profiling"}, "profiling not wired")
 		return
 	}
 	mode := r.PathValue("mode")
 	if err := runner.Delete(r.Context(), mode); err != nil {
-		writeError(w, http.StatusInternalServerError, "delete failed")
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "delete failed")
 		return
 	}
 	s.audit(r, "human", "profile_delete", mode, "")

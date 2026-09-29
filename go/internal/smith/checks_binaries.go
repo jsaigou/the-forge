@@ -113,7 +113,8 @@ func runBinaryVersions(ctx context.Context, env *CheckEnv) Finding {
 	tracked := env.TrackedBinaries
 	if len(tracked) == 0 {
 		return Finding{CheckID: id, Severity: SeverityOK,
-			Summary: "no tracked binaries configured (smith.binaries.tracked is empty)"}
+			Summary:    "no tracked binaries configured (smith.binaries.tracked is empty)",
+			SummaryKey: "checks.binary_versions.no_tracked"}
 	}
 
 	statuses := make([]binaryStatus, 0, len(tracked))
@@ -270,11 +271,16 @@ func runBinaryVersions(ctx context.Context, env *CheckEnv) Finding {
 		return Finding{CheckID: id, Severity: SeverityInfo,
 			Summary: fmt.Sprintf("%d nightly-tracked fork(s) have no recorded upstream build sha yet: %s",
 				len(nightlyUnrecorded), strings.Join(nightlyUnrecorded, ", ")),
+			SummaryKey: "checks.binary_versions.nightly_unrecorded",
+			Params:     map[string]any{"count": len(nightlyUnrecorded), "names": strings.Join(nightlyUnrecorded, ", ")},
 			Evidence:   ev,
 			Confidence: confidence, ConfidenceNote: confidenceNote}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
-		Summary: fmt.Sprintf("%d tracked binaries checked; source tree matches (or is unmeasurable against) the installed build for all", len(tracked)), Evidence: ev,
+		Summary:    fmt.Sprintf("%d tracked binaries checked; source tree matches (or is unmeasurable against) the installed build for all", len(tracked)),
+		SummaryKey: "checks.binary_versions.ok",
+		Params:     map[string]any{"count": len(tracked)},
+		Evidence:   ev,
 		Confidence: confidence, ConfidenceNote: confidenceNote}
 }
 

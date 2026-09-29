@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { formatGB } from "../../lib/format";
 import { useSmithSettings, useUpdateSmithSettings } from "../../lib/queries";
 import type { SmithDeleteFileEntry } from "../../lib/types";
@@ -27,6 +28,7 @@ export function DeleteFilesCard({
   totalBytes: number;
   guidance?: string;
 }) {
+  const { t } = useTranslation("common");
   const settings = useSmithSettings();
   const updateSettings = useUpdateSmithSettings();
   const [justKept, setJustKept] = useState<Set<string>>(new Set());
@@ -46,28 +48,27 @@ export function DeleteFilesCard({
   return (
     <div className="card" style={{ marginTop: 8, padding: 10, borderLeft: "3px solid var(--crit)" }}>
       <div style={{ fontSize: 12, fontWeight: 600, color: "var(--crit)" }}>
-        {files.length} file{files.length === 1 ? "" : "s"} — {formatGB(totalBytes, 1)} GB reclaimable
+        {t("delete_files_card.file_count_reclaimable", { count: files.length, gb: formatGB(totalBytes, 1) })}
       </div>
       <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
-        Deleting is irreversible — the risk is in approving, not in the files being listed here.
+        {t("delete_files_card.irreversible_notice")}
       </div>
       {guidance && (
         <div style={{
           marginTop: 6, padding: 8, borderRadius: 6, fontSize: 11, lineHeight: 1.5,
           color: "var(--text-dim)", background: "var(--bg)", border: "1px solid var(--border)",
         }}>
-          <span style={{ fontWeight: 600, color: "var(--text)" }}>Want to keep one of these? </span>
-          Click "Keep" on its row below (adds it to a standing exclusion list — this and any
-          future check will skip it), or {guidance}
+          <span style={{ fontWeight: 600, color: "var(--text)" }}>{t("delete_files_card.guidance_intro")}</span>
+          {t("delete_files_card.guidance_instructions", { keepLabel: t("delete_files_card.keep") })}{guidance}
         </div>
       )}
       <div style={{ marginTop: 6, maxHeight: 220, overflow: "auto" }}>
         <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ color: "var(--text-mute)", textAlign: "left" }}>
-              <th style={{ padding: "2px 6px", fontWeight: 500 }}>path</th>
-              <th style={{ padding: "2px 6px", fontWeight: 500 }}>folder</th>
-              <th style={{ padding: "2px 6px", fontWeight: 500, textAlign: "right" }}>size</th>
+              <th style={{ padding: "2px 6px", fontWeight: 500 }}>{t("delete_files_card.col_path")}</th>
+              <th style={{ padding: "2px 6px", fontWeight: 500 }}>{t("delete_files_card.col_folder")}</th>
+              <th style={{ padding: "2px 6px", fontWeight: 500, textAlign: "right" }}>{t("delete_files_card.col_size")}</th>
               <th style={{ padding: "2px 6px", fontWeight: 500 }} />
             </tr>
           </thead>
@@ -85,7 +86,7 @@ export function DeleteFilesCard({
                   </td>
                   <td style={{ padding: "2px 6px", textAlign: "right" }}>
                     {kept ? (
-                      <span style={{ fontSize: 10, color: "var(--ok)" }}>kept — reject this proposal &amp; recheck to drop it now</span>
+                      <span style={{ fontSize: 10, color: "var(--ok)" }}>{t("delete_files_card.kept_notice")}</span>
                     ) : (
                       <button
                         className="btn"
@@ -93,7 +94,7 @@ export function DeleteFilesCard({
                         disabled={updateSettings.isPending}
                         onClick={() => keepFile(f.path)}
                       >
-                        Keep
+                        {t("delete_files_card.keep")}
                       </button>
                     )}
                   </td>

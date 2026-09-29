@@ -38,7 +38,7 @@ func (s *Server) handleConfigCards(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		got, err := s.deps.Registry.Cards(ctx, time.Now().Add(-dur))
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "registry query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "registry query failed")
 			return
 		}
 		cards = got
@@ -73,7 +73,7 @@ func (s *Server) handleModelCards(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		got, err := s.deps.Registry.ModelCards(ctx, time.Now().Add(-dur))
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "registry query failed")
+			writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "registry query failed")
 			return
 		}
 		cards = got

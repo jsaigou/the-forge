@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../../lib/api";
+import { appLocale } from "../../lib/format";
 import { useCatalogNotes, useCreateCatalogNote, useDeleteCatalogNote, useUpdateCatalogNote } from "../../lib/queries";
 import { useSession } from "../../lib/session";
 import type { CatalogNote } from "../../lib/types";
@@ -22,6 +24,7 @@ import { useStepUpGate } from "../../lib/useStepUpGate";
 // server-required, and a human typing their own name is a worse record than
 // the session already has.
 export function NotesInline({ subjectType, subjectId }: { subjectType: "model" | "config"; subjectId: number }) {
+  const { t } = useTranslation("models");
   const { canAdmin, username } = useSession();
   const notes = useCatalogNotes(subjectType, subjectId);
   const create = useCreateCatalogNote();
@@ -83,10 +86,10 @@ export function NotesInline({ subjectType, subjectId }: { subjectType: "model" |
   return (
     <div style={{ marginTop: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div className="eyebrow" style={{ fontSize: 11 }}>Notes</div>
+        <div className="eyebrow" style={{ fontSize: 11 }}>{t("notes.title")}</div>
         {canAdmin && !adding && (
           <button className="icon-btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => { setAdding(true); setDraft(""); setError(null); }}>
-            + Add
+            {t("notes.add")}
           </button>
         )}
       </div>
@@ -94,9 +97,9 @@ export function NotesInline({ subjectType, subjectId }: { subjectType: "model" |
       {error && <div className="error-note" style={{ marginTop: 6 }}>{error}</div>}
 
       {notes.isError ? (
-        <div className="empty-note" style={{ marginTop: 6 }}>Catalog not available (503 — store may not be wired).</div>
+        <div className="empty-note" style={{ marginTop: 6 }}>{t("notes.unavailable")}</div>
       ) : list.length === 0 && !adding ? (
-        <div className="empty-note" style={{ marginTop: 6 }}>No notes yet.</div>
+        <div className="empty-note" style={{ marginTop: 6 }}>{t("notes.empty")}</div>
       ) : (
         <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 8 }}>
           {list.map((n) => (
@@ -110,8 +113,8 @@ export function NotesInline({ subjectType, subjectId }: { subjectType: "model" |
                     onChange={(e) => setEditDraft(e.target.value)}
                   />
                   <div className="form-actions">
-                    <button className="btn" onClick={() => setEditingId(null)}>Cancel</button>
-                    <button className="btn primary" disabled={update.isPending || !editDraft} onClick={() => submitEdit(n)}>Save</button>
+                    <button className="btn" onClick={() => setEditingId(null)}>{t("notes.cancel")}</button>
+                    <button className="btn primary" disabled={update.isPending || !editDraft} onClick={() => submitEdit(n)}>{t("notes.save")}</button>
                   </div>
                 </div>
               ) : (
@@ -119,7 +122,7 @@ export function NotesInline({ subjectType, subjectId }: { subjectType: "model" |
                   <div style={{ fontSize: 12, color: "var(--text-dim)", whiteSpace: "pre-wrap" }}>{n.body}</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>
-                      {n.author} · {new Date(n.updated_at).toLocaleDateString()}
+                      {n.author} · {new Date(n.updated_at).toLocaleDateString(appLocale())}
                     </span>
                     {canAdmin && (
                       <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
@@ -128,14 +131,14 @@ export function NotesInline({ subjectType, subjectId }: { subjectType: "model" |
                           style={{ fontSize: 10.5, padding: "2px 6px" }}
                           onClick={() => { setEditingId(n.id); setEditDraft(n.body); setError(null); }}
                         >
-                          Edit
+                          {t("notes.edit")}
                         </button>
                         <ConfirmButton
                           className="btn"
                           style={{ fontSize: 10.5, padding: "2px 6px" }}
                           pending={remove.isPending}
                           onConfirm={() => submitDelete(n.id)}
-                          warning="Delete this note?"
+                          warning={t("notes.delete_confirm")}
                         />
                       </div>
                     )}
@@ -153,13 +156,13 @@ export function NotesInline({ subjectType, subjectId }: { subjectType: "model" |
             value={draft}
             rows={3}
             autoFocus
-            placeholder="What should the next operator know?"
+            placeholder={t("notes.placeholder")}
             style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "8px 10px", fontSize: 12, resize: "vertical" }}
             onChange={(e) => setDraft(e.target.value)}
           />
           <div className="form-actions">
-            <button className="btn" onClick={() => { setAdding(false); setError(null); }}>Cancel</button>
-            <button className="btn primary" disabled={create.isPending || !draft} onClick={submitCreate}>Add note</button>
+            <button className="btn" onClick={() => { setAdding(false); setError(null); }}>{t("notes.cancel")}</button>
+            <button className="btn primary" disabled={create.isPending || !draft} onClick={submitCreate}>{t("notes.add_note")}</button>
           </div>
         </div>
       )}

@@ -7,10 +7,13 @@
 // live config — this is an invalidated cache, not an error. Shown next to
 // the chip so the word "stale" is never left unexplained (product/QA sprint,
 // 2026-07-29).
-export const STALE_EXPLANATION = "config changed since measurement (context, backend, or model file differs)";
+// t must be a "settings"-namespaced translate function (useTranslation("settings")).
+export function staleExplanation(t: (key: string) => string): string {
+  return t("benchmarks.stale_explanation");
+}
 
-export function depthLabel(depthTokens: number, nCtx: number): string {
-  if (nCtx <= 0) return `${depthTokens} tok`;
+export function depthLabel(depthTokens: number, nCtx: number, t: (key: string, opts?: Record<string, unknown>) => string): string {
+  if (nCtx <= 0) return t("benchmarks.depth_label.tokens", { tokens: depthTokens });
   const pct = Math.round((depthTokens / nCtx) * 100);
-  return depthTokens === 0 ? "empty" : `~${pct}% ctx`;
+  return depthTokens === 0 ? t("benchmarks.depth_label.empty") : t("benchmarks.depth_label.pct", { pct });
 }
