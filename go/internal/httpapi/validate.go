@@ -187,6 +187,10 @@ func (b schedulerConfigBody) validate() (schedulerConfigBody, map[string]string)
 type slotLoadBody struct {
 	Mode string `json:"mode"`
 	Slot string `json:"slot"`
+	// Evict lists other loaded slots the operator has confirmed may be
+	// unloaded to make room (the wont_fit response's evict_candidates).
+	// Unloaded server-side, in order, before the load starts.
+	Evict []string `json:"evict,omitempty"`
 }
 
 func (b slotLoadBody) validate() (slotLoadBody, map[string]string) {
@@ -196,6 +200,12 @@ func (b slotLoadBody) validate() (slotLoadBody, map[string]string) {
 	}
 	if !authz.ValidSlots[b.Slot] {
 		fields["slot"] = "must be one of a1, a2, a3, a4"
+	}
+	for _, e := range b.Evict {
+		if !authz.ValidSlots[e] {
+			fields["evict"] = "must list only slots a1, a2, a3, a4"
+			break
+		}
 	}
 	return b, fields
 }

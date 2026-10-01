@@ -249,7 +249,8 @@ export const api = {
     get<{ cards: ConfigCard[]; window: string; display_currency: string }>(`/api/v1/configs/cards?window=${encodeURIComponent(window_)}`),
 
   switchMode: (mode: string) => post<{ ok?: boolean; success?: boolean; message?: string }>(`/api/v1/switch/${encodeURIComponent(mode)}`),
-  loadModel: (mode: string, slot: string) => post<{ success: boolean; message?: string }>("/api/v1/load", { mode, slot }),
+  loadModel: (mode: string, slot: string, evict?: string[]) =>
+    post<{ success: boolean; message?: string }>("/api/v1/load", evict?.length ? { mode, slot, evict } : { mode, slot }),
   unloadSlot: (slot: string) => post<{ success: boolean; message?: string }>("/api/v1/unload", { slot }),
 
   reservations: () => get<{ reservations: Reservation[]; total: number }>("/api/v1/reservations"),
