@@ -17,6 +17,7 @@ import (
 type engineFull interface {
 	engine.Engine
 	FitPlan(mode string) (engine.Plan, error)
+	SlotFootprintBytes(slot string) int64
 	SlotStates(units map[string]collector.UnitState) map[string]collector.SlotAssignment
 }
 
@@ -52,6 +53,11 @@ func (g *GatedEngine) Slots() []string     { return g.real.Slots() }
 func (g *GatedEngine) CanFit(mode string) (engine.CanFit, error) { return g.real.CanFit(mode) }
 func (g *GatedEngine) MemoryBudget() (engine.Budget, error)      { return g.real.MemoryBudget() }
 func (g *GatedEngine) FitPlan(mode string) (engine.Plan, error)  { return g.real.FitPlan(mode) }
+
+// SlotFootprintBytes must be forwarded explicitly: consumers discover it by
+// type assertion on the wrapped value (httpapi's fit check and eviction
+// candidates), so a wrapper that omits it makes it silently look absent.
+func (g *GatedEngine) SlotFootprintBytes(slot string) int64 { return g.real.SlotFootprintBytes(slot) }
 
 func (g *GatedEngine) SlotStates(units map[string]collector.UnitState) map[string]collector.SlotAssignment {
 	return g.real.SlotStates(units)

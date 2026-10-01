@@ -519,7 +519,8 @@ export function useUpdateSchedulerSeed() {
 export function useLoadModel() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ mode, slot }: { mode: string; slot: string }) => api.loadModel(mode, slot),
+    mutationFn: ({ mode, slot, evict }: { mode: string; slot: string; evict?: string[] }) =>
+      api.loadModel(mode, slot, evict),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.status });
       qc.invalidateQueries({ queryKey: qk.schedulerStatus });

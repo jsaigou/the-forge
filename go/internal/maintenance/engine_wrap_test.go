@@ -59,7 +59,20 @@ func (f *fakeFullEngine) StopUnit(ctx context.Context, unit string) error {
 	return f.Stub.StopUnit(ctx, unit)
 }
 
+func (f *fakeFullEngine) SlotFootprintBytes(slot string) int64 { return 42 }
+
 var _ engineFull = (*fakeFullEngine)(nil)
+
+// The wrapper must keep exposing the footprint seam: consumers find it by
+// type assertion, so dropping it silently disables the fit check's
+// freed-memory math.
+func TestGatedEngine_ForwardsSlotFootprintBytes(t *testing.T) {
+	var e any = WrapEngine(New(newFakeSettings(), nil, time.Now, nil), newFakeFullEngine())
+	fp, ok := e.(interface{ SlotFootprintBytes(string) int64 })
+	if !ok || fp.SlotFootprintBytes("a1") != 42 {
+		t.Fatalf("GatedEngine must expose SlotFootprintBytes (ok=%v)", ok)
+	}
+}
 
 func TestGatedEngine_BlocksEveryMutationWhileActive(t *testing.T) {
 	real := newFakeFullEngine()

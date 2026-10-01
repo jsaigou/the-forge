@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom";
+import { formatDurationShort, formatGB } from "../lib/format";
 import type { UseLoadConfigResult } from "../lib/useLoadConfig";
 import type { ConfigCard, Status } from "../lib/types";
 
@@ -14,7 +15,10 @@ export function LoadConfirmModal({
   status: Status;
   loadState: UseLoadConfigResult;
 }) {
-  const { state, slotKeys, emptySlot, evictTarget, setEvictTarget, loadError, busy, doLoad, closeConfirm } = loadState;
+  const {
+    state, slotKeys, emptySlot, evictTarget, setEvictTarget, loadError,
+    shortfall, evictChoice, toggleEvictChoice, busy, doLoad, closeConfirm,
+  } = loadState;
 
   // createPortal to document.body — same reasoning as DetailModal's portal:
   // the hero card (ModelHeroView) renders ConfigRows inside a perspective
@@ -42,7 +46,36 @@ export function LoadConfirmModal({
               : ""}
           .
         </div>
-        {state === "evict-needed" && (
+        {shortfall && (
+          <div style={{ marginBottom: 14 }}>
+            <div className="error-note" style={{ marginBottom: 10 }}>
+              Not enough free memory
+              {shortfall.needBytes != null && shortfall.freeBytes != null
+                ? ` (needs ${formatGB(shortfall.needBytes)} GB, ${formatGB(shortfall.freeBytes)} GB free)`
+                : ""}
+              . Unload to make room? Longest-idle first; the suggested ones are pre-selected.
+            </div>
+            {shortfall.candidates.map((c) => (
+              <label key={c.slot} className="form-row" style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={evictChoice.includes(c.slot)}
+                  disabled={busy}
+                  onChange={() => toggleEvictChoice(c.slot)}
+                />
+                <span>
+                  {status.slot_labels[c.slot] ?? c.slot} · {c.mode}
+                  <span style={{ color: "var(--text-dim)" }}>
+                    {" · "}
+                    {c.idle_seconds == null ? "idle time unknown" : `idle ${formatDurationShort(c.idle_seconds)}`}
+                    {c.footprint_bytes > 0 ? ` · ${formatGB(c.footprint_bytes)} GB` : ""}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+        {state === "evict-needed" && !shortfall && (
           <label className="form-row" style={{ marginBottom: 14 }}>
             Slot to evict
             <select value={evictTarget} onChange={(e) => setEvictTarget(e.target.value)}>
@@ -68,10 +101,10 @@ export function LoadConfirmModal({
           </button>
           <button
             className="btn primary"
-            disabled={busy || (state === "evict-needed" && !evictTarget)}
+            disabled={busy || (state === "evict-needed" && !shortfall && !evictTarget) || (!!shortfall && evictChoice.length === 0)}
             onClick={doLoad}
           >
-            {busy ? "Loading…" : state === "evict-needed" ? "Evict & Load" : "Load"}
+            {busy ? "Loading…" : shortfall ? "Unload & Load" : state === "evict-needed" ? "Evict & Load" : "Load"}
           </button>
         </div>
       </div>

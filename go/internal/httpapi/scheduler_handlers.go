@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sort"
 	"time"
 
 	"github.com/jsaigou/the-forge/internal/engine"
@@ -443,17 +444,30 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 	// eviction candidates or explains why nothing would help) instead of
 	// starting a load that will silently starve every other slot of
 	// context — no silent retry loop; the caller gets one clear answer.
-	if fits, reason, requiredBytes, freeBytes, err := s.fitsForSlotLoad(b.Mode, b.Slot); err != nil {
+	evict := dedupeEvict(b.Evict, b.Slot)
+	if fits, reason, requiredBytes, freeBytes, err := s.fitsForSlotLoad(b.Mode, b.Slot, evict); err != nil {
 		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("fit check failed: %v", err))
 		return
 	} else if !fits {
-		writeJSON(w, http.StatusConflict, map[string]any{
+		resp := map[string]any{
 			"success":        false,
 			"error":          "wont_fit",
 			"message":        reason,
 			"required_bytes": requiredBytes,
 			"free_bytes":     freeBytes,
-		})
+		}
+		// Offer the operator a way forward: the other loaded slots, longest
+		// idle first, with the shortest prefix that would make room flagged.
+		// Only when this request didn't already carry a confirmed evict list
+		// (a confirmed list that still doesn't fit is a plain refusal).
+		if len(evict) == 0 {
+			cands, suggested := s.evictCandidates(b.Slot, requiredBytes-freeBytes)
+			if len(cands) > 0 {
+				resp["evict_candidates"] = cands
+				resp["suggested_evict"] = suggested
+			}
+		}
+		writeJSON(w, http.StatusConflict, resp)
 		return
 	}
 
@@ -496,7 +510,7 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 			"status": s.buildStatusResponse(),
 		})
 	}
-	go s.runLoadBackground(s.bgCtx, b.Mode, b.Slot)
+	go s.runLoadBackground(s.bgCtx, b.Mode, b.Slot, evict)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":     true,
@@ -515,7 +529,7 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 // answer when the engine doesn't expose the optional per-slot footprint
 // seam (mirrors sched.Footprints; test doubles like engine.Stub don't
 // implement it) or the target slot is already empty.
-func (s *Server) fitsForSlotLoad(mode, slot string) (fits bool, reason string, requiredBytes, freeBytes int64, err error) {
+func (s *Server) fitsForSlotLoad(mode, slot string, evict []string) (fits bool, reason string, requiredBytes, freeBytes int64, err error) {
 	fit, err := s.deps.Engine.CanFit(mode)
 	if err != nil {
 		return false, "", 0, 0, err
@@ -531,11 +545,16 @@ func (s *Server) fitsForSlotLoad(mode, slot string) (fits bool, reason string, r
 	if snap == nil {
 		return false, fit.Reason, fit.RequiredBytes, fit.FreeBytes, nil
 	}
-	st, ok := snap.Slots[slot]
-	if !ok || st.Mode == "" {
-		return false, fit.Reason, fit.RequiredBytes, fit.FreeBytes, nil
+	// The target's own occupant plus every confirmed eviction is freed
+	// before the new load starts.
+	var freed int64
+	for _, sl := range append([]string{slot}, evict...) {
+		if st, ok := snap.Slots[sl]; ok && st.Mode != "" {
+			if f := fp.SlotFootprintBytes(sl); f > 0 {
+				freed += f
+			}
+		}
 	}
-	freed := fp.SlotFootprintBytes(slot)
 	if freed <= 0 {
 		return false, fit.Reason, fit.RequiredBytes, fit.FreeBytes, nil
 	}
@@ -546,11 +565,116 @@ func (s *Server) fitsForSlotLoad(mode, slot string) (fits bool, reason string, r
 	return false, fit.Reason, fit.RequiredBytes, adjustedFree, nil
 }
 
+// dedupeEvict drops repeats and the load's own target slot (its occupant is
+// always replaced anyway) from a request's confirmed-eviction list.
+func dedupeEvict(evict []string, target string) []string {
+	var out []string
+	seen := map[string]bool{target: true}
+	for _, e := range evict {
+		if !seen[e] {
+			seen[e] = true
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// evictCandidate describes one loaded slot the operator could unload to
+// make room for a load that doesn't currently fit.
+type evictCandidate struct {
+	Slot           string   `json:"slot"`
+	Mode           string   `json:"mode"`
+	IdleSeconds    *float64 `json:"idle_seconds"` // nil = activity unknown
+	FootprintBytes int64    `json:"footprint_bytes"`
+}
+
+// evictCandidates lists every loaded slot other than target (settled — not
+// mid load/unload), longest idle first; unknown-activity slots sort last
+// since "idle longest" can't be claimed for them. suggested is the shortest
+// prefix of that order whose footprints cover shortfallBytes (all of them
+// when even that isn't enough — the caller's confirmed re-request is
+// re-checked server-side regardless).
+func (s *Server) evictCandidates(target string, shortfallBytes int64) (cands []evictCandidate, suggested []string) {
+	snap := s.snapshot()
+	if snap == nil {
+		return nil, nil
+	}
+	fp, _ := s.deps.Engine.(interface{ SlotFootprintBytes(string) int64 })
+	now := snap.TakenAt
+	if now.IsZero() {
+		now = time.Now()
+	}
+	s.mu.Lock()
+	busy := func(sl string) bool {
+		return s.slotLoading[sl].inProgress || s.slotUnloading[sl].inProgress
+	}
+	for name, st := range snap.Slots {
+		if name == target || st.Mode == "" || busy(name) {
+			continue
+		}
+		c := evictCandidate{Slot: name, Mode: st.Mode}
+		if !st.LastActivity.IsZero() {
+			idle := now.Sub(st.LastActivity).Seconds()
+			if idle < 0 {
+				idle = 0
+			}
+			c.IdleSeconds = &idle
+		}
+		if fp != nil {
+			c.FootprintBytes = fp.SlotFootprintBytes(name)
+		}
+		if c.FootprintBytes <= 0 {
+			c.FootprintBytes = st.MemoryBytes // measured per-process GPU memory
+		}
+		cands = append(cands, c)
+	}
+	s.mu.Unlock()
+	sort.SliceStable(cands, func(i, j int) bool {
+		a, b := cands[i].IdleSeconds, cands[j].IdleSeconds
+		switch {
+		case a != nil && b != nil && *a != *b:
+			return *a > *b
+		case (a == nil) != (b == nil):
+			return a != nil
+		}
+		return cands[i].Slot < cands[j].Slot
+	})
+	var covered int64
+	for _, c := range cands {
+		if covered >= shortfallBytes {
+			break
+		}
+		suggested = append(suggested, c.Slot)
+		covered += c.FootprintBytes
+	}
+	return cands, suggested
+}
+
+// unloadThenLoad unloads each operator-confirmed eviction (sequentially —
+// Engine.Unload waits for the unit to stop, so memory is actually free
+// before the load starts) and then loads. An unload failure aborts the load
+// rather than proceeding into a likely OOM.
+func (s *Server) unloadThenLoad(ctx context.Context, mode, slot string, evict []string) engine.Result {
+	for _, ev := range evict {
+		s.mu.Lock()
+		s.slotUnloading[ev] = slotTransition{inProgress: true, startedAt: time.Now()}
+		s.mu.Unlock()
+		res := s.deps.Engine.Unload(ctx, ev)
+		s.mu.Lock()
+		s.slotUnloading[ev] = slotTransition{}
+		s.mu.Unlock()
+		if !res.Success {
+			return engine.Result{Message: fmt.Sprintf("could not unload %s to make room: %s", ev, res.Message)}
+		}
+	}
+	return s.deps.Engine.Load(ctx, mode, slot)
+}
+
 // runLoadBackground performs the engine load call.
-func (s *Server) runLoadBackground(parent context.Context, mode, slot string) {
+func (s *Server) runLoadBackground(parent context.Context, mode, slot string, evict []string) {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
-	result := s.deps.Engine.Load(ctx, mode, slot)
+	result := s.unloadThenLoad(ctx, mode, slot, evict)
 	out := lifecycleResult{
 		Success: result.Success,
 		Message: s.annotateCtxReduction(mode, result),
