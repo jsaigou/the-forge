@@ -14,6 +14,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -222,5 +223,109 @@ func TestHandleLoadAnnotatesCtxReduction(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for load_complete")
 		}
+	}
+}
+
+// unloadRecordingEngine records Unload calls (in order) on top of
+// footprintEngine.
+type unloadRecordingEngine struct {
+	footprintEngine
+	mu       sync.Mutex
+	unloaded []string
+	loaded   chan string
+}
+
+func (e *unloadRecordingEngine) Unload(_ context.Context, slot string) engine.Result {
+	e.mu.Lock()
+	e.unloaded = append(e.unloaded, slot)
+	e.mu.Unlock()
+	return engine.Result{Success: true}
+}
+
+func (e *unloadRecordingEngine) Load(_ context.Context, mode, slot string) engine.Result {
+	e.loaded <- slot
+	return engine.Result{Success: true, Message: "loaded"}
+}
+
+func evictTestSnapshot() *collector.Snapshot {
+	now := time.Now()
+	return &collector.Snapshot{
+		TakenAt: now,
+		Slots: map[string]collector.SlotState{
+			"a1": {Slot: "a1", Unit: "forge-a1", Port: 8080, Label: "A1"},
+			"a2": {Slot: "a2", Mode: "busy", Unit: "forge-a2", Port: 8081, Label: "A2", LastActivity: now.Add(-1 * time.Minute)},
+			"a3": {Slot: "a3", Mode: "stale", Unit: "forge-a3", Port: 8082, Label: "A3", LastActivity: now.Add(-3 * time.Hour)},
+		},
+	}
+}
+
+// TestHandleLoadWontFitOffersLongestIdleFirst: a refused load names the
+// other loaded slots longest-idle first, and suggests the shortest prefix
+// that covers the shortfall.
+func TestHandleLoadWontFitOffersLongestIdleFirst(t *testing.T) {
+	eng := &unloadRecordingEngine{loaded: make(chan string, 1)}
+	eng.fit = engine.CanFit{Fits: false, RequiredBytes: 50 << 30, FreeBytes: 20 << 30, Reason: "won't fit"}
+	eng.footprint = map[string]int64{"a2": 40 << 30, "a3": 35 << 30}
+	s := newFitTestServer(t, eng, evictTestSnapshot())
+
+	w := do(t, s, authedRequest("POST", "/api/v1/load", strings.NewReader(`{"mode":"qwen3","slot":"a1"}`)))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("code = %d, want 409", w.Code)
+	}
+	var resp struct {
+		Candidates []evictCandidate `json:"evict_candidates"`
+		Suggested  []string         `json:"suggested_evict"`
+	}
+	decodeJSON(t, w.Body, &resp)
+	if len(resp.Candidates) != 2 || resp.Candidates[0].Slot != "a3" || resp.Candidates[1].Slot != "a2" {
+		t.Fatalf("candidates = %+v, want a3 (idle 3h) before a2 (idle 1m)", resp.Candidates)
+	}
+	// a3 alone frees 35 GiB ≥ the 30 GiB shortfall.
+	if len(resp.Suggested) != 1 || resp.Suggested[0] != "a3" {
+		t.Errorf("suggested = %v, want [a3]", resp.Suggested)
+	}
+}
+
+// TestHandleLoadWithConfirmedEvictUnloadsThenLoads: the confirmed evict
+// list is honored — fit is re-checked counting those slots as freed, they
+// are unloaded, and only then does the load run.
+func TestHandleLoadWithConfirmedEvictUnloadsThenLoads(t *testing.T) {
+	eng := &unloadRecordingEngine{loaded: make(chan string, 1)}
+	eng.fit = engine.CanFit{Fits: false, RequiredBytes: 50 << 30, FreeBytes: 20 << 30, Reason: "won't fit"}
+	eng.footprint = map[string]int64{"a2": 40 << 30, "a3": 35 << 30}
+	s := newFitTestServer(t, eng, evictTestSnapshot())
+
+	w := do(t, s, authedRequest("POST", "/api/v1/load", strings.NewReader(`{"mode":"qwen3","slot":"a1","evict":["a3"]}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	select {
+	case <-eng.loaded:
+	case <-time.After(2 * time.Second):
+		t.Fatal("load never ran")
+	}
+	eng.mu.Lock()
+	defer eng.mu.Unlock()
+	if len(eng.unloaded) != 1 || eng.unloaded[0] != "a3" {
+		t.Errorf("unloaded = %v, want [a3]", eng.unloaded)
+	}
+}
+
+// TestHandleLoadConfirmedEvictStillTooSmallRefuses: a confirmed list that
+// doesn't actually free enough is a plain refusal — nothing is unloaded.
+func TestHandleLoadConfirmedEvictStillTooSmallRefuses(t *testing.T) {
+	eng := &unloadRecordingEngine{loaded: make(chan string, 1)}
+	eng.fit = engine.CanFit{Fits: false, RequiredBytes: 90 << 30, FreeBytes: 20 << 30, Reason: "won't fit"}
+	eng.footprint = map[string]int64{"a2": 40 << 30, "a3": 35 << 30}
+	s := newFitTestServer(t, eng, evictTestSnapshot())
+
+	w := do(t, s, authedRequest("POST", "/api/v1/load", strings.NewReader(`{"mode":"qwen3","slot":"a1","evict":["a3"]}`)))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("code = %d, want 409", w.Code)
+	}
+	eng.mu.Lock()
+	defer eng.mu.Unlock()
+	if len(eng.unloaded) != 0 {
+		t.Errorf("unloaded = %v, want none", eng.unloaded)
 	}
 }

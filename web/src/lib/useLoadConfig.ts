@@ -31,12 +31,31 @@ export function deriveConfigState(
   return { state: hasEmpty ? "idle" : "evict-needed", slot: null };
 }
 
+// One loaded slot the backend offered to unload to make room, longest idle
+// first (idle_seconds null = activity unknown, sorted last).
+export interface EvictCandidate {
+  slot: string;
+  mode: string;
+  idle_seconds: number | null;
+  footprint_bytes: number;
+}
+
 interface WontFitBody {
   error?: string;
   slot?: string;
   message?: string;
   required_bytes?: number;
   free_bytes?: number;
+  evict_candidates?: EvictCandidate[];
+  suggested_evict?: string[];
+}
+
+// Set when a load was refused for memory and the backend offered eviction
+// candidates; drives the "unload these to make room?" step in the modal.
+export interface MemoryShortfall {
+  needBytes: number | null;
+  freeBytes: number | null;
+  candidates: EvictCandidate[];
 }
 
 export interface UseLoadConfigResult {
@@ -48,6 +67,9 @@ export interface UseLoadConfigResult {
   evictTarget: string;
   setEvictTarget: (slot: string) => void;
   loadError: string | null;
+  shortfall: MemoryShortfall | null;
+  evictChoice: string[];
+  toggleEvictChoice: (slot: string) => void;
   busy: boolean;
   openConfirm: () => void;
   closeConfirm: () => void;
@@ -64,6 +86,8 @@ export function useLoadConfig(card: ConfigCard, status: Status): UseLoadConfigRe
   const [confirming, setConfirming] = useState(false);
   const [evictTarget, setEvictTarget] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [shortfall, setShortfall] = useState<MemoryShortfall | null>(null);
+  const [evictChoice, setEvictChoice] = useState<string[]>([]);
 
   const slotKeys = Object.keys(status.slot_labels);
   const { state, slot: activeSlot } = deriveConfigState(card.name, status);
@@ -75,10 +99,16 @@ export function useLoadConfig(card: ConfigCard, status: Status): UseLoadConfigRe
   function openConfirm() {
     setLoadError(null);
     setEvictTarget("");
+    setShortfall(null);
+    setEvictChoice([]);
     setConfirming(true);
   }
   function closeConfirm() {
     if (!busy) setConfirming(false);
+  }
+
+  function toggleEvictChoice(slot: string) {
+    setEvictChoice((cur) => (cur.includes(slot) ? cur.filter((s) => s !== slot) : [...cur, slot]));
   }
 
   async function doLoad() {
@@ -90,7 +120,9 @@ export function useLoadConfig(card: ConfigCard, status: Status): UseLoadConfigRe
     setLoadError(null);
     try {
       if (state === "evict-needed") await unload.mutateAsync(slot);
-      await load.mutateAsync({ mode: card.name, slot });
+      // A confirmed memory-shortfall eviction rides along with the load: the
+      // server unloads them in order, re-checks the fit, then loads.
+      await load.mutateAsync({ mode: card.name, slot, evict: shortfall ? evictChoice : undefined });
       setConfirming(false);
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
@@ -99,6 +131,13 @@ export function useLoadConfig(card: ConfigCard, status: Status): UseLoadConfigRe
           qc.invalidateQueries({ queryKey: qk.status });
           qc.invalidateQueries({ queryKey: qk.schedulerStatus });
           setLoadError(body.message ?? `Already loaded on slot ${body.slot ?? "?"}`);
+        } else if (body.error === "wont_fit" && body.evict_candidates?.length) {
+          setShortfall({
+            needBytes: body.required_bytes ?? null,
+            freeBytes: body.free_bytes ?? null,
+            candidates: body.evict_candidates,
+          });
+          setEvictChoice(body.suggested_evict ?? []);
         } else if (body.error === "wont_fit") {
           const need = body.required_bytes != null ? formatGB(body.required_bytes) : null;
           const free = body.free_bytes != null ? formatGB(body.free_bytes) : null;
@@ -115,7 +154,7 @@ export function useLoadConfig(card: ConfigCard, status: Status): UseLoadConfigRe
 
   return {
     state, activeSlot, slotKeys, emptySlot,
-    confirming, evictTarget, setEvictTarget, loadError, busy,
+    confirming, evictTarget, setEvictTarget, loadError, shortfall, evictChoice, toggleEvictChoice, busy,
     openConfirm, closeConfirm, doLoad,
   };
 }
