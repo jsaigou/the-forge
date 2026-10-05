@@ -192,6 +192,18 @@
     "priority_status": "priority {{priority}} · {{status}}"
   },
   "compression": {
+    "retired": {
+      "badge": "Retired",
+      "title": "The compressor is retired",
+      "body": "Forge no longer compresses or rewrites request context. Context is append-only: editing earlier messages invalidates the model's KV cache prefix (a mid-history edit cut cache reuse to under 1% in measurements) and has caused silent corruption, while the compressor saved only about 2.5% of tokens. Forge now reduces how much context is created at the source instead (ADR-0017).",
+      "status_bypassed": "Every request is forwarded to its upstream unchanged.",
+      "warn_not_bypassed": "Warning: the global passthrough setting is off in the store, so a retired compressor proxy may still be on the request path. Turn it back on from the CLI (forge config set compressor.passthrough_all true).",
+      "no_controls": "There is no switch here to turn it back on. Re-enabling any message-rewriting hop requires an ADR-0017 amendment.",
+      "proxies_note": "These proxy rows are kept only so existing units can be cleaned up. No new proxies are created, and linking a provider no longer starts one.",
+      "row_badge": "retired",
+      "row_state": "not in the request path",
+      "no_proxies": "No retired proxy rows."
+    },
     "mode_title": "Compressor · routing mode",
     "role_required": "Operator role required to view Compressor configuration.",
     "bypass_title_operator": "Bypass Compressor compression for every proxy — flips live, no teardown",

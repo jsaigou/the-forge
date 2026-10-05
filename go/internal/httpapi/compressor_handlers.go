@@ -19,14 +19,61 @@ import (
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
+// compressorPassthroughAllDefault is the value of compressor.passthrough_all
+// when the settings key is absent or unreadable. The compressor is retired
+// (CONTRACTS C7 / ADR-0017 "context is append-only"), so the safe default is
+// bypassed — a missing key must never mean "compress". Production already
+// stores true explicitly; this only matters for fresh installs and tests.
+const compressorPassthroughAllDefault = true
+
+// readCompressorPassthroughAll reads compressor.passthrough_all, defaulting
+// to compressorPassthroughAllDefault when the settings store is unwired, the
+// key is absent, or the stored value does not parse as a bool.
+func (s *Server) readCompressorPassthroughAll(ctx context.Context) bool {
+	if s.deps.Settings == nil {
+		return compressorPassthroughAllDefault
+	}
+	raw, err := s.deps.Settings.Get(ctx, "compressor.passthrough_all")
+	if err != nil {
+		return compressorPassthroughAllDefault
+	}
+	var v bool
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return compressorPassthroughAllDefault
+	}
+	return v
+}
+
+// retiredProxyJSON / retiredConfigResponse are the compressor-config wire
+// shapes plus the additive `retired` marker (C7). They embed the frozen
+// shapes so every existing field is byte-for-byte unchanged.
+type retiredProxyJSON struct {
+	compressorProxyJSON
+	Retired bool `json:"retired"`
+}
+
+type retiredConfigResponse struct {
+	Proxies         []retiredProxyJSON   `json:"proxies"`
+	Providers       []routerProviderJSON `json:"providers"`
+	PassthroughAll  bool                 `json:"passthrough_all"`
+	ExternalEnabled bool                 `json:"external_enabled"`
+	Retired         bool                 `json:"retired"`
+}
+
+// errCompressorRetired is the English message for any attempt to bring the
+// compressor back into the request path.
+const errCompressorRetired = "the compressor is retired (ADR-0017: context is append-only); re-enabling it requires an ADR amendment"
+
 // handleCompressorConfig returns the proxy + provider configuration (Contract
 // 1 §2 #18). Provider API keys are NOT returned here (§0.9 relocated
 // provider-key management to the Settings routes); the api_key field is
 // always "" — use GET /api/v1/providers for the masked key form.
 func (s *Server) handleCompressorConfig(w http.ResponseWriter, r *http.Request) {
-	resp := compressorConfigResponse{
-		Proxies:   []compressorProxyJSON{},
-		Providers: []routerProviderJSON{},
+	resp := retiredConfigResponse{
+		Proxies:        []retiredProxyJSON{},
+		Providers:      []routerProviderJSON{},
+		PassthroughAll: compressorPassthroughAllDefault,
+		Retired:        compressorctl.Retired(),
 	}
 	if s.deps.Routing == nil {
 		writeJSON(w, http.StatusOK, resp)
@@ -35,13 +82,8 @@ func (s *Server) handleCompressorConfig(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	// passthrough_all from settings (default false).
-	passthroughAll := false
-	if s.deps.Settings != nil {
-		if raw, err := s.deps.Settings.Get(ctx, "compressor.passthrough_all"); err == nil {
-			_ = json.Unmarshal(raw, &passthroughAll)
-		}
-	}
+	// passthrough_all from settings (default true: compressor retired, C7).
+	passthroughAll := s.readCompressorPassthroughAll(ctx)
 	resp.PassthroughAll = passthroughAll
 
 	// external_enabled from settings (default false) — same read shape as
@@ -59,7 +101,7 @@ func (s *Server) handleCompressorConfig(w http.ResponseWriter, r *http.Request) 
 	if err == nil {
 		for _, p := range proxies {
 			active := unitActive(s.snapshot(), p.Unit)
-			resp.Proxies = append(resp.Proxies, compressorProxyJSON{
+			resp.Proxies = append(resp.Proxies, retiredProxyJSON{Retired: compressorctl.Retired(), compressorProxyJSON: compressorProxyJSON{
 				ID:        p.ID,
 				Service:   p.Service,
 				Label:     p.Label,
@@ -77,7 +119,7 @@ func (s *Server) handleCompressorConfig(w http.ResponseWriter, r *http.Request) 
 				// human clicked displayed as "on" here while silently doing
 				// nothing to actual traffic. See handleCompressorPassthrough.
 				Passthrough: passthroughAll || p.Passthrough,
-			})
+			}})
 		}
 	}
 	// Providers are still listed here for proxy↔provider linkage display, but
@@ -90,13 +132,13 @@ func (s *Server) handleCompressorConfig(w http.ResponseWriter, r *http.Request) 
 	if err == nil {
 		for _, p := range providers {
 			resp.Providers = append(resp.Providers, routerProviderJSON{
-				ID:            p.ID,
-				Name:          p.Name,
-				APIKey:        "",
-				TargetURL:     p.TargetURL,
+				ID:              p.ID,
+				Name:            p.Name,
+				APIKey:          "",
+				TargetURL:       p.TargetURL,
 				CompressorProxy: p.CompressorProxyName,
-				Model:         p.Model,
-				Model2:        p.Model2,
+				Model:           p.Model,
+				Model2:          p.Model2,
 			})
 		}
 	}
@@ -133,15 +175,21 @@ func (s *Server) handleCompressorPassthrough(w http.ResponseWriter, r *http.Requ
 	}
 	b = b2
 
+	// C7: the compressor is retired. Turning bypass ON is always allowed
+	// (idempotent, safe); turning it OFF would put a message-rewriting hop
+	// back in the request path and is refused — at either scope — until an
+	// ADR amendment overrides ADR-0017. (Break-glass for an operator who has
+	// that amendment is the CLI: `forge config set compressor.passthrough_all
+	// false`.)
+	if compressorctl.Retired() && !*b.Enabled {
+		writeError(w, http.StatusConflict, errCompressorRetired)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	passthroughAll := false
-	if s.deps.Settings != nil {
-		if raw, err := s.deps.Settings.Get(ctx, "compressor.passthrough_all"); err == nil {
-			_ = json.Unmarshal(raw, &passthroughAll)
-		}
-	}
+	passthroughAll := s.readCompressorPassthroughAll(ctx)
 
 	if b.Scope == "all" {
 		if s.deps.Settings == nil {
@@ -335,6 +383,11 @@ func (s *Server) handleCompressorTeardown(ctx context.Context, w http.ResponseWr
 // docs/v5-headroom-replacement.md, dropped the dual-Provisioner dispatch
 // this used to pick between).
 func (s *Server) handleCompressorProxyCreate(w http.ResponseWriter, r *http.Request) {
+	if compressorctl.Retired() {
+		// C7: no new compressor proxies are provisioned.
+		writeError(w, http.StatusGone, errCompressorRetired)
+		return
+	}
 	if s.deps.Routing == nil || s.deps.CompressorProvisioner == nil {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
 			"error": "Compressor proxy lifecycle needs both the proxy store and the provisioner wired",
@@ -440,6 +493,11 @@ func (s *Server) handleCompressorProxyCreate(w http.ResponseWriter, r *http.Requ
 // doesn't check that itself, since "should I migrate this now" is an
 // operator judgment call, not something to silently gate on.
 func (s *Server) handleCompressorMigrate(w http.ResponseWriter, r *http.Request) {
+	if compressorctl.Retired() {
+		// C7: migrating onto forge-compress@ would provision a new unit.
+		writeError(w, http.StatusGone, errCompressorRetired)
+		return
+	}
 	if s.deps.Routing == nil || s.deps.CompressorProvisioner == nil {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
 			"error": "Compressor proxy migration needs the proxy store and the provisioner wired",

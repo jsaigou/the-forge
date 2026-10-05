@@ -19,6 +19,7 @@ import (
 	"github.com/jsaigou/the-forge/internal/authz"
 	"github.com/jsaigou/the-forge/internal/bus"
 	"github.com/jsaigou/the-forge/internal/collector"
+	"github.com/jsaigou/the-forge/internal/compressorctl"
 	"github.com/jsaigou/the-forge/internal/config"
 	"github.com/jsaigou/the-forge/internal/engine"
 	"github.com/jsaigou/the-forge/internal/sched"
@@ -33,10 +34,10 @@ import (
 // that construct a bare store.ProviderRow{Name: ...} still work — only
 // updates/deletes/lookups now need a real id, matching the production store.
 type fakeCompressor struct {
-	mu        sync.Mutex
-	providers []store.ProviderRow
-	proxies   []store.ProxyRow
-	savings   map[string]store.SavingsTotal
+	mu             sync.Mutex
+	providers      []store.ProviderRow
+	proxies        []store.ProxyRow
+	savings        map[string]store.SavingsTotal
 	nextProviderID int64
 	nextProxyID    int64
 }
@@ -257,9 +258,9 @@ func newSettingsTestServer(t *testing.T) (*Server, *fakeCompressor, *fakeSetting
 		Auth:      &stubAuth{identity: authz.Identity{Name: "admin", Role: authz.RoleAdmin}},
 		Events:    events,
 		Publish:   events,
-		Config: func() *config.Config { return cfg },
+		Config:    func() *config.Config { return cfg },
 		Hostname:  "test-host",
-		Routing:  fh,
+		Routing:   fh,
 		Settings:  fs,
 	})
 	t.Cleanup(func() { s.Close() })
@@ -801,6 +802,7 @@ func TestCompressorConfigDoesNotReturnAPIKey(t *testing.T) {
 // routing straight through the proxy, unbypassed. This test would have
 // failed against the old settings-list-only implementation.
 func TestCompressorPassthroughProxyPersistsToStoreRow(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s, fh, _ := newSettingsTestServer(t)
 	_ = fh.SaveProxy(context.Background(), store.ProxyRow{
 		Service: "deepseek", Label: "DeepSeek", Port: 8790, Unit: "headroom@deepseek",

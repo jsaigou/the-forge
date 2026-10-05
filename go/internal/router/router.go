@@ -25,6 +25,7 @@ import (
 
 	"github.com/jsaigou/the-forge/internal/activity"
 	"github.com/jsaigou/the-forge/internal/authz"
+	"github.com/jsaigou/the-forge/internal/ctxledger"
 	"github.com/jsaigou/the-forge/internal/registry"
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/store"
@@ -93,6 +94,10 @@ type Deps struct {
 	// throughput virtual model resolves as unavailable; capability_tier
 	// virtual models are unaffected (they only need StoreCatalog).
 	Registry registry.Registry
+	// CtxLedger is the observe-only context-creation ledger (WS-N1,
+	// internal/ctxledger). Nil → no observation; never alters a request or
+	// response either way.
+	CtxLedger *ctxledger.Ledger
 }
 
 // Server is the a0 router.
