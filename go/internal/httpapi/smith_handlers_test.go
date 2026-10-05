@@ -382,17 +382,20 @@ func TestSmithAnomalyHook(t *testing.T) {
 		t.Errorf("status = %q, want open", invs.Investigations[0].Status)
 	}
 
-	// Get detail — should have findings from the deep sweep.
+	// Get detail — should have findings from the deep sweep. The hook opens the investigation first and
+	// attaches the sweep's findings afterwards, so the investigation appearing does NOT mean the findings
+	// are attached yet: wait for them (asserting immediately made this test flaky, ~1 in 3 runs alone).
 	idStr := strconv.FormatInt(invs.Investigations[0].ID, 10)
-	w = do(t, s, authedRequest("GET", "/api/v1/smith/investigations/"+idStr, nil))
-	if w.Code != 200 {
-		t.Fatalf("detail = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
 	var detail smithInvestigationDetailResponse
-	decodeJSON(t, w.Body, &detail)
-	if len(detail.Findings) == 0 {
-		t.Fatalf("expected findings attached to the anomaly investigation")
-	}
+	waitFor(t, 5*time.Second, "findings attached to the anomaly investigation", func() bool {
+		w = do(t, s, authedRequest("GET", "/api/v1/smith/investigations/"+idStr, nil))
+		if w.Code != 200 {
+			t.Fatalf("detail = %d, want 200; body=%s", w.Code, w.Body.String())
+		}
+		detail = smithInvestigationDetailResponse{}
+		decodeJSON(t, w.Body, &detail)
+		return len(detail.Findings) > 0
+	})
 	for _, f := range detail.Findings {
 		if f.SweepKind != "anomaly" {
 			t.Errorf("finding sweep_kind = %q, want anomaly", f.SweepKind)

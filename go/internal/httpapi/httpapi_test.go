@@ -17,6 +17,7 @@ import (
 	"github.com/jsaigou/the-forge/internal/authz"
 	"github.com/jsaigou/the-forge/internal/bus"
 	"github.com/jsaigou/the-forge/internal/collector"
+	"github.com/jsaigou/the-forge/internal/compressorctl"
 	"github.com/jsaigou/the-forge/internal/config"
 	"github.com/jsaigou/the-forge/internal/engine"
 	"github.com/jsaigou/the-forge/internal/registry"
@@ -82,7 +83,7 @@ func newTestServerWith(t *testing.T, ident authz.Identity) *Server {
 	cfg, _ := config.New(config.Config{
 		Server: config.Server{Listen: ":0"},
 		Slots: map[string]config.Slot{
-			"a1":   {Unit: "forge-a1", Port: 8080, Label: "A1", Order: 1},
+			"a1": {Unit: "forge-a1", Port: 8080, Label: "A1", Order: 1},
 			"a2": {Unit: "forge-a2", Port: 8081, Label: "A2", Order: 2},
 		},
 		Ports: map[string]int{"embedding": 8083, "stt": 8084},
@@ -101,7 +102,7 @@ func newTestServerWith(t *testing.T, ident authz.Identity) *Server {
 		Auth:      &stubAuth{identity: ident},
 		Events:    events,
 		Publish:   events,
-		Config: func() *config.Config { return cfg },
+		Config:    func() *config.Config { return cfg },
 		Hostname:  "test-host",
 	})
 	t.Cleanup(func() { s.Close() })
@@ -498,10 +499,10 @@ func TestSSEEmitsUnderscoreEventNames(t *testing.T) {
 		"config_updated":     true,
 		"registry:refreshed": true, // namespaced with colon — that's the only valid colon form
 		"tts:job_update":     true, // namespaced with colon — also valid
-		"profile:started":   true, // PROFILE track (Contract 1 amendment)
-		"profile:progress":  true,
-		"profile:done":      true,
-		"profile:failed":    true,
+		"profile:started":    true, // PROFILE track (Contract 1 amendment)
+		"profile:progress":   true,
+		"profile:done":       true,
+		"profile:failed":     true,
 		// HF model-acquisition track (Contract 1 amendment, go/internal/
 		// hfdownload/events.go) — not exercised by this test's switch/
 		// load/unload flow, registered here anyway per this file's own
@@ -611,6 +612,7 @@ func TestModesMutationsReturn501(t *testing.T) {
 // wired-up behavior.)
 
 func TestUnportedEndpointsReturn501(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s := newTestServer(t)
 	cases := []struct {
 		method, path string
@@ -857,7 +859,7 @@ func serverWithSettings(t *testing.T, set store.Settings) *Server {
 		Auth:      &stubAuth{identity: authz.Identity{Name: "operator", Role: authz.RoleAdmin}},
 		Events:    events,
 		Publish:   events,
-		Config: func() *config.Config { return cfg },
+		Config:    func() *config.Config { return cfg },
 		Settings:  set,
 		Hostname:  "test-host",
 	})
@@ -927,6 +929,7 @@ func TestTTSStartStopOK(t *testing.T) {
 }
 
 func TestCompressorLifecycleStill501(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s := serverWithSettings(t, newFakeSettings())
 	for _, path := range []string{"/api/v1/compressor/restart", "/api/v1/compressor/proxy/teardown", "/api/v1/compressor/proxy/create"} {
 		w := do(t, s, authedRequest("POST", path, nil))
@@ -954,12 +957,12 @@ func newA0TestServer(t *testing.T, daemonState collector.UnitState, passthrough 
 		},
 	})
 	snap := &collector.Snapshot{
-		TakenAt:   time.Now(),
-		Hostname:  "test-host",
-		Units:     map[string]collector.UnitState{"forge-daemon": daemonState},
-		Slots:     map[string]collector.SlotState{},
-		Inference: map[string]collector.SlotInference{},
-		Ports:     map[int]bool{},
+		TakenAt:        time.Now(),
+		Hostname:       "test-host",
+		Units:          map[string]collector.UnitState{"forge-daemon": daemonState},
+		Slots:          map[string]collector.SlotState{},
+		Inference:      map[string]collector.SlotInference{},
+		Ports:          map[int]bool{},
 		BookmarkHealth: map[string]bool{},
 	}
 	settings := newFakeSettings()
@@ -974,7 +977,7 @@ func newA0TestServer(t *testing.T, daemonState collector.UnitState, passthrough 
 		Auth:      &stubAuth{identity: authz.Identity{Name: "operator", Role: authz.RoleAdmin}},
 		Events:    events,
 		Publish:   events,
-		Config: func() *config.Config { return cfg },
+		Config:    func() *config.Config { return cfg },
 		Hostname:  "test-host",
 		Settings:  settings,
 	})
@@ -1118,10 +1121,10 @@ func newA0CompressorTestServer(t *testing.T, daemonState collector.UnitState, pr
 		Auth:      &stubAuth{identity: authz.Identity{Name: "operator", Role: authz.RoleAdmin}},
 		Events:    events,
 		Publish:   events,
-		Config: func() *config.Config { return cfg },
+		Config:    func() *config.Config { return cfg },
 		Hostname:  "test-host",
 		Settings:  settings,
-		Routing:  fh,
+		Routing:   fh,
 	})
 	t.Cleanup(func() { s.Close() })
 	return s, settings
@@ -1260,7 +1263,7 @@ func newLoadGuardTestServer(t *testing.T) *Server {
 	cfg, err := config.New(config.Config{
 		Server: config.Server{Listen: ":0"},
 		Slots: map[string]config.Slot{
-			"a1":   {Unit: "forge-a1", Port: 8080, Label: "A1", Order: 1},
+			"a1": {Unit: "forge-a1", Port: 8080, Label: "A1", Order: 1},
 			"a2": {Unit: "forge-a2", Port: 8081, Label: "A2", Order: 2},
 		},
 		Modes: map[string]config.Mode{
@@ -1277,11 +1280,11 @@ func newLoadGuardTestServer(t *testing.T) *Server {
 	cfg.Modes["qwen3"] = mode
 	reg := registry.New(regDB.Catalog(), func() *config.Config { return cfg }, nil)
 	snap := &collector.Snapshot{
-		TakenAt:   time.Now(),
-		Hostname:  "test-host",
-		Units:     map[string]collector.UnitState{},
+		TakenAt:  time.Now(),
+		Hostname: "test-host",
+		Units:    map[string]collector.UnitState{},
 		Slots: map[string]collector.SlotState{
-			"a1":   {Slot: "a1", Mode: "qwen3", Unit: "forge-a1", Port: 8080, Label: "A1"},
+			"a1": {Slot: "a1", Mode: "qwen3", Unit: "forge-a1", Port: 8080, Label: "A1"},
 			"a2": {Slot: "a2", Mode: "", Unit: "forge-a2", Port: 8081, Label: "A2"},
 		},
 		Inference:      map[string]collector.SlotInference{},
@@ -1295,7 +1298,7 @@ func newLoadGuardTestServer(t *testing.T) *Server {
 		Auth:      &stubAuth{identity: authz.Identity{Name: "operator", Role: authz.RoleAdmin}},
 		Events:    events,
 		Publish:   events,
-		Config: func() *config.Config { return cfg },
+		Config:    func() *config.Config { return cfg },
 		Hostname:  "test-host",
 		Registry:  reg,
 	})
@@ -1394,7 +1397,7 @@ func TestLoadGuardAllowsDifferentConfigSameModel(t *testing.T) {
 	cfg, err := config.New(config.Config{
 		Server: config.Server{Listen: ":0"},
 		Slots: map[string]config.Slot{
-			"a1":   {Unit: "forge-a1", Port: 8080, Label: "A1", Order: 1},
+			"a1": {Unit: "forge-a1", Port: 8080, Label: "A1", Order: 1},
 			"a2": {Unit: "forge-a2", Port: 8081, Label: "A2", Order: 2},
 		},
 		Modes: map[string]config.Mode{
@@ -1424,7 +1427,7 @@ func TestLoadGuardAllowsDifferentConfigSameModel(t *testing.T) {
 		Hostname: "test-host",
 		Units:    map[string]collector.UnitState{},
 		Slots: map[string]collector.SlotState{
-			"a1":   {Slot: "a1", Mode: "qwen3-coder-256k", Unit: "forge-a1", Port: 8080, Label: "A1"},
+			"a1": {Slot: "a1", Mode: "qwen3-coder-256k", Unit: "forge-a1", Port: 8080, Label: "A1"},
 			"a2": {Slot: "a2", Mode: "", Unit: "forge-a2", Port: 8081, Label: "A2"},
 		},
 		Inference:      map[string]collector.SlotInference{},

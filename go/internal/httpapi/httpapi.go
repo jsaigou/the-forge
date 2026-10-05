@@ -60,6 +60,7 @@ import (
 	"github.com/jsaigou/the-forge/internal/collector"
 	"github.com/jsaigou/the-forge/internal/compressorctl"
 	"github.com/jsaigou/the-forge/internal/config"
+	"github.com/jsaigou/the-forge/internal/ctxledger"
 	"github.com/jsaigou/the-forge/internal/engine"
 	"github.com/jsaigou/the-forge/internal/fx"
 	"github.com/jsaigou/the-forge/internal/hf"
@@ -263,6 +264,11 @@ type Deps struct {
 	// sprint, 2026-07-29 — Console "Choose a config" starring). nil = not
 	// yet wired; favorites routes return an empty list / no-op.
 	Favorites store.Favorites
+
+	// CtxLedger is the observe-only a0 context-creation ledger (WS-N1,
+	// CONTRACTS C2); the same instance is wired into router.Deps. nil = not
+	// wired; the context routes return 503 not_wired.
+	CtxLedger *ctxledger.Ledger
 
 	// SchedulerJobs is the cron-style forced-load job surface (P3 track,
 	// migration 0066). nil = not yet wired; scheduler-jobs routes return
@@ -496,6 +502,11 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	// Favorites (product/QA sprint, 2026-07-29) — personal preference, not
 	// shared system state, so gated on authentication alone (see
 	// favorites_handlers.go's file doc comment).
+	// Context-creation ledger (WS-N1, CONTRACTS C2): operator-gated (exposes
+	// consumer names); sizes and names only, never content.
+	mux.Handle("GET /api/v1/context/creation", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleContextCreation)))
+	mux.Handle("GET /api/v1/context/creation/metrics", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleContextCreationMetrics)))
+
 	mux.HandleFunc("GET /api/v1/favorites", s.handleFavoritesList)
 	mux.HandleFunc("PUT /api/v1/favorites/{subject_type}/{id}", s.handleFavoriteAdd)
 	mux.HandleFunc("DELETE /api/v1/favorites/{subject_type}/{id}", s.handleFavoriteRemove)

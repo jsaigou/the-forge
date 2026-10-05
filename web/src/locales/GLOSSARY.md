@@ -73,6 +73,15 @@ both for the same English term across catalogs.
 | evidence (chat/tool-call detail) | | | 根拠 | |
 | source (web-research citation) | | | 情報源 | |
 | externally blocked work | | | ブロック中の作業 | As in "外部要因でブロック中の作業". |
+| retired (compressor) | | | 廃止 / 廃止されました | Permanent end state of the compressor (ADR-0017), not "disabled"/無効 — nothing re-enables it from the UI. |
+| append-only (context) | | | 追記のみ | As in "コンテキストは追記のみ". |
+| passthrough / bypass | | | バイパス | Already used for the global passthrough toggle; kept as バイパス. |
+| context creation (ledger) | | | コンテキストの生成量 | Dashboard panel on how much context each request adds; "生成" = created, never "圧縮". |
+| consumer (a0 client) | | コンシューマー | | The API-key holder calling a0 (OpenCode, LibreChat, ...). |
+| cache-bust suspect | | | キャッシュ破壊の疑い | A client that rewrote earlier messages instead of appending. |
+| cache reuse | | | キャッシュ再利用 | Share of the prompt prefix served from the KV cache. |
+| tool schema | | ツールスキーマ | | The `tools[]` definitions sent on every request. |
+| tool output / result | | | ツール出力 / ツールの結果 | "大きな結果" = a single tool output over 8K/24K characters. |
 
 ## Style rules
 

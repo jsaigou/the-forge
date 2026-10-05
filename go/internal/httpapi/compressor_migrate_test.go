@@ -11,10 +11,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jsaigou/the-forge/internal/compressorctl"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
 func TestCompressorMigrate_MovesUnitAndRotatesToken(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s, fh, sys := newProvisionedTestServer(t)
 	ctx := context.Background()
 	if err := fh.SaveProxy(ctx, store.ProxyRow{
@@ -59,6 +61,7 @@ func TestCompressorMigrate_MovesUnitAndRotatesToken(t *testing.T) {
 }
 
 func TestCompressorMigrate_UnknownServiceNotFound(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s, _, _ := newProvisionedTestServer(t)
 	w := do(t, s, authedRequest("POST", "/api/v1/compressor/proxy/migrate", strings.NewReader(`{"service":"nonexistent"}`)))
 	if w.Code != 404 {
@@ -67,6 +70,7 @@ func TestCompressorMigrate_UnknownServiceNotFound(t *testing.T) {
 }
 
 func TestCompressorMigrate_OrphanedProxyRefused(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s, fh, _ := newProvisionedTestServer(t)
 	ctx := context.Background()
 	if err := fh.SaveProxy(ctx, store.ProxyRow{Service: "external", Unit: "headroom-external", Port: 8791, TargetURL: "https://x", Token: "t"}); err != nil {
@@ -84,6 +88,7 @@ func TestCompressorMigrate_OrphanedProxyRefused(t *testing.T) {
 }
 
 func TestCompressorMigrate_AlreadyMigratedRefused(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s, fh, _ := newProvisionedTestServer(t)
 	ctx := context.Background()
 	if err := fh.SaveProxy(ctx, store.ProxyRow{
@@ -98,6 +103,7 @@ func TestCompressorMigrate_AlreadyMigratedRefused(t *testing.T) {
 }
 
 func TestCompressorMigrate_MissingServiceValidationError(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s, _, _ := newProvisionedTestServer(t)
 	w := do(t, s, authedRequest("POST", "/api/v1/compressor/proxy/migrate", strings.NewReader(`{}`)))
 	if w.Code != 422 {
@@ -111,6 +117,7 @@ func TestCompressorMigrate_MissingServiceValidationError(t *testing.T) {
 // teardown correctly removes ITS OWN env file), not silently fall back to
 // the default headroom@ one just because that's what most rows still use.
 func TestCompressorMigrate_ThenRestartUsesCorrectProvisioner(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s, fh, sys := newProvisionedTestServer(t)
 	ctx := context.Background()
 	if err := fh.SaveProxy(ctx, store.ProxyRow{
