@@ -36,6 +36,7 @@ Every method landed in the same narrow band, well short of a usable bar:
 | rule heuristic (supersession + recency) | 0.513 (chance) | — |
 | Laya zero-shot classifier | 0.579 | 2.21% of content, at 1.29% false-drop |
 | Flash-Next LLM teacher (local, same model smith uses) | 0.577 | not separately measured — same AUC band |
+| CLM-v0.1-8B zero-shot (frozen Qwen3-8B + contrastive heads; added 2026-10-02) | 0.42–0.50 (chance, 3 framings) | not measured — blending with the deterministic heuristic below adds +0.0001 AUC even test-tuned; see `.sweep/laya-compaction-poc-2026-09-25.md` addendum |
 | **improved deterministic heuristic** (tool-type rules + result-size signal, no model) | **0.873** | **3.33%** of content, at 1.60% false-drop |
 
 The deterministic heuristic is the only one that cleared a reasonable "can it discriminate"

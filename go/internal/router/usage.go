@@ -20,8 +20,10 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"net/http"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/ctxledger"
 	"github.com/jsaigou/the-forge/internal/pricing"
 	"github.com/jsaigou/the-forge/internal/store"
 )
@@ -319,4 +321,52 @@ func (s *Server) recordExternalUsage(resolved ResolvedBackend, model string, buf
 	if err := s.deps.Usage.Record(ctx, ev); err != nil {
 		log.Printf("router: external usage record: %v", err)
 	}
+}
+
+// ---- creation ledger hooks (WS-N1; observe-only, see internal/ctxledger) ----
+//
+// Both hooks are strictly read-only with respect to the request and the
+// response: ledgerObserve hands the already-read inbound body bytes to the
+// ledger's queue (non-blocking, fail-open) and ledgerTap wraps a local-slot
+// response body in the same bounded usageTap used for remote spend, so
+// llama.cpp's timings.cache_n/prompt_n can be read from the non-stream body or
+// the final SSE chunk without buffering the stream.
+
+type ledgerTicketKey struct{}
+
+// ledgerObserve queues the inbound body for measurement and stashes the
+// returned ticket in ctx for the response tap. Never fails the request.
+func (s *Server) ledgerObserve(ctx context.Context, r *http.Request, bodyBytes []byte, model string) context.Context {
+	if s.deps.CtxLedger == nil {
+		return ctx
+	}
+	consumer := consumerLabelFromCtx(ctx)
+	if consumer == "" {
+		// consumerLabel returns "" only for smith's own traffic.
+		consumer = "smith"
+	}
+	// The requested model is what is known here (the resolved backend is only
+	// known later); the ledger bounds its cardinality.
+	if t := s.deps.CtxLedger.Observe(bodyBytes, consumer, model); t != nil {
+		return context.WithValue(ctx, ledgerTicketKey{}, t)
+	}
+	return ctx
+}
+
+// ledgerTap wraps a committed 2xx local-slot response so cache_n/prompt_n can
+// be reported to the ledger once the body has been fully relayed. No-op when
+// there is no ticket or the body is content-encoded (unparseable).
+func (s *Server) ledgerTap(ctx context.Context, resp *http.Response, streaming bool) {
+	t, _ := ctx.Value(ledgerTicketKey{}).(*ctxledger.Ticket)
+	if t == nil || resp.Header.Get("Content-Encoding") != "" {
+		return
+	}
+	resp.Body = newUsageTap(resp.Body, streaming, func(buf []byte) {
+		go func() {
+			defer func() { _ = recover() }()
+			if c, p, ok := ctxledger.ParseTimings(buf, streaming); ok {
+				t.Reuse(c, p)
+			}
+		}()
+	})
 }

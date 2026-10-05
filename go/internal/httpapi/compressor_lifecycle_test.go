@@ -17,9 +17,9 @@ import (
 	"github.com/jsaigou/the-forge/internal/authz"
 	"github.com/jsaigou/the-forge/internal/bus"
 	"github.com/jsaigou/the-forge/internal/collector"
+	"github.com/jsaigou/the-forge/internal/compressorctl"
 	"github.com/jsaigou/the-forge/internal/config"
 	"github.com/jsaigou/the-forge/internal/engine"
-	"github.com/jsaigou/the-forge/internal/compressorctl"
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/store"
 )
@@ -69,7 +69,7 @@ func newProvisionedTestServer(t *testing.T) (*Server, *fakeCompressor, *fakeProx
 		Sched:                 &sched.Stub{},
 		Auth:                  &stubAuth{identity: authz.Identity{Name: "admin", Role: authz.RoleAdmin}},
 		Events:                events,
-		Publish:                events,
+		Publish:               events,
 		Config:                func() *config.Config { return cfg },
 		Hostname:              "test-host",
 		Routing:               fh,
@@ -81,6 +81,7 @@ func newProvisionedTestServer(t *testing.T) (*Server, *fakeCompressor, *fakeProx
 }
 
 func TestProviderUpdateLinkProvisionsProxy(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s, fh, sys := newProvisionedTestServer(t)
 	do(t, s, authedRequest("POST", "/api/v1/providers",
 		strings.NewReader(`{"name":"deepseek","target_url":"https://api.deepseek.com/v1"}`)))
@@ -138,6 +139,7 @@ func TestProviderUpdateUnlinkTearsDownProxy(t *testing.T) {
 }
 
 func TestProviderUpdateRetargetReconciles(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s, fh, sys := newProvisionedTestServer(t)
 	do(t, s, authedRequest("POST", "/api/v1/providers",
 		strings.NewReader(`{"name":"deepseek","target_url":"https://old.example.com/v1"}`)))
@@ -159,6 +161,7 @@ func TestProviderUpdateRetargetReconciles(t *testing.T) {
 }
 
 func TestProviderUpdateRetargetLegacyProxyRefused(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	// A provider already linked to a legacy hand-created proxy (mirrors
 	// aiand -> "headroom-external") must not have its retarget silently
 	// no-op: Provisioner.Reconcile refuses, and that error must surface as
@@ -298,6 +301,7 @@ func TestCompressorLifecycleMissingServiceValidationError(t *testing.T) {
 // Provisioner (Sprint 7 dropped the legacy headroom@ one — see
 // newProvisionedTestServer's doc comment).
 func TestCompressorProxyCreateDefaultTemplateUsesLegacyProvisioner(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s, fh, sys := newProvisionedTestServer(t)
 	w := do(t, s, authedRequest("POST", "/api/v1/compressor/proxy/create",
 		strings.NewReader(`{"service":"a1","label":"A1","target_url":"http://127.0.0.1:8080"}`)))
@@ -319,6 +323,7 @@ func TestCompressorProxyCreateDefaultTemplateUsesLegacyProvisioner(t *testing.T)
 // handleCompressorMigrate (that handler requires one) — it needs to be
 // created fresh, on the forge-compress@ template.
 func TestCompressorProxyCreateCompressTemplateUsesCompressProvisioner(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s, fh, sys := newProvisionedTestServer(t)
 	w := do(t, s, authedRequest("POST", "/api/v1/compressor/proxy/create",
 		strings.NewReader(`{"service":"external","label":"External (shared)","target_url":"dynamic (per-request via x-compress-base-url)","template":"compress"}`)))
@@ -337,6 +342,7 @@ func TestCompressorProxyCreateCompressTemplateUsesCompressProvisioner(t *testing
 // TestCompressorProxyCreateInvalidTemplateRejected covers validate()'s new
 // field.
 func TestCompressorProxyCreateInvalidTemplateRejected(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	s, _, _ := newProvisionedTestServer(t)
 	w := do(t, s, authedRequest("POST", "/api/v1/compressor/proxy/create",
 		strings.NewReader(`{"service":"a1","label":"A1","target_url":"http://x","template":"bogus"}`)))
@@ -396,6 +402,7 @@ func TestCompressorConfigExternalEnabledReflectsSetting(t *testing.T) {
 // TestCompressorProxyCreateCompressTemplateWithoutCompressProvisionerWired
 // covers the 501 guard when no Provisioner is wired at all.
 func TestCompressorProxyCreateCompressTemplateWithoutCompressProvisionerWired(t *testing.T) {
+	defer compressorctl.OverrideRetiredForTest(false)()
 	events := bus.New()
 	cfg, _ := config.New(config.Config{Server: config.Server{Listen: ":0"}})
 	fh := &fakeCompressor{}

@@ -20,6 +20,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,6 +29,32 @@ import (
 
 	"github.com/jsaigou/the-forge/internal/store"
 )
+
+// Retired reports that the compressor is permanently out of the request path
+// (docs/compression-redesign/CONTRACTS.md C7, ADR-0017 "context is
+// append-only": forge-compress rewrites messages, which invalidates the KV
+// prefix and has corrupted context — ai-mode#46). While true, Provision and
+// Reconcile are deliberate no-ops: they never write an env file and never
+// start or restart a unit. Restart and Teardown still work so existing units
+// can be bounced or cleaned up. Re-enabling needs an ADR amendment overriding
+// ADR-0017. This is a const, not a setting, on purpose: there is no runtime
+// switch to flip by accident (the only override is OverrideRetiredForTest).
+// Code deletion is deferred to WS-R2.
+var retired = true
+
+// Retired reports whether the compressor is retired (always true outside
+// tests).
+func Retired() bool { return retired }
+
+// OverrideRetiredForTest sets the retired flag for the duration of a test
+// that needs to exercise the legacy provisioning/toggle code paths that WS-R2
+// will delete. It returns a restore func; call it via defer or t.Cleanup.
+// Never call from non-test code.
+func OverrideRetiredForTest(v bool) (restore func()) {
+	old := retired
+	retired = v
+	return func() { retired = old }
+}
 
 // Systemd is the subset of engine.Systemd (plus Restart, added to *engine.DBus
 // for this package — docs/v5-headroom-topology.md Phase 2) that provisioning
@@ -166,7 +193,16 @@ func (p *Provisioner) writeEnv(row store.ProxyRow) error {
 // unit that happens to already be running under this name (in violation of
 // the "brand-new proxy" assumption above) picks up the just-written env
 // file instead of silently keeping its old one.
+//
+// RETIRED (C7): while the compressor is retired this is a logged no-op that returns nil
+// without touching the filesystem or systemd. Callers (provider link, proxy
+// create) keep their existing flow and persist the row, but no forge-compress
+// unit is ever started for it.
 func (p *Provisioner) Provision(ctx context.Context, row store.ProxyRow) error {
+	if retired {
+		log.Printf("compressorctl: provision %q skipped: compressor is retired (C7/ADR-0017)", row.Service)
+		return nil
+	}
 	if !p.isTemplateUnit(row.Unit) {
 		return fmt.Errorf("compressorctl: provision %q: unit %q is not a %s template instance", row.Service, row.Unit, p.templatePrefix())
 	}
@@ -191,7 +227,14 @@ func (p *Provisioner) Provision(ctx context.Context, row store.ProxyRow) error {
 // correctness trap worse than refusing outright. Retargeting a legacy proxy
 // needs its unit file edited directly (or the proxy torn down and
 // re-linked, which provisions a fresh template instance in its place).
+//
+// RETIRED (C7): while the compressor is retired this is a logged no-op returning nil;
+// no env file is written and no unit is restarted.
 func (p *Provisioner) Reconcile(ctx context.Context, row store.ProxyRow) error {
+	if retired {
+		log.Printf("compressorctl: reconcile %q skipped: compressor is retired (C7/ADR-0017)", row.Service)
+		return nil
+	}
 	if !p.isTemplateUnit(row.Unit) {
 		return fmt.Errorf("compressorctl: reconcile %q: unit %q is a legacy hand-created unit — its target can't be changed by rewriting an env file it doesn't read; edit its unit file directly, or tear it down and re-link to provision a managed replacement", row.Service, row.Unit)
 	}

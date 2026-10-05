@@ -106,7 +106,10 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.NoBody // prevent any downstream reader from hitting EOF noise
 
 	var body map[string]any
-	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+	// Decode with UseNumber so numbers keep their exact source text (json.Number re-marshals verbatim):
+	// without it integers beyond 2^53 are rounded through float64, which would edit message content
+	// (contract C1, ADR-0017). Trailing data after the object is still rejected, as json.Unmarshal did.
+	if err := decodeBodyExact(bodyBytes, &body); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 			"error":  "validation_failed",
 			"fields": map[string]string{"body": "must be a valid JSON object"},
@@ -132,6 +135,11 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// Observe-only creation ledger (WS-N1): once per request (never inside
+	// tryBackends, which re-runs on failover), after validation and before
+	// routing. Queues the untouched inbound bytes; never alters the request.
+	ctx = s.ledgerObserve(ctx, r, bodyBytes, model)
 
 	cfg := s.cfg()
 	if s.deps.Cfg == nil {
@@ -454,6 +462,11 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 							s.recordExternalUsage(captured, model, buf, streaming)
 						})
 					}
+					if b.Kind == "foundry_slot" {
+						// Observe-only: read llama.cpp timings for the ledger's reuse figure.
+						streaming, _ := body["stream"].(bool)
+						s.ledgerTap(ctx, resp, streaming)
+					}
 					// Consumer attribution completion mark: ReverseProxy
 					// always closes the upstream body after copying it, so
 					// this fires when the response is fully streamed — both
@@ -643,4 +656,18 @@ func parseRemoteAddr(remoteAddr string) netip.Addr {
 		return netip.Addr{}
 	}
 	return addr
+}
+
+// decodeBodyExact is json.Unmarshal with UseNumber: same errors for malformed/trailing input, but numbers
+// are kept as json.Number so mutateBody's re-marshal reproduces them byte-for-byte.
+func decodeBodyExact(data []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return errors.New("invalid character after top-level value")
+	}
+	return nil
 }

@@ -98,6 +98,7 @@ func newTemplateRow(service string) store.ProxyRow {
 }
 
 func TestProvisionWritesEnvAndStarts(t *testing.T) {
+	defer OverrideRetiredForTest(false)()
 	dir := t.TempDir()
 	sys := &fakeSystemd{}
 	p := &Provisioner{Systemd: sys, EnvDir: dir}
@@ -160,6 +161,7 @@ func TestProvisionNeverUsesStart(t *testing.T) {
 }
 
 func TestProvisionRequiresToken(t *testing.T) {
+	defer OverrideRetiredForTest(false)()
 	p := &Provisioner{Systemd: &fakeSystemd{}, EnvDir: t.TempDir()}
 	row := newTemplateRow("deepseek")
 	row.Token = ""
@@ -169,6 +171,7 @@ func TestProvisionRequiresToken(t *testing.T) {
 }
 
 func TestProvisionRefusesNonTemplateUnit(t *testing.T) {
+	defer OverrideRetiredForTest(false)()
 	// A row whose Unit isn't a forge-compress@ instance (e.g. constructed
 	// with a bug, or accidentally pointed at a legacy name) must be
 	// refused, not silently started under the wrong assumption.
@@ -181,6 +184,7 @@ func TestProvisionRefusesNonTemplateUnit(t *testing.T) {
 }
 
 func TestReconcileRewritesEnvAndRestarts(t *testing.T) {
+	defer OverrideRetiredForTest(false)()
 	dir := t.TempDir()
 	sys := &fakeSystemd{}
 	p := &Provisioner{Systemd: sys, EnvDir: dir}
@@ -204,6 +208,7 @@ func TestReconcileRewritesEnvAndRestarts(t *testing.T) {
 }
 
 func TestReconcileRefusesLegacyUnit(t *testing.T) {
+	defer OverrideRetiredForTest(false)()
 	// aiand's real legacy proxy ("headroom-external", pre-Sprint-3) baked
 	// its target into its own unit file's Environment= lines — rewriting
 	// our env file wouldn't touch that, so silently "succeeding" here would
@@ -275,6 +280,7 @@ func TestTeardownLegacyUnitStopsWithoutTouchingEnvDir(t *testing.T) {
 }
 
 func TestTeardownStopErrorPropagates(t *testing.T) {
+	defer OverrideRetiredForTest(false)()
 	dir := t.TempDir()
 	sys := &fakeSystemd{}
 	p := &Provisioner{Systemd: sys, EnvDir: dir}
@@ -294,6 +300,7 @@ func TestTeardownStopErrorPropagates(t *testing.T) {
 }
 
 func TestProvisionReconcileTeardown_CustomTemplatePrefix(t *testing.T) {
+	defer OverrideRetiredForTest(false)()
 	// End-to-end lifecycle for a Provisioner pointed at a non-default
 	// template prefix — the same code path the default forge-compress@
 	// Provisioner uses, just under a different template name.
@@ -338,6 +345,7 @@ func TestProvisionReconcileTeardown_CustomTemplatePrefix(t *testing.T) {
 }
 
 func TestReconcileRefusesUnitFromADifferentTemplate(t *testing.T) {
+	defer OverrideRetiredForTest(false)()
 	// A Provisioner driving one template prefix must refuse to reconcile a
 	// row from a different one — same correctness trap as refusing a
 	// legacy hand-created unit: rewriting an env file the other template's

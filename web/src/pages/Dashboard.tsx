@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DashboardCustomPage } from "../components/DashboardCustomPage";
 import { ErrorBoundary } from "../components/ErrorBoundary";
+import { ContextCreationPanel } from "../components/ContextCreationPanel";
 import { CompressorSavingsChips } from "../components/CompressionSavingsChips";
 import { Icon } from "../components/Icon";
 import { RangeToggle } from "../components/RangeToggle";
@@ -219,6 +220,7 @@ function OverviewTab() {
       <div className="card">
         <RoutingTree readOnly />
       </div>
+      <ContextCreationPanel />
     </>
   );
 }

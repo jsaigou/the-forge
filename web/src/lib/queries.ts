@@ -50,6 +50,9 @@ import type {
   VoiceSettingsUpdate,
   WebAuthnFinishAssertRequest,
   WebAuthnFinishRegisterRequest,
+  ContextCreationBy,
+  ContextCreationResult,
+  ContextCreationWindow,
 } from "./types";
 
 // Sprint 13 (Sprint 12 Phase 9, plan risk 12) — Settings mounts one panel at
@@ -2255,3 +2258,19 @@ export function useSmithPendingAsk(): {
     clear: () => qc.setQueryData(qk.smith.pendingAsk, null),
   };
 }
+
+// ── Context creation ledger (WS-N2) ───────────────────────────────────────
+
+export function useContextCreation(window_: ContextCreationWindow, by: ContextCreationBy) {
+  return useQuery({
+    queryKey: ["context-creation", window_, by] as const,
+    queryFn: async (): Promise<ContextCreationResult> => {
+      const resp = await fetch(`/api/v1/context/creation?window=${window_}&by=${by}`, { credentials: "include" });
+      if (!resp.ok) throw new Error(`context creation: HTTP ${resp.status}`);
+      return (await resp.json()) as ContextCreationResult;
+    },
+    refetchInterval: 60_000,
+    retry: false,
+  });
+}
+

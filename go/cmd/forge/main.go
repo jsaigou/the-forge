@@ -50,6 +50,7 @@ import (
 	"github.com/jsaigou/the-forge/internal/collector"
 	"github.com/jsaigou/the-forge/internal/compressorctl"
 	"github.com/jsaigou/the-forge/internal/config"
+	"github.com/jsaigou/the-forge/internal/ctxledger"
 	"github.com/jsaigou/the-forge/internal/engine"
 	"github.com/jsaigou/the-forge/internal/fx"
 	"github.com/jsaigou/the-forge/internal/hf"
@@ -483,6 +484,7 @@ func main() {
 	// "safe for any unit" contract. Best-effort: a failure here must not
 	// block daemon startup.
 	reconcileCompressorsOnBoot(ctx, db.Routing(), compressorProvisioner)
+	seedCompressorRetired(ctx, db.Settings())
 
 	// ── TTS provisioner (Tier 1 Sprint 2, Voice & Speech settings) ───────────
 	// Writes forge-tts's env file under <StateDir>/tts (testuser-writable,
@@ -566,6 +568,11 @@ func main() {
 	// Marks its brain slot as "SMITH", and httpapi reads fresh entries back
 	// onto /api/v1/status as slot_consumers.
 	activityReg := activity.New()
+
+	// Observe-only a0 context-creation ledger (WS-N1): one instance shared by
+	// the router (hook) and httpapi (read side). Stops with ctx.
+	ctxLedger := ctxledger.New(ctxledger.Config{Sink: db.ContextCreation(), Settings: db.Settings()})
+	ctxLedger.Start(ctx)
 
 	// ── Smith (self-diagnosis agent — docs/v5-smith.md) ──────────────────
 	// Created after engine + collector + scheduler exist. P1-P2 are the
@@ -751,6 +758,7 @@ func main() {
 		PrefillStats:       db.PrefillStats(),
 		InvalidateConfig:   mergedProvider.Invalidate,
 		Favorites:          db.Favorites(),
+		CtxLedger:          ctxLedger,
 		Smith:              smithAgent,
 		HFDownload:         hfDownloadSvc,
 		HFClient:           hfClient,
@@ -795,6 +803,7 @@ func main() {
 		Usage:        db.Usage(),
 		Activity:     activityReg,
 		Registry:     reg,
+		CtxLedger:    ctxLedger,
 	})
 
 	// ── MCP server ─────────────────────────────────────────────────────────
@@ -1124,6 +1133,12 @@ func newNetworkIdentity(ctx context.Context, settings store.Settings) authz.Netw
 // form.
 func reconcileCompressorsOnBoot(ctx context.Context, hp store.Routing, prov *compressorctl.Provisioner) {
 	if hp == nil {
+		return
+	}
+	if compressorctl.Retired() {
+		// ADR-0017 / contract C7: the compressor is retired from the request path; a boot must not
+		// (re)start any forge-compress unit.
+		log.Printf("forge: compressor retired; skipping boot reconcile")
 		return
 	}
 	bootCtx, bootCancel := context.WithTimeout(ctx, 30*time.Second)
@@ -1808,4 +1823,21 @@ func listenAndServe(srv *http.Server, name, addr string) error {
 	}
 	log.Printf("forge: %s listener on %s", name, ln.Addr())
 	return srv.Serve(ln)
+}
+
+// seedCompressorRetired makes the retired state explicit in the store (ADR-0017, contract C7): if
+// compressor.passthrough_all has never been written, write true, so the router and the Settings API agree
+// without either read path changing its own default. An existing value (true or false) is never overwritten.
+func seedCompressorRetired(ctx context.Context, st store.Settings) {
+	if st == nil || !compressorctl.Retired() {
+		return
+	}
+	c, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := st.Get(c, "compressor.passthrough_all"); err == nil {
+		return
+	}
+	if err := st.Set(c, "compressor.passthrough_all", []byte("true")); err != nil {
+		log.Printf("forge: seed compressor.passthrough_all: %v", err)
+	}
 }

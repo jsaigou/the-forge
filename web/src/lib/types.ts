@@ -2814,3 +2814,38 @@ export interface SmithActionUpdateEvent {
   self_evicting: boolean;
   pending_count?: number;
 }
+
+// ── Context creation ledger (WS-N2, CONTRACTS C2) ─────────────────────────
+// GET /api/v1/context/creation. Sizes and names only — never content.
+export type ContextCreationWindow = "24h" | "7d" | "30d";
+export type ContextCreationBy = "tool" | "consumer" | "model";
+
+export interface ContextCreationRow {
+  key: string;
+  requests: number;
+  created_chars: number;
+  share: number;
+  p50_result_chars: number;
+  p90_result_chars: number;
+  max_result_chars: number;
+  big_results_8k: number;
+  big_results_24k: number;
+  kinds?: Record<string, number>;
+}
+
+export interface ContextCreationResult {
+  window: string;
+  by: string;
+  rows: ContextCreationRow[];
+  total_requests: number;
+  total_created_chars: number;
+  schema_chars_p50: number | null;
+  reuse_p50: number | null;
+  reuse_samples: number;
+  cache_bust_suspects: number;
+  approximate: string;
+  // go ctxledger.Stats has no json tags, so keys are capitalized on the wire.
+  // Consumers with >=1 suspect in the requested window, descending.
+  suspects_by_consumer?: { consumer: string; suspects: number; requests: number }[];
+  ledger?: { observed: number; dropped: number; parse_failures: number; panics: number; flush_errors: number };
+}

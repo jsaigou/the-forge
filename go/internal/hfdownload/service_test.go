@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -236,10 +237,19 @@ func TestPauseThenResumeCompletesViaRangeRequest(t *testing.T) {
 			_, _ = w.Write([]byte(`{}`))
 			return
 		}
-		if r.Header.Get("Range") != "" {
+		if rng := r.Header.Get("Range"); rng != "" {
 			atomic.StoreInt32(&sawRangeResume, 1)
+			// Honour the requested start offset like a real server. (Always sending payload[half:]
+			// made this test depend on the pause landing after the whole first half had been
+			// persisted; on a slow runner the pause can land after a single 32 KiB buffer and the
+			// resumed file came out short: BytesDone 32768+100056 instead of 200111.)
+			var start int
+			if _, err := fmt.Sscanf(rng, "bytes=%d-", &start); err != nil || start < 0 || start > len(payload) {
+				start = half
+			}
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, len(payload)-1, len(payload)))
 			w.WriteHeader(http.StatusPartialContent)
-			_, _ = w.Write(payload[half:])
+			_, _ = w.Write(payload[start:])
 			return
 		}
 		flusher, _ := w.(http.Flusher)

@@ -49,6 +49,15 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	// Subscribe BEFORE sending the initial snapshot. A client that has read the initial event may
+	// immediately trigger an action (the integration test does exactly that); if the subscription were
+	// registered afterwards, an event published in between would be lost to this client. The subscriber
+	// channel is buffered, so anything published after Subscribe is delivered right after the snapshot.
+	events := s.deps.Events.Subscribe(ctx)
+
 	// Send one initial status_update with the full Status payload. The
 	// PWA's useLiveEvents() writes this straight into the Query cache
 	// (web/src/lib/sse.ts) — without it the dashboard would render empty
@@ -58,10 +67,6 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-
-	events := s.deps.Events.Subscribe(ctx)
 	if events == nil {
 		// No bus wired — close the stream. (cmd/forge always wires a
 		// bus; this branch is the test-time nil case.)
