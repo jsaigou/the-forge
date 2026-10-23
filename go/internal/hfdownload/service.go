@@ -45,6 +45,10 @@ type Deps struct {
 	Publish bus.Publisher
 	Now     func() time.Time
 	Logf    func(format string, args ...any)
+	// ProbeLoadMode reports whether the llama-server binary at path accepts
+	// --load-mode (known=false: could not tell). nil ⇒ run `<bin> --help`.
+	// Injected by tests; see loadmode.go.
+	ProbeLoadMode func(ctx context.Context, path string) (supported, known bool)
 }
 
 func (d Deps) now() time.Time {

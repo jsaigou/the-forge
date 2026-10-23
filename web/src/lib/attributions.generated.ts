@@ -110,7 +110,7 @@ export const NPM_DEPS: NpmDep[] = [
   },
   {
     "name": "vite",
-    "version": "8.1.5",
+    "version": "8.3.5",
     "license": "MIT",
     "projectUrl": "https://vite.dev",
     "direct": false

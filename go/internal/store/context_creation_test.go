@@ -60,7 +60,7 @@ func TestMigration0090DryRunOnCopy(t *testing.T) {
 	if _, err := db.sql.Exec(`DROP TABLE context_creation_hourly`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.sql.Exec(`DELETE FROM schema_migrations WHERE version = 90`); err != nil {
+	if _, err := db.sql.Exec(`DELETE FROM schema_migrations WHERE version >= 90`); err != nil {
 		t.Fatal(err)
 	}
 	// Copy the live files while still open (so -wal/-shm exist), then upgrade the copy.
@@ -83,7 +83,7 @@ func TestMigration0090DryRunOnCopy(t *testing.T) {
 	defer cp.Close()
 	var v int
 	cp.sql.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&v)
-	if v != 90 {
+	if v != 91 {
 		t.Fatalf("version=%d", v)
 	}
 	if raw, err := cp.Settings().Get(context.Background(), "marker"); err != nil || string(raw) != `"keep"` {
