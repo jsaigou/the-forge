@@ -127,3 +127,20 @@ or ROCm backend instead of vLLM, subject to the size ceilings above).
   service manager considers the unit stopped. Anything that reads slot occupancy should treat a
   slot as still occupied until the unload path itself confirms completion, not the instant the
   unit's own state flips.
+
+## Upstream llama.cpp Removes CLI Flags Without a Compatibility Window
+
+`--mmap`, `--no-mmap`, `--mlock` and `--direct-io` were removed upstream (ggml-org/llama.cpp
+#28334) in favor of `--load-mode {auto,none,mmap,mlock,mmap+mlock}`; `--no-mmap` is
+`--load-mode none`. A binary built after that change rejects the old flag with
+`error: invalid argument` and exits, so the slot never starts. Two rules follow:
+
+- **Flag spelling is a property of the build, not of the config template.** Builds from before the
+  change accept both spellings or only the old one; builds after it accept only the new one. Check a
+  binary with `<bin> --help | grep -c -- --load-mode` before pointing a config at it. The HF
+  downloader's auto-registration probes the chosen binary for this; hand-edited `extra_args` must
+  match the config's own build.
+- **`--help` presence is not behavior.** Verify a flag change by loading the config through the
+  normal path and reading the real command line (`ps -eo args`) and `/props`, not just grepping help.
+
+See [docs/adr/0018-llama-cpp-fork-rebase-and-flag-compatibility.md](adr/0018-llama-cpp-fork-rebase-and-flag-compatibility.md).

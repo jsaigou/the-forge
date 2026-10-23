@@ -19,8 +19,8 @@ func TestMigrateFresh(t *testing.T) {
 	).Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 90 {
-		t.Fatalf("schema version = %d, want 90", version)
+	if version != 91 {
+		t.Fatalf("schema version = %d, want 91", version)
 	}
 
 	// Every Contract 3 table (0001) plus the Sprint 0 §0.11 polish tables

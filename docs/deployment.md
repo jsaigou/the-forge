@@ -89,6 +89,14 @@ env -i HOME=$HOME PATH=/usr/bin:/bin ldd build-vulkan-new/bin/llama-server   # a
 Build into a new directory rather than overwriting a build currently in use, then repoint the
 catalog's `builds.binary_path` and send the daemon a reload once you've verified the new binary.
 
+**Flag spelling and loading check.** Build a new llama.cpp variant into its own directory beside the
+live one and register it as an additional build; move configs onto it one at a time and test each
+against its own baseline (cache reuse, decode speed, `n_ctx`), keeping the old build as the rollback.
+Before pointing a config at a new binary confirm it starts under the same environment the launcher
+uses (`readelf -d <bin> | grep -i runpath`; `env -u LD_LIBRARY_PATH ldd <bin> | grep -c "not found"` must
+print 0) and that every flag in the config's `extra_args` exists in `<bin> --help`. Note
+`--no-mmap` became `--load-mode none` upstream - see [docs/pitfalls.md](pitfalls.md).
+
 ## CLI (`forge`)
 
 The client CLI/TUI ships inside the `forge` binary (same file as the daemon; subcommands never
