@@ -43,7 +43,10 @@ Go to **Models → Add Model**.
      across N slots rather than multiplying it, so a mode meant to serve one long conversation
      at full context must stay at `1`
    - `--no-mmap --jinja --flash-attn on --threads 16` (the universal llama.cpp flags every other
-     mode already uses)
+     mode already uses). **Builds from the 2026-10 upstream rebase (`llama.cpp-kintsugi-rebase/*`)
+     reject `--no-mmap`** — use `--load-mode none` instead (the September kintsugi and
+     `standard-vulkan` builds accept both). Models added through the HF downloader get the
+     right spelling automatically (the registrar probes the chosen build's binary)
    - the Build (Vulkan or ROCm) that actually matches the file's size
 
    The new Config lands **`status=unverified`, `visibility=hidden`** - it exists for review, not

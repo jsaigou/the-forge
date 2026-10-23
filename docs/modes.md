@@ -30,6 +30,14 @@ For any config meant to serve one long conversation at its full configured conte
 `--parallel 1`. A higher value only makes sense for a short-context, high-concurrency
 fast-worker config where several small, independent requests are the actual intended use.
 
+## Model load mode (`--load-mode`)
+
+Reading the whole weight file into memory up front (what `--no-mmap` used to do) is
+`--load-mode none`; `mmap` memory-maps on demand, `mlock` / `mmap+mlock` also pin it in RAM, `auto`
+lets llama.cpp choose. Upstream removed `--mmap`/`--no-mmap`/`--mlock`/`--direct-io`, so configs on
+current builds should carry `--load-mode`; configs on older builds may still need the old flag - the
+spelling is per build (see [docs/pitfalls.md](pitfalls.md)).
+
 ## `--ctx-checkpoints`
 
 This flag (llama.cpp default is currently 32) lets the engine checkpoint and restore context

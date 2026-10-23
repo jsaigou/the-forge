@@ -78,9 +78,15 @@ export const LLAMA_FLAGS: Record<string, FlagRef> = {
     arg: "text",
     managed: true,
   },
+  "--load-mode": {
+    label: "Model load mode",
+    why: "How the weight file is loaded: \"none\" reads it all into memory up front (what --no-mmap used to do), \"mmap\" memory-maps it on demand, \"mlock\" / \"mmap+mlock\" also pin it in RAM, \"auto\" lets llama.cpp choose (mmap unless a device can't). Replaces --mmap / --no-mmap / --mlock / --direct-io, which current upstream builds reject.",
+    arg: "text",
+    presets: ["none", "mmap", "mlock", "mmap+mlock", "auto"],
+  },
   "--no-mmap": {
-    label: "Disable mmap",
-    why: "Forces the whole weight file to be read into memory up front instead of memory-mapped on demand. Slower to start, but avoids page-fault stalls mid-generation on some filesystem/GPU-driver combinations.",
+    label: "Disable mmap (deprecated)",
+    why: "Forces the whole weight file to be read into memory up front instead of memory-mapped on demand. Slower to start, but avoids page-fault stalls mid-generation on some filesystem/GPU-driver combinations. Deprecated: upstream removed it (ggml-org/llama.cpp #28334) — builds from the 2026-10 rebase reject it; use --load-mode none instead. Older builds still accept both.",
     arg: "none",
   },
   "--threads": {

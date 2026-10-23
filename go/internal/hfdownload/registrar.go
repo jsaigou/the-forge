@@ -172,6 +172,8 @@ func (s *Service) buildBundle(ctx context.Context, job store.ModelDownloadRow, p
 		nCtx = 4096 // conservative fallback when the GGUF header carries no context_length KV
 	}
 
+	build := s.pickBuild(ctx, cat, sizeBytes)
+
 	b := store.ModelBundle{
 		Model: store.Model{
 			Name: modelName, HFRepo: job.Repo, Creator: repoBase,
@@ -192,13 +194,13 @@ func (s *Service) buildBundle(ctx context.Context, job store.ModelDownloadRow, p
 		Config: store.Config{
 			Name: slugify(modelName) + "-" + slugify(variantName),
 			EngineID: engine.ID, NCtx: nCtx, Parallel: 1,
-			ExtraArgs:  []string{"--no-mmap", "--jinja", "--flash-attn", "on", "--threads", "16"},
+			ExtraArgs:  append(s.loadModeArgs(ctx, build), "--jinja", "--flash-attn", "on", "--threads", "16"),
 			Status:     "unverified",
 			Visibility: "hidden",
 		},
 	}
-	if buildID := s.resolveBuildID(ctx, cat, sizeBytes); buildID != 0 {
-		b.Config.BuildID = buildID
+	if build.ID != 0 {
+		b.Config.BuildID = build.ID
 	}
 	if mmprojFile != nil {
 		mmProjMD, mmErr := gguf.ReadMetadata(filepath.Join(s.d.Cfg().Paths.ModelsDir, mmprojFile.DestRelPath))
@@ -249,27 +251,46 @@ func (s *Service) lookupQuantizationID(ctx context.Context, cat store.Catalog, q
 	return 0
 }
 
-// resolveBuildID picks a Build whose Backend matches what totalBytes
-// requires (ROCm above the Vulkan ceiling, Vulkan otherwise) — never
-// derived from a name substring (store.Build.Backend's own doc comment
-// records the live incident that rule prevents). Returns 0 (NULL) when no
-// matching Build exists; a human still has to install one, but the
-// generated Config at least never claims the wrong backend.
-func (s *Service) resolveBuildID(ctx context.Context, cat store.Catalog, totalBytes int64) int64 {
+// pickBuild chooses the Build a freshly registered Config should use: one
+// whose Backend matches what totalBytes requires (ROCm above the Vulkan
+// ceiling, Vulkan otherwise) — never derived from a name substring
+// (store.Build.Backend's own doc comment records the live incident that rule
+// prevents). Retired rows (no binary_path, or a "(retired)" name) are never
+// candidates: the previous "first row with a matching backend" rule landed
+// new models on a retired vulkan build and on the oldest rocm build.
+//
+// Among the live candidates it takes the build already serving the most
+// Configs — the operator's de-facto default for that backend, so a smith
+// "candidate, pending promotion" row or a freshly added test build is never
+// adopted just for being new — and breaks ties toward the newest (highest
+// id). Returns the zero Build when none qualifies; a human still has to
+// install one, but the generated Config at least never claims the wrong
+// backend.
+func (s *Service) pickBuild(ctx context.Context, cat store.Catalog, totalBytes int64) store.Build {
 	want := "vulkan"
 	if totalBytes > vulkanCeilingBytes {
 		want = "rocm"
 	}
 	builds, err := cat.ListBuilds(ctx)
 	if err != nil {
-		return 0
+		return store.Build{}
 	}
-	for _, b := range builds {
-		if b.Backend == want {
-			return b.ID
+	uses := map[int64]int{}
+	if cfgs, err := cat.ListConfigs(ctx); err == nil {
+		for _, c := range cfgs {
+			uses[c.BuildID]++
 		}
 	}
-	return 0
+	var best store.Build
+	for _, b := range builds {
+		if b.Backend != want || b.BinaryPath == "" || strings.HasPrefix(b.Name, "(retired)") {
+			continue
+		}
+		if best.ID == 0 || uses[b.ID] > uses[best.ID] || (uses[b.ID] == uses[best.ID] && b.ID > best.ID) {
+			best = b
+		}
+	}
+	return best
 }
 
 func (s *Service) isSharded(jobID int64) bool {
