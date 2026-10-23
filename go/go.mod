@@ -6,6 +6,8 @@ module github.com/jsaigou/the-forge
 
 go 1.25.0
 
+toolchain go1.27.3
+
 require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
