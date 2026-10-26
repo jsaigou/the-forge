@@ -144,3 +144,14 @@ or ROCm backend instead of vLLM, subject to the size ceilings above).
   normal path and reading the real command line (`ps -eo args`) and `/props`, not just grepping help.
 
 See [docs/adr/0018-llama-cpp-fork-rebase-and-flag-compatibility.md](adr/0018-llama-cpp-fork-rebase-and-flag-compatibility.md).
+
+## A Touch-Target Floor Can Push a Control Into Its Neighbor (web UI)
+
+`@media (pointer: coarse) { .icon-btn { min-width: 44px; min-height: 44px } }` enlarges every
+`.icon-btn`, including ones with an inline 24px size and `position: absolute` (the bay unload ⏏).
+The enlarged button then overlaps a later positioned sibling (the config-name copy button, also an
+`.icon-btn`), which paints over it because later positioned elements win at equal `z-index`.
+
+It is invisible in a desktop browser resized to phone width: `pointer: coarse` only matches on a
+real touch device or an iOS/Android simulator. Test touch CSS there. Fix: give the absolutely
+placed control a `z-index` and reserve its full height in the row it sits in.

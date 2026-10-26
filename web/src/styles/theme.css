@@ -496,7 +496,9 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
 /* Slots pass 2026-08-25: header icons sized to the 16.5px slot-name font
    height (down from the 26px .icon.sm default). */
 .bay .slot-head .icon, .bay .slot-head .logo.sm { width: 17px; height: 17px; border-radius: 5px; }
-.bay .bay-eject { position: absolute; top: 10px; right: 10px; }
+/* z-index: on coarse pointers the 44px eject grows into the config-name
+   copy button below it, which is positioned later and would paint over it. */
+.bay .bay-eject { position: absolute; top: 10px; right: 10px; z-index: 2; }
 /* Sprint K: diagonal warning-stripe overlay while a profiling run holds the
    fleet (see Bay.tsx's profilingHold comment for why this applies to every
    loaded bay rather than guessing which slot). Low-opacity so the bay's own
@@ -1624,6 +1626,10 @@ h1,h2,h3 { text-wrap: balance; margin: 0; }
   .icon-btn { min-width: 44px; min-height: 44px; }
   .btn { min-height: 44px; }
   .bay .load-btn { min-height: 44px; padding: 10px 18px; }
+  /* The 44px eject is absolutely placed at top/right 10px; reserve its full
+     height in the header row so the config-name copy button below doesn't
+     sit under it. */
+  .bay .slot-head { min-height: 42px; }
   /* The provider billing ↗ link is a bare inline anchor — grow its real
      box (padding + min-height) so the rect census passes too. */
   .cchip-provider a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; }
