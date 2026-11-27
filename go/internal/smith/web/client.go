@@ -13,12 +13,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"time"
+
+	"github.com/jsaigou/the-forge/internal/netguard"
 )
 
 // maxBodyBytes caps every response body (docs/v5-smith.md §4.8: "1 MB body
@@ -98,95 +98,18 @@ func newPlainHTTPClient() *http.Client {
 	return &http.Client{}
 }
 
-// newGuardedHTTPClient returns a client whose DialContext rejects
-// loopback/private/link-local/CGNAT destinations, resolved and checked at
-// dial time — not by pre-resolving the host and validating a separate
-// lookup, which a DNS-rebinding attacker could answer differently between
-// the check and the connect. allow, when non-nil, overrides the guard for
-// hosts it approves; production leaves it nil. Tests pointing `direct` at
-// an httptest.Server (127.0.0.1) must set it explicitly.
+// newGuardedHTTPClient is netguard.NewClient (dial-time SSRF guard; see there). allow, when non-nil, overrides the guard for hosts it
+// approves; production leaves it nil, tests pointing `direct` at an httptest.Server (127.0.0.1) must set it explicitly.
 func newGuardedHTTPClient(allow func(host string) bool) *http.Client {
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	return &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				host, port, err := net.SplitHostPort(addr)
-				if err != nil {
-					return nil, err
-				}
-				if allow != nil && allow(host) {
-					return dialer.DialContext(ctx, network, addr)
-				}
-				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-				if err != nil {
-					return nil, fmt.Errorf("web: resolve %q: %w", host, err)
-				}
-				var lastErr error
-				for _, ip := range ips {
-					if !isPublicIP(ip.IP) {
-						lastErr = fmt.Errorf("web: direct fetch blocked (non-public address %s for %q)", ip.IP, host)
-						continue
-					}
-					conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
-					if dialErr == nil {
-						return conn, nil
-					}
-					lastErr = dialErr
-				}
-				if lastErr == nil {
-					lastErr = fmt.Errorf("web: no address for %q", host)
-				}
-				return nil, lastErr
-			},
-		},
-	}
+	return netguard.NewClient(allow)
 }
 
-// isPublicIP rejects loopback, RFC1918/ULA private, link-local, unspecified,
-// and CGNAT (100.64.0.0/10 — this fleet's tailnet range) addresses.
-// net.IP.IsPrivate() does not cover CGNAT, hence the explicit check.
-func isPublicIP(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
-		return false
-	}
-	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
-		return false
-	}
-	return true
-}
+// isPublicIP is the SSRF predicate shared with every other server-side fetcher; the rules (and why they are a table, not a list of
+// helper calls) live in internal/netguard.
+func isPublicIP(ip net.IP) bool { return netguard.IsPublic(ip) }
 
-// validateFetchURL validates that a URL's resolved host has only public IP
-// addresses, preventing SSRF to internal services (a0, MCP, ops dashboard,
-// ComfyUI, embeddings — all on the tailnet). This check runs before ANY
-// fetch adapter, including firecrawl, which otherwise bypasses the direct
-// adapter's dial-time guard in newGuardedHTTPClient. The direct adapter
-// retains its dial-time check as defense-in-depth against DNS rebinding.
-// allow, when non-nil, overrides the guard for hosts it approves (tests
-// pointing at httptest.Server on 127.0.0.1).
+// validateFetchURL is netguard.ValidateURL. It runs before ANY fetch adapter, including firecrawl, which otherwise bypasses the direct
+// adapter's dial-time guard; the direct adapter keeps its dial-time check as defence in depth against DNS rebinding.
 func validateFetchURL(ctx context.Context, rawURL string, allow func(host string) bool) error {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return fmt.Errorf("web: parse url: %w", err)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("web: scheme %q not allowed (http/https only)", u.Scheme)
-	}
-	host := u.Hostname()
-	if host == "" {
-		return fmt.Errorf("web: url has no host")
-	}
-	if allow != nil && allow(host) {
-		return nil
-	}
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return fmt.Errorf("web: resolve %q: %w", host, err)
-	}
-	for _, ip := range ips {
-		if !isPublicIP(ip.IP) {
-			return fmt.Errorf("web: fetch blocked (non-public address %s for %q)", ip.IP, host)
-		}
-	}
-	return nil
+	return netguard.ValidateURL(ctx, rawURL, allow)
 }

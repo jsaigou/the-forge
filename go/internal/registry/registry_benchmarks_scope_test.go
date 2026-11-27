@@ -41,7 +41,7 @@ func seedConfigCatalog(t *testing.T, ctx context.Context, cat store.Catalog) (mo
 	configID, _ = cat.CreateConfig(ctx, store.Config{
 		Name: "gemma4-31b-mtp", VariantID: variantID, WeightArtifactID: weightID,
 		EngineID: eng.ID, BuildID: buildID,
-		NCtx: 262144, Parallel: 1, ExtraArgs: []string{},
+		NCtx: 262144, ExtraArgs: []string{},
 		Status: "verified", Visibility: "visible", IsDefault: true,
 	})
 	return modelID, variantID, configID

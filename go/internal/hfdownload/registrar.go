@@ -4,6 +4,8 @@ package hfdownload
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -87,6 +89,7 @@ func (s *Service) registerAndFinish(ctx context.Context, jobID int64, job store.
 		s.failJob(ctx, jobID, fmt.Errorf("register catalog rows: %w", err))
 		return
 	}
+	s.d.catalogChanged()
 	if err := s.d.Store.ModelDownloads().SetCreatedConfig(ctx, jobID, res.ConfigID); err != nil {
 		s.d.logf("hfdownload: job %d: set_created_config: %v", jobID, err)
 	}
@@ -173,6 +176,10 @@ func (s *Service) buildBundle(ctx context.Context, job store.ModelDownloadRow, p
 	}
 
 	build := s.pickBuild(ctx, cat, sizeBytes)
+	visibility, err := s.newDownloadVisibility(ctx)
+	if err != nil {
+		return store.ModelBundle{}, err
+	}
 
 	b := store.ModelBundle{
 		Model: store.Model{
@@ -192,11 +199,13 @@ func (s *Service) buildBundle(ctx context.Context, job store.ModelDownloadRow, p
 			SHA256: sha256OrEmpty(primary),
 		},
 		Config: store.Config{
-			Name: slugify(modelName) + "-" + slugify(variantName),
-			EngineID: engine.ID, NCtx: nCtx, Parallel: 1,
-			ExtraArgs:  append(s.loadModeArgs(ctx, build), "--jinja", "--flash-attn", "on", "--threads", "16"),
+			Name:     slugify(modelName) + "-" + slugify(variantName),
+			EngineID: engine.ID, NCtx: nCtx,
+			// --parallel must be in the launch flags: extra_args is the only source of the slot count (the old
+			// configs.parallel column was never read and was dropped in migration 0096).
+			ExtraArgs:  append(s.loadModeArgs(ctx, build), "--jinja", "--flash-attn", "on", "--threads", "16", "--parallel", "1"),
 			Status:     "unverified",
-			Visibility: "hidden",
+			Visibility: visibility,
 		},
 	}
 	if build.ID != 0 {
@@ -229,6 +238,31 @@ func (s *Service) buildBundle(ctx context.Context, job store.ModelDownloadRow, p
 		})
 	}
 	return b, nil
+}
+
+// SettingShowNewDownloads ("catalog.show_new_downloads") is a boolean: true makes a downloaded model's config visible at once. Unset or false, it
+// stays hidden until someone makes it visible, as an established host wants. A new installation turns it on (forge host-setup).
+const SettingShowNewDownloads = "catalog.show_new_downloads"
+
+func (s *Service) newDownloadVisibility(ctx context.Context) (string, error) {
+	if s.d.Store == nil {
+		return "hidden", nil
+	}
+	raw, err := s.d.Store.Settings().Get(ctx, SettingShowNewDownloads)
+	if errors.Is(err, store.ErrNotFound) {
+		return "hidden", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", SettingShowNewDownloads, err)
+	}
+	var show bool
+	if err := json.Unmarshal(raw, &show); err != nil {
+		return "", fmt.Errorf("%s must be true or false: %w", SettingShowNewDownloads, err)
+	}
+	if show {
+		return "visible", nil
+	}
+	return "hidden", nil
 }
 
 // lookupQuantizationID resolves quant against the seeded vocabulary,
@@ -283,7 +317,7 @@ func (s *Service) pickBuild(ctx context.Context, cat store.Catalog, totalBytes i
 	}
 	var best store.Build
 	for _, b := range builds {
-		if b.Backend != want || b.BinaryPath == "" || strings.HasPrefix(b.Name, "(retired)") {
+		if b.Backend != want || b.BinaryPath == "" || b.Retired || strings.HasPrefix(b.Name, "(retired)") {
 			continue
 		}
 		if best.ID == 0 || uses[b.ID] > uses[best.ID] || (uses[b.ID] == uses[best.ID] && b.ID > best.ID) {
@@ -352,20 +386,13 @@ func (s *Service) repointExistingConfig(ctx context.Context, job store.ModelDown
 	if err != nil {
 		return fmt.Errorf("resolve config %q: %w", job.ConfigName, err)
 	}
-	art, err := cat.GetArtifact(ctx, cfgRow.WeightArtifactID)
-	if err != nil {
-		return fmt.Errorf("weight artifact for config %q: %w", job.ConfigName, err)
-	}
-	art.FilePath = primary.DestRelPath
-	art.FileSizeBytes = primary.BytesTotal
-	art.SHA256 = sha256OrEmpty(primary)
+	file := store.ArtifactFile{FilePath: primary.DestRelPath, FileSizeBytes: primary.BytesTotal, SHA256: sha256OrEmpty(primary)}
 	if strings.HasSuffix(strings.ToLower(primary.Filename), ".gguf") {
-		art.GGUFArch = md.Architecture
-		art.GGUFTrainedCtx = md.TrainedCtx
-		art.GGUFParameterCount = ggufParamString(md)
-		art.GGUFQuantType = md.QuantType
+		file.GGUF = &store.ArtifactGGUFFacts{Arch: md.Architecture, TrainedCtx: md.TrainedCtx, ParameterCount: ggufParamString(md), QuantType: md.QuantType}
 	}
-	if err := cat.UpdateArtifact(ctx, art); err != nil {
+	// The narrow write re-reads the artifact: the download took long enough for the row to have been edited since the config was resolved.
+	writes := store.ArtifactWrites{Cat: cat, Changed: s.d.OnCatalogChange}
+	if _, err := writes.SetFile(ctx, cfgRow.WeightArtifactID, file); err != nil {
 		return fmt.Errorf("repoint artifact for config %q: %w", job.ConfigName, err)
 	}
 	return nil

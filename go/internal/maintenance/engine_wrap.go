@@ -19,6 +19,7 @@ type engineFull interface {
 	FitPlan(mode string) (engine.Plan, error)
 	SlotFootprintBytes(slot string) int64
 	SlotStates(units map[string]collector.UnitState) map[string]collector.SlotAssignment
+	engine.SlotOrderer
 }
 
 var _ engineFull = (*engine.Manager)(nil)
@@ -58,6 +59,10 @@ func (g *GatedEngine) FitPlan(mode string) (engine.Plan, error)  { return g.real
 // type assertion on the wrapped value (httpapi's fit check and eviction
 // candidates), so a wrapper that omits it makes it silently look absent.
 func (g *GatedEngine) SlotFootprintBytes(slot string) int64 { return g.real.SlotFootprintBytes(slot) }
+
+// LoadOrder and RecentlyFreed are forwarded for the same reason as SlotFootprintBytes.
+func (g *GatedEngine) LoadOrder() []string            { return g.real.LoadOrder() }
+func (g *GatedEngine) RecentlyFreed(slot string) bool { return g.real.RecentlyFreed(slot) }
 
 func (g *GatedEngine) SlotStates(units map[string]collector.UnitState) map[string]collector.SlotAssignment {
 	return g.real.SlotStates(units)

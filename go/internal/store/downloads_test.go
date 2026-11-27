@@ -229,7 +229,7 @@ func TestRegisterDownloadedModelAtomicRowSet(t *testing.T) {
 		},
 		Config: Config{
 			Name: "downloaded-model-7b-q4km", EngineID: eng.ID,
-			NCtx: 32768, Parallel: 1, ExtraArgs: []string{"--no-mmap", "--jinja", "--flash-attn", "on"},
+			NCtx: 32768, ExtraArgs: []string{"--no-mmap", "--jinja", "--flash-attn", "on"},
 		},
 	})
 	if err != nil {
@@ -284,7 +284,7 @@ func TestRegisterDownloadedModelWithMMProj(t *testing.T) {
 		MMProj: &Artifact{
 			FormatID: ggufFormat.ID, FilePath: "vision-model/mmproj.gguf", FileSizeBytes: 1,
 		},
-		Config: Config{Name: "vision-model-7b", EngineID: eng.ID, Parallel: 1},
+		Config: Config{Name: "vision-model-7b", EngineID: eng.ID},
 	})
 	if err != nil {
 		t.Fatalf("RegisterDownloadedModel: %v", err)
@@ -317,7 +317,7 @@ func TestRegisterDownloadedModelFailsClosedOnBadFK(t *testing.T) {
 		Model:    Model{Name: "Should Not Persist", HFRepo: "org/should-not-persist"},
 		Variant:  Variant{Name: "7b"},
 		Artifact: Artifact{FormatID: 1, FilePath: "x.gguf"},
-		Config:   Config{Name: "should-not-persist-7b", EngineID: 999999, Parallel: 1},
+		Config:   Config{Name: "should-not-persist-7b", EngineID: 999999},
 	})
 	if err == nil {
 		t.Fatal("expected a foreign key failure on an unknown engine_id")
@@ -346,7 +346,7 @@ func TestRegisterDownloadedModelWithExtraArtifacts(t *testing.T) {
 			{FormatID: ggufFormat.ID, FilePath: "sharded-model/model-00002-of-00003.gguf", FileSizeBytes: 1 << 30, ShardSetID: "dl-1"},
 			{FormatID: ggufFormat.ID, FilePath: "sharded-model/model-00003-of-00003.gguf", FileSizeBytes: 1 << 30, ShardSetID: "dl-1"},
 		},
-		Config: Config{Name: "sharded-model-70b", EngineID: eng.ID, Parallel: 1},
+		Config: Config{Name: "sharded-model-70b", EngineID: eng.ID},
 	})
 	if err != nil {
 		t.Fatalf("RegisterDownloadedModel: %v", err)
@@ -395,7 +395,7 @@ func TestRegisterDownloadedModelExtraArtifactFailureRollsBackEverything(t *testi
 		ExtraArtifacts: []Artifact{
 			{FormatID: 999999, FilePath: "x-00002-of-00002.gguf", ShardSetID: "dl-2"},
 		},
-		Config: Config{Name: "should-also-not-persist-70b", EngineID: eng.ID, Parallel: 1},
+		Config: Config{Name: "should-also-not-persist-70b", EngineID: eng.ID},
 	})
 	if err == nil {
 		t.Fatal("expected a foreign key failure on an unknown extra artifact format_id")

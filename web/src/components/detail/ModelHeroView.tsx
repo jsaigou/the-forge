@@ -12,6 +12,7 @@ import { CopyButton } from "../CopyButton";
 import { Icon } from "../Icon";
 import { PlayingCard } from "../PlayingCard";
 import { NotesInline } from "./NotesInline";
+import { safeHref } from "../../lib/safeHref";
 
 // ModelHeroView — the zoomed playing card (playing-card redesign
 // 2026-08-14). Replaces the old ModelDetailView hero: tapping a model card
@@ -166,6 +167,12 @@ export function ModelHeroView({
                     <span className="v">{card.modalities.map((m) => m[0].toUpperCase() + m.slice(1)).join(", ")}</span>
                   </div>
                 )}
+                {card.output_modalities.some((m) => m !== "text") && (
+                  <div className="spec-row">
+                    <span className="k">{t("spec.outputs")}</span>
+                    <span className="v">{card.output_modalities.map((m) => t(`spec.output_kind.${m}`, { defaultValue: m[0].toUpperCase() + m.slice(1) })).join(", ")}</span>
+                  </div>
+                )}
                 {card.derived.trained_ctx != null && (
                   <div className="spec-row"><span className="k">{t("spec.trained_context")}</span><span className="v">{card.derived.trained_ctx.toLocaleString()}</span></div>
                 )}
@@ -191,7 +198,7 @@ export function ModelHeroView({
                   <div className="spec-row">
                     <span className="k">{t("spec.license")}</span>
                     <span className="v">
-                      {card.license_url ? <a href={card.license_url} target="_blank" rel="noreferrer">{card.license_name}</a> : card.license_name}
+                      {safeHref(card.license_url) ? <a href={safeHref(card.license_url)} target="_blank" rel="noreferrer">{card.license_name}</a> : card.license_name}
                     </span>
                   </div>
                 )}

@@ -16,16 +16,28 @@ type usageView struct{ d *DB }
 func (d *DB) Usage() Usage { return usageView{d} }
 
 func (v usageView) Record(ctx context.Context, e UsageEvent) error {
+	var startedMS, durationMS, waitMS, outcome, consumer any
+	if t := e.Timing; t != nil {
+		startedMS = t.Start.UnixMilli()
+		durationMS = t.Duration.Milliseconds()
+		outcome = nullStr(t.Outcome)
+		consumer = nullStr(t.Consumer)
+		if t.Wait >= 0 {
+			waitMS = t.Wait.Milliseconds()
+		}
+	}
 	_, err := v.d.sql.ExecContext(ctx,
 		`INSERT INTO usage_events (ts, kind, model, slot, provider_id,
 		   prompt_tokens, completion_tokens, cost_usd, detail,
-		   cost_native, cost_currency, cached_prompt_tokens, unmetered, price_tier)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   cost_native, cost_currency, cached_prompt_tokens, unmetered, price_tier,
+		   started_ms, duration_ms, outcome, consumer, wait_ms)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		unixOf(orNow(e.TS)), e.Kind, nullStr(e.Model), nullStr(e.Slot),
 		intPtrArg(e.ProviderID), e.PromptTokens, e.CompletionTokens, e.CostUSD,
 		nullStr(e.Detail),
 		floatPtrArg(e.CostNative), nullStr(e.CostCurrency), intPtrArg(e.CachedPromptTokens),
 		boolInt(e.Unmetered), nullStr(e.PriceTier),
+		startedMS, durationMS, outcome, consumer, waitMS,
 	)
 	if err != nil {
 		return fmt.Errorf("store: usage.record: %w", err)
@@ -173,6 +185,69 @@ func (v usageView) History(ctx context.Context, mode string, limit int) ([]ModeH
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: usage.history: %w", err)
+	}
+	return out, nil
+}
+
+// Intervals reads the timed per-request rows (started_ms set) whose start lies in [Since, Until], oldest first.
+func (v usageView) Intervals(ctx context.Context, q IntervalQuery) (IntervalSet, error) {
+	where := `started_ms IS NOT NULL AND started_ms >= ?`
+	args := []any{q.Since.UnixMilli()}
+	if !q.Until.IsZero() {
+		where += ` AND started_ms <= ?`
+		args = append(args, q.Until.UnixMilli())
+	}
+	if q.Model != "" {
+		where += ` AND model = ?`
+		args = append(args, q.Model)
+	}
+	if q.Consumer != "" {
+		where += ` AND consumer = ?`
+		args = append(args, q.Consumer)
+	}
+	rows, err := v.d.sql.QueryContext(ctx,
+		`SELECT started_ms, duration_ms, prompt_tokens, completion_tokens, unmetered, outcome
+		 FROM usage_events WHERE `+where+` ORDER BY started_ms ASC, id ASC`, args...)
+	if err != nil {
+		return IntervalSet{}, fmt.Errorf("store: usage.intervals: %w", err)
+	}
+	defer rows.Close()
+	var out IntervalSet
+	for rows.Next() {
+		var start, dur, unmetered int64
+		var prompt, completion sql.NullInt64
+		var outcome sql.NullString
+		if err := rows.Scan(&start, &dur, &prompt, &completion, &unmetered, &outcome); err != nil {
+			return IntervalSet{}, fmt.Errorf("store: usage.intervals: %w", err)
+		}
+		if dur < 0 {
+			dur = 0
+		}
+		iv := Interval{StartMS: start, EndMS: start + dur, Outcome: strOf(outcome)}
+		if unmetered == 0 {
+			iv.PromptTokens = nullInt64Ptr(prompt)
+			iv.CompletionTokens = nullInt64Ptr(completion)
+		}
+		out.Intervals = append(out.Intervals, iv)
+	}
+	if err := rows.Err(); err != nil {
+		return IntervalSet{}, fmt.Errorf("store: usage.intervals: %w", err)
+	}
+
+	// Per-request rows of the same window and model that predate the timing columns. The window is on ts (seconds): an
+	// untimed row has no millisecond start to compare.
+	exWhere := `started_ms IS NULL AND kind IN ('external_request', 'a0_request') AND ts >= ?`
+	exArgs := []any{q.Since.Unix()}
+	if !q.Until.IsZero() {
+		exWhere += ` AND ts <= ?`
+		exArgs = append(exArgs, q.Until.Unix())
+	}
+	if q.Model != "" {
+		exWhere += ` AND model = ?`
+		exArgs = append(exArgs, q.Model)
+	}
+	if err := v.d.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_events WHERE `+exWhere, exArgs...).Scan(&out.ExcludedUntimed); err != nil {
+		return IntervalSet{}, fmt.Errorf("store: usage.intervals excluded: %w", err)
 	}
 	return out, nil
 }

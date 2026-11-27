@@ -314,9 +314,13 @@ func statusJSON(st sched.Status) map[string]any {
 		"slot_labels":  slotLabels,
 		"idle_seconds": idle,
 		"memory_budget": map[string]any{
-			"total_bytes": st.MemoryBudget.TotalBytes,
-			"used_bytes":  st.MemoryBudget.UsedBytes,
-			"free_bytes":  st.MemoryBudget.FreeBytes,
+			"total_bytes":               st.MemoryBudget.TotalBytes,
+			"used_bytes":                st.MemoryBudget.UsedBytes,
+			"free_bytes":                st.MemoryBudget.FreeBytes,
+			"model_budget_bytes":        st.MemoryBudget.Ledger.ModelBudget,
+			"specialist_declared_bytes": st.MemoryBudget.Ledger.SpecialistDeclared,
+			"host_avail_bytes":          st.MemoryBudget.Ledger.HostAvail,
+			"binding":                   st.MemoryBudget.Ledger.Binding,
 		},
 		"queue": queue,
 	}

@@ -4,6 +4,8 @@ package smith
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -91,5 +93,42 @@ func TestGPUDeviceLost_NoMatchIsOK(t *testing.T) {
 	f := runGPUDeviceLost(context.Background(), env)
 	if f.Severity != SeverityOK {
 		t.Errorf("severity = %s, want ok", f.Severity)
+	}
+}
+
+// A journal read that fails is missing evidence, not a clean journal: the severity is unchanged (nothing was seen), but the confidence says how
+// much of the picture is gone, and a detection from the journal that did answer still stands.
+func TestGPUDeviceLost_UnreadableJournalLowersConfidence(t *testing.T) {
+	readable := func(lines ...string) func(context.Context, int, time.Time) ([]string, error) {
+		return func(context.Context, int, time.Time) ([]string, error) { return lines, nil }
+	}
+	broken := func(context.Context, int, time.Time) ([]string, error) {
+		return nil, errors.New("journalctl: exit status 1")
+	}
+
+	cases := []struct {
+		name       string
+		kernel     func(context.Context, int, time.Time) ([]string, error)
+		units      func(context.Context, int, time.Time) ([]string, error)
+		wantSev    Severity
+		wantConf   Confidence
+		wantInNote string
+	}{
+		{"both readable and clean", readable(), readable(), SeverityOK, ConfidenceHigh, ""},
+		{"kernel journal unreadable", broken, readable(), SeverityOK, ConfidenceMedium, "kernel journal"},
+		{"unit journals unreadable", readable(), broken, SeverityOK, ConfidenceMedium, "unit journals"},
+		{"both unreadable", broken, broken, SeverityOK, ConfidenceLow, "kernel journal or unit journals"},
+		{"detection survives an unreadable other journal", readable("amdgpu: ring comp_1.2.0 timeout"), broken, SeverityCrit, ConfidenceMedium, "unit journals"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := runGPUDeviceLost(context.Background(), &CheckEnv{Now: time.Now, KernelJournal: tc.kernel, JournalErrors: tc.units})
+			if f.Severity != tc.wantSev || f.Confidence != tc.wantConf {
+				t.Errorf("severity/confidence = %s/%s, want %s/%s", f.Severity, f.Confidence, tc.wantSev, tc.wantConf)
+			}
+			if tc.wantInNote == "" && f.ConfidenceNote != "" || !strings.Contains(f.ConfidenceNote, tc.wantInNote) {
+				t.Errorf("note = %q, want it to mention %q", f.ConfidenceNote, tc.wantInNote)
+			}
+		})
 	}
 }

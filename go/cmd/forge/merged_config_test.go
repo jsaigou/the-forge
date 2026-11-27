@@ -73,7 +73,7 @@ func TestMergedConfig_StoreBacked(t *testing.T) {
 	_, _ = cat.CreateConfig(ctx, store.Config{
 		Name: "gemma4-31b", VariantID: varID, WeightArtifactID: weightID,
 		EngineID: eng.ID, BuildID: buildID, MMProjArtifactID: mmprojID,
-		NCtx: 262144, Parallel: 2, ExtraArgs: []string{"--no-mmap", "--parallel", "2"},
+		NCtx: 262144, ExtraArgs: []string{"--no-mmap", "--parallel", "2"},
 		Status: "unverified", Visibility: "visible", IsDefault: true,
 	})
 	_, _ = cat.CreateService(ctx, store.Service{

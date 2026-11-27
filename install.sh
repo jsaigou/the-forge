@@ -4,21 +4,27 @@
 #
 # Usage:
 #   sudo ./install.sh --target=dev           # reference-host install (default; ForgeHost-oriented)
-#   sudo ./install.sh --target=public        # generic-host install — pre-flight MANDATORY
-#   sudo ./install.sh --force                # public target: proceed despite pre-flight FAILs
+#   sudo ./install.sh --target=public        # generic-host install — platform differences warn, they never stop it
+#   sudo ./install.sh --user=NAME            # public target: the service user (default forge; created if absent)
+#   sudo ./install.sh --speech=default       # set up speech: default | none | ids (kokoro,zonos,qwen-voicedesign,...)
+#   sudo ./install.sh --voice-studio         # also install Voice Studio (default: with speech); --no-voice-studio leaves it out
+#   sudo ./install.sh --no-llama             # public target: do not build llama.cpp (built by default when no llama-server is there)
+#   sudo ./install.sh --force                # dev target: proceed on a host that is not the reference host
 #   sudo ./install.sh --upgrade              # in-place legacy upgrade
 #   sudo ./install.sh --dry-run              # show checks without making changes
 #   sudo ./install.sh --skip-models          # skip model download prompts
+#   sudo ./install.sh --no-radiance          # do not build the Radiance engine (default: built where the hardware profile matches)
+#   sudo ./install.sh --radiance             # build the Radiance engine even where the hardware is not recognised
 #   sudo ./install.sh --help-hermes          # print Hermes agent connection guide
 #
 # Targets:
 #   dev    — current behaviour, oriented at the reference host (ForgeHost):
 #            fixed /opt/forge paths, SELinux relabel notes, Fedora-only gates.
-#   public — generic-host path: identical unit installation, but
-#            reference-host assumptions are skipped/guarded, the hardware
-#            pre-flight (installer/preflight.sh) MUST pass unless --force,
-#            the KGC profile matcher runs after units are installed, and the
-#            operator is prompted to provision models (installer/provision.py).
+#   public — generic-host path: a service user, units filled in for it,
+#            reference-host assumptions skipped/guarded; what differs from the
+#            reference platform is reported, and a step that cannot work is
+#            skipped by name and listed at the end. The KGC profile matcher runs
+#            after units are installed and the operator is asked about models.
 
 set -euo pipefail
 
@@ -35,7 +41,7 @@ step() { echo -e "\n${BOLD}${C}[${STEP}/${TOTAL_STEPS}]${NC} ${BOLD}$*${NC}"; ((
 info() { echo -e "    ${DIM}$*${NC}"; }
 
 STEP=1
-TOTAL_STEPS=15
+TOTAL_STEPS=16
 WARNINGS=()
 ERRORS=()
 
@@ -46,6 +52,15 @@ FORCE=0
 UPGRADE=0
 DRY_RUN=0
 SKIP_MODELS=0
+RADIANCE_MODE=auto   # auto: build the Radiance engine only on hardware the KGC matcher recognises
+SERVICE_USER=""
+SPEECH_CHOICE=""
+VOICE_STUDIO_MODE=auto
+LLAMA_MODE=auto
+HAVE_SYSTEMD=1
+DAEMON_FAILED=0
+# Where the speech engines, forge-tts and Voice Studio live. The pool launcher accepts engines only from here.
+ENGINE_ROOT=/opt/forge
 
 print_hermes_guide() {
     cat <<'HERMES'
@@ -89,7 +104,7 @@ HERMES
 }
 
 usage() {
-    sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit 2
 }
 
@@ -101,6 +116,15 @@ while [[ $# -gt 0 ]]; do
         --upgrade)         UPGRADE=1 ;;
         --dry-run)         DRY_RUN=1 ;;
         --skip-models)     SKIP_MODELS=1 ;;
+        --radiance)        RADIANCE_MODE=on ;;
+        --user=*)          SERVICE_USER="${1#*=}" ;;
+        --user)            SERVICE_USER="${2:-}"; [[ -n "${2:-}" ]] && shift ;;
+        --speech=*)        SPEECH_CHOICE="${1#*=}" ;;
+        --speech)          SPEECH_CHOICE="${2:-}"; [[ -n "${2:-}" ]] && shift ;;
+        --voice-studio)    VOICE_STUDIO_MODE=on ;;
+        --no-voice-studio) VOICE_STUDIO_MODE=off ;;
+        --no-llama)        LLAMA_MODE=off ;;
+        --no-radiance)     RADIANCE_MODE=off ;;
         --help|-h)         usage ;;
         --help-hermes)     print_hermes_guide ;;
         --yes)             YES=1 ;;
@@ -116,7 +140,15 @@ case "$TARGET" in
     *) fail "Invalid --target '${TARGET}' (expected dev|public)"; exit 1 ;;
 esac
 
-[[ "$TARGET" == "public" ]] && TOTAL_STEPS=16   # extra pre-flight step
+[[ "$TARGET" == "public" ]] && TOTAL_STEPS=18   # extra pre-flight and llama.cpp steps
+
+if [[ "$TARGET" == "public" ]]; then
+    SERVICE_USER="${SERVICE_USER:-forge}"
+else
+    [[ -n "$SERVICE_USER" ]] && { fail "--user applies to the public target; the dev target runs as the reference host's user"; exit 1; }
+    SERVICE_USER=testuser
+fi
+[[ "$SERVICE_USER" =~ ^[a-z_][a-z0-9_-]{0,30}$ && "$SERVICE_USER" != root ]] || { fail "Invalid --user '${SERVICE_USER}'"; exit 1; }
 
 [[ $EUID -ne 0 ]] && { fail "Run as root: sudo ./install.sh"; exit 1; }
 
@@ -143,18 +175,31 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=installer/preflight.sh
 source "${SCRIPT_DIR}/installer/preflight.sh"
+# shellcheck source=installer/radiance.sh
+source "${SCRIPT_DIR}/installer/radiance.sh"
+# shellcheck source=installer/host.sh
+source "${SCRIPT_DIR}/installer/host.sh"
+# shellcheck source=installer/speech.sh
+source "${SCRIPT_DIR}/installer/speech.sh"
+# shellcheck source=installer/voice-studio.sh
+source "${SCRIPT_DIR}/installer/voice-studio.sh"
+# shellcheck source=installer/llama.sh
+source "${SCRIPT_DIR}/installer/llama.sh"
+speech_parse "${SPEECH_CHOICE}" || exit 1
+export RADIANCE_OWNER="${RADIANCE_OWNER:-${SERVICE_USER}:}"
 
 # Per-target defaults (overridable via environment).
 if [[ "$TARGET" == "dev" ]]; then
     ROCM_ROOT="${ROCM_ROOT:-/opt/rocm-therock-7.13}"
+    FORGE_RADIANCE_ROCM="${FORGE_RADIANCE_ROCM:-/opt/forge/rocm-therock-10.1}"   # the Radiance fork builds against TheRock 10.x
     MODELS_DIR="${FORGE_MODELS_DIR:-/opt/forge/models}"
-    LLAMA_VULKAN_BIN="${FORGE_LLAMA_VULKAN_BIN:-/opt/forge/llama.cpp/build-vulkan/bin/llama-server}"
-    LLAMA_ROCM_BIN="${FORGE_LLAMA_ROCM_BIN:-/opt/forge/llama.cpp/build/bin/llama-server}"
+    LLAMA_VULKAN_BIN="${FORGE_LLAMA_VULKAN_BIN:-/opt/forge/llama.cpp-upstream-plain/build-vulkan-plain/bin/llama-server}"
+    LLAMA_ROCM_BIN="${FORGE_LLAMA_ROCM_BIN:-/opt/forge/llama.cpp-upstream-plain/build-rocm-plain/bin/llama-server}"
 else
     ROCM_ROOT="${ROCM_ROOT:-}"                       # scan /opt/rocm* generically
     MODELS_DIR="${FORGE_MODELS_DIR:-/var/lib/forge/models}"
     LLAMA_VULKAN_BIN="${FORGE_LLAMA_VULKAN_BIN:-/opt/forge/llama.cpp/build-vulkan/bin/llama-server}"
-    LLAMA_ROCM_BIN="${FORGE_LLAMA_ROCM_BIN:-/opt/forge/llama.cpp/build/bin/llama-server}"
+    LLAMA_ROCM_BIN="${FORGE_LLAMA_ROCM_BIN:-$(llama_rocm_default /opt/forge/llama.cpp/build-rocm/bin/llama-server /opt/forge/llama.cpp/build/bin/llama-server)}"
 fi
 export FORGE_DATA_DIR="${FORGE_DATA_DIR:-$(dirname "${MODELS_DIR}")}"
 
@@ -181,20 +226,7 @@ run_preflight_step() {
     counts="$(pf_summary)"
     fails="${counts##* }"
     if (( fails > 0 )); then
-        if [[ $FORCE -eq 1 ]]; then
-            warn "Pre-flight reported ${fails} failure(s) — continuing (--force)"
-            echo -en "\n  Proceed DESPITE failed pre-flight checks? [y/N]: "
-            if [[ $YES -ne 1 ]]; then
-                read -r ANSWER || ANSWER="n"
-            else
-                ANSWER="y"
-            fi
-            [[ "${ANSWER,,}" == "y" ]] || { fail "Aborted."; exit 1; }
-        else
-            fail "Pre-flight FAILED (${fails} check(s)). The public target requires a passing pre-flight."
-            fail "Fix the failures above, or re-run with --force to override (not recommended)."
-            exit 1
-        fi
+        warn "This machine differs from the reference platform in ${fails} check(s) above. The install continues; the parts that need what is missing may not work."
     fi
 }
 
@@ -226,8 +258,10 @@ check_os_kernel() {
                 ok "Fedora ${VER_ID}"
             fi
         fi
-    else
+    elif [[ "$TARGET" == "dev" ]]; then
         fail "/etc/os-release not found"; exit 1
+    else
+        warn "/etc/os-release not found: this system cannot be identified. Continuing."
     fi
 
     # Kernel — dev gate is the stricter reference-host rule (≥ 7.0); public
@@ -252,7 +286,9 @@ check_os_kernel() {
 check_cpu() {
     step "CPU identification"
 
-    CPU_MODEL="$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs)"
+    # Not every processor reports a "model name" (ARM does not): that is not an error.
+    CPU_MODEL="$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | xargs || true)"
+    CPU_MODEL="${CPU_MODEL:-unknown}"
     if echo "${CPU_MODEL}" | grep -qi "Ryzen AI Max"; then
         ok "CPU: ${CPU_MODEL}"
     else
@@ -368,6 +404,11 @@ check_gpu_vulkan() {
         fi
     done
 
+    if [[ $GFX_FOUND -eq 0 && "$TARGET" == "public" ]]; then
+        warn "No gfx1151 GPU (Radeon 8060S, Strix Halo) found. Language models are tuned and tested only there; speech on the processor still works."
+        return 0
+    fi
+
     if [[ $GFX_FOUND -eq 0 ]]; then
         fail "No gfx1151 GPU found in KFD topology. Forge requires Radeon 8060S (RDNA3.5 / Strix Halo)."
         if [[ "$(grep -E '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2)" == "fedora" ]]; then
@@ -382,6 +423,8 @@ check_gpu_vulkan() {
     if command -v vulkaninfo &>/dev/null; then
         if vulkaninfo --summary 2>/dev/null | grep -qi "RADV STRIX_HALO"; then
             ok "Vulkan: RADV STRIX_HALO driver present"
+        elif [[ "$TARGET" == "public" ]]; then
+            warn "Vulkan does not report the RADV STRIX_HALO driver. $(pkg_hint mesa-vulkan-drivers mesa-vulkan-drivers)"
         else
             fail "Vulkan driver does not report RADV STRIX_HALO. Install mesa-vulkan-drivers (RADV)."
             exit 1
@@ -420,11 +463,16 @@ check_llama_bins() {
 
     for BIN in "${LLAMA_VULKAN_BIN}" "${LLAMA_ROCM_BIN}"; do
         BACKEND="$( [[ "${BIN}" == *vulkan* ]] && echo "Vulkan" || echo "ROCm" )"
+        local named="FORGE_LLAMA_${BACKEND^^}_BIN"   # a path the operator chose is never built into
         if [[ ! -f "${BIN}" ]]; then
             if [[ "$TARGET" == "dev" ]]; then
                 warn "llama.cpp ${BACKEND} binary not found: ${BIN}"
+            elif [[ "$BACKEND" == "Vulkan" && "$LLAMA_MODE" != "off" && -z "${!named:-}" ]]; then
+                info "llama-server is not there yet: ${BIN} (built in a later step)"
+            elif [[ "$BACKEND" == "ROCm" && "$LLAMA_MODE" != "off" && -z "${!named:-}" ]]; then
+                info "No ROCm llama-server yet: a later step builds one where an AMD GPU and the ROCm development files are present"
             else
-                warn "llama.cpp ${BACKEND} binary not found: ${BIN} (set FORGE_LLAMA_${BACKEND^^}_BIN to override)"
+                info "No llama.cpp ${BACKEND} server at ${BIN} (set FORGE_LLAMA_${BACKEND^^}_BIN if yours is elsewhere)"
             fi
             continue
         fi
@@ -447,22 +495,34 @@ check_llama_bins() {
 check_prereqs() {
     step "Prerequisites"
 
-    # Python ≥ 3.12
+    # Python ≥ 3.12 (the model download helper and the hardware profile matcher)
     if ! command -v python3 &>/dev/null; then
-        fail "python3 not found"; exit 1
+        [[ "$TARGET" == "dev" ]] && { fail "python3 not found"; exit 1; }
+        warn "python3 not found: model downloads and hardware profile matching are skipped. $(pkg_hint python3 python3)"
+    else
+        PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+        PY_MAJOR="${PY_VER%.*}"; PY_MINOR="${PY_VER#*.}"
+        if (( PY_MAJOR < 3 )) || { (( PY_MAJOR == 3 )) && (( PY_MINOR < 12 )); }; then
+            [[ "$TARGET" == "dev" ]] && { fail "Python ${PY_VER} too old. Require ≥ 3.12."; exit 1; }
+            warn "Python ${PY_VER} is older than 3.12, the oldest version tested"
+        else
+            ok "Python ${PY_VER}"
+        fi
     fi
-    PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-    PY_MAJOR="${PY_VER%.*}"; PY_MINOR="${PY_VER#*.}"
-    if (( PY_MAJOR < 3 )) || { (( PY_MAJOR == 3 )) && (( PY_MINOR < 12 )); }; then
-        fail "Python ${PY_VER} too old. Require ≥ 3.12."; exit 1
-    fi
-    ok "Python ${PY_VER}"
 
     # systemd
-    if [[ "$(cat /proc/1/comm 2>/dev/null)" != "systemd" ]]; then
+    if host_has_systemd; then
+        ok "systemd (PID 1)"
+        host_check_service_bus
+    elif [[ "$TARGET" == "dev" ]]; then
         fail "systemd must be PID 1"; exit 1
+    else
+        HAVE_SYSTEMD=0
+        warn "systemd is not running: files are installed, no service is set up or started. (WSL: put 'systemd=true' under [boot] in /etc/wsl.conf, run 'wsl --shutdown', then run this installer again.)"
     fi
-    ok "systemd (PID 1)"
+
+    # Before anything changes: the tools that build the program.
+    host_check_build_tools || { fail "Install the tools above and run the installer again."; exit 1; }
 
     if [[ "$TARGET" == "dev" ]]; then
         # uv — legacy V4 Python venv management (reference host only)
@@ -515,7 +575,9 @@ check_model_inventory() {
     # maintains that list.
     MANIFEST="${SCRIPT_DIR}/installer/assets.manifest.json"
     ROOT_DIR="$(dirname "${MODELS_DIR}")"
-    if [[ ! -f "${MANIFEST}" ]]; then
+    if ! command -v python3 &>/dev/null; then
+        info "python3 is missing: the model check is skipped"
+    elif [[ ! -f "${MANIFEST}" ]]; then
         warn "installer/assets.manifest.json not found — skipping mandatory-model check"
     else
         while IFS=$'\t' read -r MODEL_ID MODEL_PATH; do
@@ -524,7 +586,7 @@ check_model_inventory() {
                 ok "Found: ${MODEL_ID}"
             else
                 warn "Missing: ${MODEL_ID} (expected ${ROOT_DIR}/${MODEL_PATH})"
-                if [[ $DRY_RUN -eq 0 ]]; then
+                if [[ $DRY_RUN -eq 0 && $YES -ne 1 && -t 0 ]]; then
                     echo -en "  Download now? [y/N]: "
                     read -r -t 30 ANSWER || ANSWER="n"
                     if [[ "${ANSWER,,}" == "y" ]]; then
@@ -576,7 +638,9 @@ setup_python_env() {
 # ── Step 11: System directories + user ────────────────────────────────────────
 
 create_dirs() {
-    step "System directories"
+    step "System directories and service user"
+
+    ensure_service_user || exit 1
 
     DIRS=(
         /etc/forge
@@ -584,9 +648,13 @@ create_dirs() {
         /var/lib/forge
         /var/log/forge
         /var/cache/forge/thumbs
+        /usr/local/lib/forge
+        /var/lib/forge/pool
     )
     if [[ "$TARGET" == "dev" ]]; then
         DIRS+=(/mnt/forge)
+    else
+        DIRS+=("${ENGINE_ROOT}" "${ENGINE_ROOT}/models" "${ENGINE_ROOT}/tts_voices" "${MODELS_DIR}")
     fi
 
     for DIR in "${DIRS[@]}"; do
@@ -598,10 +666,12 @@ create_dirs() {
     done
 
     if [[ $DRY_RUN -eq 0 ]]; then
-        # Ensure testuser owns the app directory
-        chown -R testuser:testuser /opt/forge /var/lib/forge /var/cache/forge
+        # The service user owns what the daemon and the speech tools write.
+        chown -R "${SERVICE_USER}:" /opt/forge /var/lib/forge /var/cache/forge
+        [[ "$TARGET" == "public" ]] && chown "${SERVICE_USER}:" "${ENGINE_ROOT}" "${ENGINE_ROOT}/models" "${ENGINE_ROOT}/tts_voices" "${MODELS_DIR}"
+        chmod 700 /var/lib/forge/pool
         chmod 755 /var/log/forge
-        ok "Directories created and permissions set"
+        ok "Directories created and permissions set (owner ${SERVICE_USER})"
     else
         info "[dry-run] Would set ownership/permissions on app directories"
     fi
@@ -617,57 +687,79 @@ create_dirs() {
 # with no forge binary at /opt/forge/forge at all.
 
 deploy_app_files() {
-    step "Build & deploy forge binary"
+    step "Build & deploy forge binaries"
 
     GO_SRC="${SCRIPT_DIR}/go"
-    PREBUILT="${SCRIPT_DIR}/forge"
     DEST="/opt/forge/forge"
 
     if [[ $DRY_RUN -eq 1 ]]; then
-        info "[dry-run] Would build ${GO_SRC}/cmd/forge (or use ${PREBUILT} if go/ is absent) and atomically deploy to ${DEST}"
+        info "[dry-run] Would build the web app and ${GO_SRC}/cmd/{forge,forge-tts} (or use prebuilt binaries) and deploy them"
+        vs_prepare
         return
     fi
 
-    VERSION="$(git -C "${SCRIPT_DIR}" describe --tags --always --dirty 2>/dev/null || echo dev)"
+    local builder out forge_bin tts_bin=""
+    builder="$(builder_user)"
+    VERSION="$(run_as "$builder" git -C "${SCRIPT_DIR}" describe --tags --always --dirty 2>/dev/null || echo dev)"
 
     if [[ -d "${GO_SRC}" ]]; then
-        if ! command -v go &>/dev/null; then
-            fail "go toolchain not found on PATH — required to build ${GO_SRC}/cmd/forge"
-            fail "Install Go, or remove ${GO_SRC} and place a pre-built binary at ${PREBUILT} instead."
-            exit 1
+        out="$(mktemp -d)" && chown "$builder" "$out" || { fail "No temporary directory for the build"; exit 1; }
+        info "Fetching Go modules ..."
+        ( cd "${GO_SRC}" && run_as "$builder" go mod download ) || { fail "go mod download failed"; exit 1; }
+        if ! host_web_prebuilt; then
+            info "Building the web app ..."
+            ( cd "${SCRIPT_DIR}/web" && run_as "$builder" npm ci --no-audit --no-fund && run_as "$builder" npm run build ) \
+                || { fail "The web app did not build; without it there is no dashboard"; exit 1; }
         fi
-        info "Building forge binary (version ${VERSION}) ..."
-        ( cd "${GO_SRC}" && go build -ldflags "-X main.version=${VERSION}" -o "${SCRIPT_DIR}/forge" ./cmd/forge )
-        ok "Build complete"
-    elif [[ -x "${PREBUILT}" ]]; then
-        info "go/ module not present — using pre-built binary at ${PREBUILT}"
+        info "Building forge (version ${VERSION}) ..."
+        # Without cgo, as the release builds are: no C library headers are needed.
+        ( cd "${GO_SRC}" && run_as "$builder" env CGO_ENABLED=0 go build -ldflags "-X main.version=${VERSION}" -o "$out/forge" ./cmd/forge ) \
+            || { fail "forge did not build"; exit 1; }
+        ( cd "${GO_SRC}" && run_as "$builder" env CGO_ENABLED=0 go build -o "$out/forge-tts" ./cmd/forge-tts ) || skip "the speech service" "forge-tts did not build"
+        forge_bin="$out/forge"; tts_bin="$out/forge-tts"
     else
-        fail "Neither ${GO_SRC} (Go module) nor a pre-built ${PREBUILT} binary found — nothing to deploy."
-        exit 1
+        info "go/ module not present — using the pre-built binaries in ${SCRIPT_DIR}"
+        forge_bin="${SCRIPT_DIR}/forge"; tts_bin="${SCRIPT_DIR}/forge-tts"
     fi
 
-    # Atomic same-fs copy → chmod 755 → chcon bin_t → mv. A fresh `install`/
-    # `cp`-created file lands 0644 with the default (non-bin_t) SELinux
-    # context; systemd then refuses to exec it (status=203/EXEC), and
-    # overwriting a running binary in place risks ETXTBSY. Both were hit
-    # live against this exact deploy path (2026-07-29/07-30) — see
-    # CLAUDE.md's "Deploy" section.
-    TMP_BIN="/opt/forge/forge.new"
-    install -m 0755 "${SCRIPT_DIR}/forge" "${TMP_BIN}"
-    chcon -u system_u -r object_r -t bin_t "${TMP_BIN}" 2>/dev/null || restorecon -F "${TMP_BIN}" 2>/dev/null || true
-    mv -f "${TMP_BIN}" "${DEST}"
-    chown testuser:testuser "${DEST}"
+    # Atomic: copy, make executable, label for SELinux, then rename over the old one. A file left 0644 or unlabelled crash-loops with 203/EXEC, and
+    # overwriting a running binary in place risks ETXTBSY.
+    install_program "$forge_bin" "${DEST}" "${SERVICE_USER}" || { fail "Could not install ${DEST}"; exit 1; }
     ok "forge binary deployed to ${DEST} (${VERSION})"
+    # The reference host deploys forge-tts by its own procedure.
+    if [[ "$TARGET" == "public" && -f "$tts_bin" ]]; then
+        if install_program "$tts_bin" "${ENGINE_ROOT}/forge-tts" "${SERVICE_USER}"; then
+            ok "forge-tts deployed to ${ENGINE_ROOT}/forge-tts"
+        else
+            skip "the speech service" "could not install ${ENGINE_ROOT}/forge-tts"
+        fi
+    fi
+    [[ -n "${out:-}" ]] && rm -rf "$out"
+    vs_prepare
 }
 
 # ── Step 13: Config ────────────────────────────────────────────────────────────
 # v0.6 (forge binary): configuration is store-backed (catalog DB + infra.* settings +
-# auth store). No /etc/forge/config.toml / secrets.toml are written or read.
+# auth store). No /etc/forge/config.toml / secrets.toml are written or read. A new public
+# install gets its model slots and folder settings here (forge host-setup).
 
 apply_config() {
     step "Configuration"
 
-    info "v0.6 store-backed config — nothing to bootstrap"
+    if [[ "$TARGET" != "public" ]]; then
+        info "v0.6 store-backed config — the reference host is set up already"
+        return 0
+    fi
+    # No migration creates the model slots or says where models live; without them nothing can be downloaded or loaded.
+    local forge="${FORGE_BIN:-/opt/forge/forge}"
+    local setup=("$forge" host-setup -models-dir "${MODELS_DIR}" -vulkan-bin "${LLAMA_VULKAN_BIN}" -rocm-bin "${LLAMA_ROCM_BIN}")
+    if [[ $DRY_RUN -eq 1 ]]; then
+        info "[dry-run] Would run as ${SERVICE_USER}: ${setup[*]}"
+    elif run_as "${SERVICE_USER}" "${setup[@]}"; then
+        ok "Model slots and folders are set"
+    else
+        skip "model slots and folders" "see the message above; later: sudo -u ${SERVICE_USER} ${setup[*]}"
+    fi
 }
 
 # ── Step 14: Systemd units (+ public-target KGC marker & provisioning prompt) ─
@@ -697,60 +789,76 @@ install_systemd_units() {
         forge-embedding.service
         forge-stt.service
         forge-tts.service
-        forge-tts-base.service
-        forge-tts-custom.service
         forge-tts-backup.service
         forge-tts-backup.timer
         forge-compress@.service
+        forge-pool@.service
     )
-    # Enabled (WantedBy=multi-user.target, starts on boot): the always-on
-    # core + infra services. a1-a4 are scheduler-managed (the a0 on-demand
-    # loader starts/stops them, not systemd at boot) and forge-compress@ is
-    # a template — instances are provisioned per-provider at runtime by
-    # internal/headroom.Provisioner, never enabled directly. Neither is
-    # started here, matching live ForgeHost (`static`/`disabled` respectively).
-    ENABLE_UNITS=(
-        forge-daemon.service
-        forge-aligner.service
-        forge-embedding.service
-        forge-stt.service
-        forge-tts.service
-        forge-tts-base.service
-        forge-tts-custom.service
-    )
+    # Enabled (WantedBy=multi-user.target, starts on boot): the daemon, and the infra services whose programs are there. a1-a4 and the pool slots
+    # are started by the daemon when needed; forge-compress@ is a template. On the public target forge-tts is enabled by the speech step.
+    ENABLE_UNITS=(forge-daemon.service)
+    OPTIONAL_UNITS=(forge-aligner.service forge-embedding.service forge-stt.service)
+    [[ "$TARGET" == "dev" ]] && OPTIONAL_UNITS+=(forge-tts.service)
 
+    local unit_dir="${FORGE_UNIT_DIR:-/etc/systemd/system}"
+    [[ $DRY_RUN -eq 0 ]] && mkdir -p "$unit_dir"
     for UNIT in "${UNITS[@]}"; do
         SRC="${SYSTEMD_SRC}/${UNIT}"
-        if [[ -f "${SRC}" ]]; then
-            if [[ $DRY_RUN -eq 0 ]]; then
-                cp "${SRC}" "/etc/systemd/system/${UNIT}"
-                ok "Installed: ${UNIT}"
-            else
-                info "[dry-run] Would install: /etc/systemd/system/${UNIT}"
-            fi
-        else
+        if [[ ! -f "${SRC}" ]]; then
             warn "Unit file not found: ${SRC}"
+        elif [[ $DRY_RUN -eq 1 ]]; then
+            info "[dry-run] Would install: ${unit_dir}/${UNIT} (service user ${SERVICE_USER})"
+        elif render_unit "${SRC}" "${unit_dir}/${UNIT}"; then
+            ok "Installed: ${UNIT}"
+        else
+            skip "${UNIT}" "it could not be written to ${unit_dir}"
         fi
     done
 
-    POLKIT_SRC="${SCRIPT_DIR}/polkit/50-forge.rules"
-    if [[ -f "${POLKIT_SRC}" ]]; then
-        if [[ $DRY_RUN -eq 0 ]]; then
-            cp "${POLKIT_SRC}" /etc/polkit-1/rules.d/50-forge.rules
-            ok "Installed: polkit/50-forge.rules (passwordless forge-* restart for testuser/forge)"
-        else
-            info "[dry-run] Would install: /etc/polkit-1/rules.d/50-forge.rules"
-        fi
+    # The engine slots: a drop-in for the unit and the one launcher it runs.
+    if [[ $DRY_RUN -eq 1 ]]; then
+        info "[dry-run] Would install the pool slot drop-in, /usr/local/lib/forge/start-pool.sh and the model slot launchers start-a1.sh to start-a4.sh"
     else
-        warn "Polkit rule not found: ${POLKIT_SRC} — restart/reconfigure actions will prompt for a password"
+        mkdir -p "${unit_dir}/forge-pool@.service.d"
+        cp "${SYSTEMD_SRC}"/forge-pool@.service.d/*.conf "${unit_dir}/forge-pool@.service.d/" || skip "the pool slot drop-in" "copy failed"
+        local launcher_dir="${FORGE_LAUNCHER_DIR:-/usr/local/lib/forge}"
+        mkdir -p "$launcher_dir"
+        if install -m 0755 "${SYSTEMD_SRC}/start-pool.sh" "$launcher_dir/start-pool.sh"; then
+            label_bin "$launcher_dir/start-pool.sh"
+            ok "Installed: start-pool.sh (the engine slots' launcher)"
+        else
+            skip "engine slots" "start-pool.sh could not be installed"
+        fi
+        install_slot_launchers "${SCRIPT_DIR}/go/internal/smith/launchers" "$launcher_dir"
     fi
 
-    if [[ $DRY_RUN -eq 0 ]]; then
-        systemctl daemon-reload
+    POLKIT_SRC="${SCRIPT_DIR}/polkit/50-forge.rules"
+    local polkit_dir="${FORGE_POLKIT_RULES_DIR:-/etc/polkit-1/rules.d}"
+    if [[ ! -f "${POLKIT_SRC}" ]]; then
+        warn "Polkit rule not found: ${POLKIT_SRC} — restart/reconfigure actions will prompt for a password"
+    elif [[ $DRY_RUN -eq 1 ]]; then
+        info "[dry-run] Would install: ${polkit_dir}/50-forge.rules (for ${SERVICE_USER})"
+    elif [[ -d "$polkit_dir" ]] && render_polkit "${POLKIT_SRC}" "${polkit_dir}/50-forge.rules"; then
+        chmod 644 "${polkit_dir}/50-forge.rules"
+        ok "Installed: polkit/50-forge.rules (${SERVICE_USER} may start and stop forge-* units)"
+    else
+        skip "the polkit rule" "${polkit_dir} is missing; $(pkg_hint polkit polkitd), then run the installer again"
+    fi
+
+    if [[ $DRY_RUN -eq 0 && $HAVE_SYSTEMD -eq 1 ]]; then
+        systemctl daemon-reload || warn "systemctl daemon-reload failed"
+        host_start_polkit
         for UNIT in "${ENABLE_UNITS[@]}"; do
-            systemctl enable "${UNIT}" 2>/dev/null || true
+            systemctl enable "${UNIT}" &>/dev/null || warn "Could not enable ${UNIT}"
         done
-        ok "systemd units reloaded and enabled"
+        for UNIT in "${OPTIONAL_UNITS[@]}"; do
+            if [[ -f "${unit_dir}/${UNIT}" ]] && unit_program_present "${unit_dir}/${UNIT}"; then
+                systemctl enable "${UNIT}" &>/dev/null || warn "Could not enable ${UNIT}"
+            else
+                info "${UNIT} is installed but not enabled: its program is not on this machine"
+            fi
+        done
+        ok "systemd units reloaded"
     fi
 
     if [[ "$TARGET" == "public" ]]; then
@@ -765,6 +873,7 @@ run_kgc_match() {
     kgc_out="$(python3 "${SCRIPT_DIR}/installer/kgc-match.py" 2>/dev/null)" && rc=0 || rc=$?
     if [[ $rc -eq 0 && -n "${kgc_out}" ]]; then
         if [[ $DRY_RUN -eq 0 ]]; then
+            mkdir -p /etc/sysconfig
             printf 'FORGE_KGC_PROFILE=%s\n' "${kgc_out}" > /etc/sysconfig/forge-kgc
             chmod 644 /etc/sysconfig/forge-kgc
         fi
@@ -785,6 +894,7 @@ run_kgc_match() {
 }
 
 offer_provisioning() {
+    command -v python3 &>/dev/null || { info "python3 is missing: model provisioning is skipped"; return 0; }
     echo -e "\n    ${BOLD}Model provisioning${NC}"
     info "Mandatory assets (embedding, STT, TTS, aligner, default brain GGUF) are listed in"
     info "installer/assets.manifest.json and fetched by installer/provision.py."
@@ -890,27 +1000,35 @@ finish_selinux_health_summary() {
         ok "SELinux labels applied"
     fi
 
-    if [[ $DRY_RUN -eq 0 ]]; then
+    speech_ask
+    speech_parse "${SPEECH_CHOICE}" || exit 1
+
+    if [[ $DRY_RUN -eq 0 && $HAVE_SYSTEMD -eq 1 ]]; then
         info "Starting forge-daemon.service ..."
         systemctl restart forge-daemon.service 2>/dev/null || true
 
-        # Wait for health endpoint
-        HEALTH_OK=0
-        for i in $(seq 1 30); do
-            if curl -sf --max-time 2 http://localhost:5000/api/v1/health &>/dev/null; then
-                HEALTH_OK=1
-                break
-            fi
-            sleep 1
-        done
-
-        if [[ $HEALTH_OK -eq 1 ]]; then
+        if wait_for http://localhost:5000/api/v1/health 30; then
             ok "forge-daemon.service running — /api/v1/health responded"
+            rad_register_build
+            [[ "$TARGET" == "public" ]] && llama_register_builds "${LLAMA_VULKAN_BIN}=vulkan" "${LLAMA_ROCM_BIN}=rocm"
+            speech_setup
+            vs_start
         else
-            warn "forge-daemon.service did not respond on /api/v1/health within 30s"
+            DAEMON_FAILED=1
+            fail "forge-daemon.service did not respond on /api/v1/health within 30s"
             info "Check: journalctl -u forge-daemon.service -n 50"
         fi
+    elif [[ $HAVE_SYSTEMD -eq 0 ]]; then
+        speech_wanted && skip "speech" "systemd is not running; turn it on and run the installer again with --speech=${SPEECH_CHOICE}"
+        vs_start
     fi
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        rad_register_build   # prints the command; a real run registered above
+        [[ "$TARGET" == "public" ]] && llama_register_builds "${LLAMA_VULKAN_BIN}=vulkan" "${LLAMA_ROCM_BIN}=rocm"
+        speech_setup
+    fi
+    rad_offer_models
 
     configure_tailscale_serve
 
@@ -927,11 +1045,31 @@ finish_selinux_health_summary() {
         echo
     fi
 
+    if (( ${#SKIPPED[@]} > 0 )); then
+        echo -e "${Y}Skipped (${#SKIPPED[@]}):${NC}"
+        for w in "${SKIPPED[@]}"; do
+            echo -e "  ${Y}⚠${NC}  ${w}"
+        done
+        echo
+    fi
+
     if [[ $DRY_RUN -eq 1 ]]; then
         echo -e "${Y}DRY RUN complete — no changes made.${NC}"
         return
     fi
 
+    if [[ $DAEMON_FAILED -eq 1 ]]; then
+        echo -e "${R}${BOLD}Installation did not complete: the Forge daemon did not start.${NC}"
+        echo -e "See: ${DIM}journalctl -u forge-daemon.service -n 50${NC}, fix the cause, and run the installer again."
+        return 1
+    fi
+    if [[ $HAVE_SYSTEMD -eq 0 ]]; then
+        echo -e "${Y}${BOLD}Files are installed. No service is running, because systemd is not.${NC}"
+        echo -e "Turn systemd on (WSL: 'systemd=true' under [boot] in /etc/wsl.conf, then 'wsl --shutdown') and run the installer again."
+        return 0
+    fi
+
+    speech_report
     echo -e "${G}${BOLD}Installation complete.${NC}"
 
     if [[ "$TARGET" == "dev" ]]; then
@@ -964,6 +1102,15 @@ finish_selinux_health_summary() {
         if [[ -f /etc/sysconfig/forge-kgc ]]; then
             echo -e "  5. Hardware profile pinned: ${DIM}$(cat /etc/sysconfig/forge-kgc)${NC}"
         fi
+        if [[ ${VS_UP:-0} -eq 1 ]]; then
+            echo -e "  Voice Studio: ${DIM}http://localhost:8090${NC} (no sign-in: keep it on this machine or your own network)"
+        fi
+        echo -e "  Speech: ${DIM}sudo -u ${SERVICE_USER} /opt/forge/forge speech status${NC}  ·  engines: ${DIM}... speech recipes${NC}"
+        if [[ -x "${LLAMA_VULKAN_BIN}" ]]; then
+            echo -e "  Language models: add one on the Models page, then load it from the Console."
+        else
+            echo -e "  Language models need a llama.cpp server at ${DIM}${LLAMA_VULKAN_BIN}${NC}: see the llama.cpp line above, then run this installer again."
+        fi
         if [[ -n "${TAILNET:-}" ]]; then
             echo -e "\n${DIM}Agent API (a0 router, tracked/compressed): https://a0.${TAILNET}${NC}"
             echo -e "${DIM}  --help-hermes for the full agent connection guide${NC}"
@@ -993,6 +1140,8 @@ main() {
     verify_packages
     setup_python_env
     create_dirs
+    rad_step                        # Radiance engine (pinned fork); never fails the install
+    llama_step                      # public: build llama-server when there is none; never fails the install
     deploy_app_files
     apply_config
     install_systemd_units           # + KGC marker & provisioning prompt (public)

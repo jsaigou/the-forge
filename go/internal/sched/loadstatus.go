@@ -83,16 +83,21 @@ func (r *outcomeRing) get(model string, now time.Time) (outcomeRecord, bool) {
 
 // LoadStatus answers "what is model doing right now" without blocking or
 // mutating scheduler state — see sched.Scheduler's doc comment. Resolution
-// order: currently loaded (authoritative, always wins) > actively
-// queued/loading (scanned from the live in-memory queue — a ticket is only
-// ever "queued" or "loading" while still enqueued, since a terminal status
-// change and the deferred dequeue in EnsureLoaded happen together) > the
-// last terminal outcome remembered in the short-lived ring > idle (never
-// requested, or too long ago to still be relevant).
+// order: currently loaded (authoritative, always wins; a load still running
+// does not count) > actively queued/loading (scanned from the live in-memory
+// queue — a ticket is only ever "queued" or "loading" while still enqueued,
+// since a terminal status change and the deferred dequeue in EnsureLoaded
+// happen together) > a load running that the scheduler did not start
+// (dashboard, MCP, CLI) > the last terminal outcome remembered in the
+// short-lived ring > idle (never requested, or too long ago to still be
+// relevant).
 func (c *Core) LoadStatus(model string) LoadState {
 	if slot := c.findLoaded(model, ""); slot != "" {
 		return LoadState{Model: model, State: StatusLoaded, Slot: slot}
 	}
+
+	// Read before taking c.mu: occupancy belongs to the engine.
+	loadingOn := c.findLoading(model, "")
 
 	c.mu.Lock()
 	for i, t := range c.queue {
@@ -113,6 +118,10 @@ func (c *Core) LoadStatus(model string) LoadState {
 		return ls
 	}
 	c.mu.Unlock()
+
+	if loadingOn != "" {
+		return LoadState{Model: model, State: StatusLoading, Slot: loadingOn}
+	}
 
 	if rec, ok := c.outcomes.get(model, c.d.Now()); ok {
 		at := rec.at

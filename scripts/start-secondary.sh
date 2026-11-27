@@ -27,9 +27,9 @@ if [[ "${FORGE_BACKEND:-vulkan}" == "vllm" ]]; then
 elif [[ -n "${FORGE_LLAMA_BIN:-}" ]]; then
   LLAMA_BIN="${FORGE_LLAMA_BIN}"
 elif [[ "${FORGE_BACKEND:-vulkan}" == "rocm" ]]; then
-  LLAMA_BIN="/opt/forge/llama.cpp/build/bin/llama-server"
+  LLAMA_BIN="/opt/forge/llama.cpp-upstream-plain/build-rocm-plain/bin/llama-server"
 else
-  LLAMA_BIN="/opt/forge/llama.cpp/build-vulkan/bin/llama-server"
+  LLAMA_BIN="/opt/forge/llama.cpp-upstream-plain/build-vulkan-plain/bin/llama-server"
 fi
 
 exec "$LLAMA_BIN" \

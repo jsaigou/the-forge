@@ -2919,3 +2919,52 @@ func TestChatCompletions_AllBackendsUnavailable_CompressorRelayedFailureLayer(t 
 		t.Errorf("layer = %v, want %q", body["layer"], "backend")
 	}
 }
+
+// The caller's own Authorization (the router key) must never reach an upstream: a keyless target gets none, a keyed one gets only its own key.
+func TestChatCompletions_DoesNotForwardTheCallersAuthorization(t *testing.T) {
+	for _, tc := range []struct {
+		name, providerKey, wantAuth string
+	}{
+		{"keyless provider", "", ""},
+		{"keyed provider", "sk-provider-own", "Bearer sk-provider-own"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotAuth string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotAuth = r.Header.Get("Authorization")
+				w.Write([]byte(`{"id":"x","object":"chat.completion","choices":[]}`))
+			}))
+			defer upstream.Close()
+			db, err := store.Open(":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			ctx := context.Background()
+			if err := db.Routing().SaveProvider(ctx, store.ProviderRow{Name: "remote", APIKey: tc.providerKey, TargetURL: upstream.URL, Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			prov, _, err := db.Routing().ProviderByName(ctx, "remote")
+			if err != nil {
+				t.Fatal(err)
+			}
+			mdlID, _ := db.Catalog().CreateModel(ctx, store.Model{Name: "Remote Model"})
+			db.Catalog().CreateOffering(ctx, store.Offering{ModelID: mdlID, ProviderID: prov.ID, WireModel: "remote-model", Enabled: true})
+			srv := NewWithDeps(Deps{Cfg: testCfg(nil, nil), StoreCatalog: db.Catalog(), Routing: db.Routing(), Settings: newFakeSettings(), Auth: &stubAuth{validToken: "router-key"}})
+			req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"remote-model","messages":[{"role":"user","content":"hi"}]}`))
+			req.Header.Set("Authorization", "Bearer router-key")
+			req.RemoteAddr = "100.64.0.1:1234"
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+			}
+			if gotAuth != tc.wantAuth {
+				t.Errorf("upstream saw Authorization %q, want %q", gotAuth, tc.wantAuth)
+			}
+			if strings.Contains(gotAuth, "router-key") {
+				t.Error("the router key reached the upstream")
+			}
+		})
+	}
+}

@@ -157,6 +157,23 @@ type LlamaMetrics struct {
 	// internal/httpapi/compressor_summary_handlers.go's prefill-collection
 	// doc comment for why the distinction matters).
 	PromptSecondsTotal *float64
+
+	// The fields below are filled only by an engine kind whose Spec.Metrics reader provides them (today the Radiance reader); the llama.cpp reader
+	// leaves them zero/nil, which keeps its hang rule exactly as it was.
+
+	// RequestsQueued is work accepted but not running (waiting + preempted + HTTP queue). The hang rule counts it as active work.
+	RequestsQueued float64
+	// ProgressTotal is the engine's own cumulative "it did a step" counter (Radiance: radiance:engine_steps_total). When present the hang rule
+	// is keyed on it and not on the TPS gauges: Radiance's rate gauges keep their last value at idle (see testdata README), so they cannot
+	// prove progress.
+	ProgressTotal *float64
+	// ContextCapacity is the engine's reported resident-context capacity in tokens (Spec.ContextCapacitySeries), nil when not served.
+	ContextCapacity *float64
+	// Stuck is the engine's own wedge report (Radiance /health 503 with status "stuck"); StuckSeconds is its stuck_s.
+	Stuck        bool
+	StuckSeconds int
+	// Series is every scalar vllm:/radiance: sample of the scrape (labelled ones keyed name{k="v"}), exposed read-only for Smith and the dashboard.
+	Series map[string]float64
 }
 
 // LlamaClient probes llama-server endpoints. BaseURL maps a port to a URL
@@ -189,9 +206,29 @@ func (l *LlamaClient) get(ctx context.Context, port int, path string) ([]byte, e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: HTTP %d", path, resp.StatusCode)
+		return nil, &HTTPStatusError{Path: path, Code: resp.StatusCode}
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+}
+
+// HTTPStatusError is a llama-server answer that was not 200, so callers can tell "the endpoint is off" (404/501) from "it did not answer".
+type HTTPStatusError struct {
+	Path string
+	Code int
+}
+
+func (e *HTTPStatusError) Error() string { return fmt.Sprintf("%s: HTTP %d", e.Path, e.Code) }
+
+// InFlight reads how many requests the server is processing. Unlike Metrics (nil on any failure) it keeps the failure, because "could not tell"
+// and "idle" must not look alike to a caller deciding whether it is safe to stop the server: a busy llama-server can be too busy to answer.
+// A server that answers without the metric reports 0.
+func (l *LlamaClient) InFlight(ctx context.Context, port int) (float64, error) {
+	raw, err := l.get(ctx, port, "/metrics")
+	if err != nil {
+		return 0, err
+	}
+	n, _ := parsePromScalar(string(raw), "llamacpp:requests_processing")
+	return n, nil
 }
 
 // Metrics scrapes /metrics. Nil result means unreachable (still starting, or

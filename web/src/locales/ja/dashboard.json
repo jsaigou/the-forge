@@ -41,7 +41,7 @@
     "compressor_loading": "圧縮サマリーを読み込み中…",
     "compressor_none": "この期間で報告している圧縮プロキシはありません。",
     "virtual_spend_section_title": "仮想利用額 · ローカルモデル · {{range}}",
-    "virtual_spend_note": "実測の消費電力ではなく、カタログの想定スループットに基づいた価格です — このハードウェアではまだプロファイリングが実行されていません(破壊的な操作のため、調整された時間枠が必要です)。",
+    "virtual_spend_note": "各リクエストの実行中に測定した電力ではなく、カタログの想定スループットに基づいた価格です。",
     "no_local_usage": "まだローカル利用の記録がありません。",
     "tok_suffix": "トークン",
     "per_model_title": "モデル別の信頼性と利用額 · {{range}}"
@@ -59,7 +59,7 @@
     "saved_suffix": " · {{amount}} 削減",
     "compressor_saved_measured": "圧縮による削減(実測)",
     "compressor_saved_detail": "{{amount}} · {{proxy}} に届く前にプロンプトから {{tokens}} トークンが圧縮されました",
-    "no_tokens_compressed": "この期間、プロンプトから圧縮されたトークンはありません — --lossless では通常0ですが、常にそうとは限りません(2026-07-31に実際に950トークンの差分が記録されています)。",
+    "no_tokens_compressed": "この期間、プロンプトから圧縮されたトークンはありません。",
     "provider_cache_discount": "プロバイダーのキャッシュ割引(圧縮による削減ではありません — 圧縮の有無にかかわらず適用されます):",
     "provider_cache_discount_detail": " {{amount}} · {{proxy}} の割引レートで {{tokens}} トークン分が課金されました",
     "no_cacheable": "この期間、キャッシュ可能なリクエスト(またはTPSの基準)がありません — 削減時間の推定はできません。"
@@ -85,7 +85,9 @@
     "temp_junction": "ジャンクション {{deg}}°C",
     "temp_nvme": "NVMe {{deg}}°C",
     "network_k": "ネットワーク",
-    "storage_k": "ストレージ · {{name}}"
+    "storage_k": "ストレージ · {{name}}",
+    "power_k": "電力",
+    "power_d": "パッケージ"
   },
   "per_model_spend": {
     "col_model": "モデル",
@@ -114,7 +116,20 @@
     "est_suffix": " (~推定)",
     "other": "その他",
     "other_legend": "その他 (カーネル / ドライバー / 未追跡)",
-    "free": "空き {{amount}} GB"
+    "free": "空き {{amount}} GB",
+    "title_host": "メモリ · ホスト{{total}} GB(統合メモリ)",
+    "other_models": "モデル · ホスト側メモリ",
+    "reserved_specialists": "予約 · 常時オンのエンジン",
+    "reserved_os": "予約 · OS",
+    "reserved_margin": "予約 · 増加マージン",
+    "held_by": "確保外({{bound}})",
+    "bound_partition": "モデル予算",
+    "bound_host": "ホスト下限",
+    "bound_gtt": "GTT上限",
+    "swap_in_use": "スワップ使用中(圧縮RAM)",
+    "unit_pool": "エンジン {{slot}}(使用中)",
+    "other_models_legend": "モデル · ホスト側メモリ(RSS)と未追跡",
+    "free_legend": "新しいモデルに使える空き(制限要因: {{bound}})"
   },
   "resource_trend": {
     "series_mem": "メモリ (GTT)",
@@ -156,10 +171,10 @@
     "loading": "電力サマリーを読み込み中…"
   },
   "activity_heatmap": {
-    "title": "トークン利用状況 · 過去1年",
+    "title": "トークン利用状況 · 過去6か月",
     "loading": "利用状況を読み込み中…",
     "none": "まだ利用状況のデータがありません。",
-    "aria_label": "日別トークン利用状況、過去1年 — {{scope}}",
+    "aria_label": "日別トークン利用状況、過去6か月 — {{scope}}",
     "scope_all": "すべて",
     "scope_local": "ローカル",
     "scope_external": "外部"
@@ -227,5 +242,37 @@
     "approx_note": "パーセンタイルは概算です(約 ±10%)。検出はヒューリスティックのため、同じ内容で始まる2つの会話があると誤って疑いと判定されることがあります。",
     "partial_dropped": "一部のデータのみ: 負荷のため {{count}} 件のリクエストが記録されませんでした。",
     "partial_errors": "記録処理で内部エラーも {{count}} 件発生しています。"
+  },
+  "concurrency": {
+    "title": "同時実行数",
+    "intro": "モデルが実際に同時に処理したリクエスト数です。並列スロット数や容量の見積もりに使います。",
+    "model": "モデル",
+    "window_1h": "1時間",
+    "window_24h": "24時間",
+    "window_7d": "7日",
+    "window_31d": "31日",
+    "requests": "リクエスト数",
+    "outcomes": "成功 {{ok}} · エラー {{error}} · 中断 {{aborted}}",
+    "in_flight": "処理中 p50 / p90 / p99",
+    "max_of": "最大 {{max}}",
+    "busy": "稼働時間",
+    "busy_d": "1件以上が処理中だった時間",
+    "unit_s": "秒",
+    "unit_min": "分",
+    "unit_h": "時間",
+    "overlap": "重なり率",
+    "overlap_d_other": "他のリクエストと同時に処理された件数: {{count}}",
+    "prompt_tokens": "プロンプトトークン p50 / p90 / p99",
+    "output_tokens": "出力トークン p50 / p90 / p99",
+    "live": "現在の処理中 / ピーク",
+    "live_d": "直近15分のピーク",
+    "live_none": "最近のa0リクエストなし",
+    "token_samples_other": "トークン数は、上流が使用量を報告した {{count}} 件のリクエストから集計しています。",
+    "untimed_other": "計測時刻が記録されていない過去のリクエスト {{count}} 件は集計に含めていません。",
+    "untimed_only_other": "この期間には計測時刻が記録されていない過去のリクエストが {{count}} 件あり、集計できません。",
+    "empty": "この期間、このモデルに計測済みのリクエストはありません。",
+    "no_models": "この期間にリクエストを処理したモデルはありません。",
+    "load_error": "同時実行数を読み込めませんでした。",
+    "caption": "「処理中」は同じ瞬間に処理されていたリクエスト数で、1件以上が実行中だった時間だけを対象に測っています(p90 は、その時間の90%でこの値以下だったことを示します)。「重なり率」は他のリクエストと同時に処理されたリクエストの割合です。a0 を経由したリクエストのみが対象で、スロットに直接接続するクライアントは含まれません。"
   }
 }

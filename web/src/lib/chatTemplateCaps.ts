@@ -13,6 +13,8 @@
 // key path) still displays correctly with zero special-casing at the call
 // site. Two raw keys deliberately share one value (supports_tool_calls /
 // supports_tools) so dedupedCapEntries's group-by-label still merges them.
+import { own } from "./own.ts";
+
 const LABELS: Record<string, string> = {
   supports_reasoning_effort: "models:caps.reasoning_effort",
   supports_preserve_reasoning: "models:caps.preserve_reasoning",
@@ -36,7 +38,8 @@ const LABELS: Record<string, string> = {
 export const OVERRIDE_ONLY_KEYS: string[] = ["supports_enable_thinking"];
 
 export function capLabel(key: string): string {
-  if (LABELS[key]) return LABELS[key];
+  const known = own(LABELS, key);
+  if (known) return known;
   const stripped = key.startsWith("supports_") ? key.slice("supports_".length) : key;
   return stripped
     .split("_")

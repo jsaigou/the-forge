@@ -65,14 +65,15 @@ import (
 	"github.com/jsaigou/the-forge/internal/fx"
 	"github.com/jsaigou/the-forge/internal/hf"
 	"github.com/jsaigou/the-forge/internal/hfdownload"
+	"github.com/jsaigou/the-forge/internal/inflight"
 	"github.com/jsaigou/the-forge/internal/maintenance"
 	"github.com/jsaigou/the-forge/internal/profile"
 	"github.com/jsaigou/the-forge/internal/providers"
 	"github.com/jsaigou/the-forge/internal/registry"
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/smith"
+	"github.com/jsaigou/the-forge/internal/specialist"
 	"github.com/jsaigou/the-forge/internal/store"
-	"github.com/jsaigou/the-forge/internal/ttsctl"
 )
 
 // Deps are the frozen-interface dependencies (Contract 2). Phase 9 swaps
@@ -90,8 +91,20 @@ type Deps struct {
 	Events    bus.Subscriber
 	Publish   bus.Publisher
 	Config    func() *config.Config
-	Hostname  string
-	Version   string
+
+	// Specialists is the specialist slot pool runtime (ADR-0022); nil when no specialist slots are configured. SpecialistStore holds its
+	// occupants and defaults; nil makes the specialist routes answer 503.
+	Specialists     SpecialistPool
+	SpecialistStore specialist.Reader
+	// SpecialistWriter is the write side of the same store. Only the occupant rules module (specialist.Occupants) uses it: handlers never write
+	// occupants or defaults themselves.
+	SpecialistWriter specialist.Writer
+	// SpecialistCatalog resolves a catalog config for a pool occupant of kind catalog-config (validation and the default memory estimate).
+	SpecialistCatalog specialist.CatalogResolver
+	// SpeechRoot is the directory the speech engines are installed under; empty means specialist.EngineRoot. Tests point it at stand-in files.
+	SpeechRoot string
+	Hostname   string
+	Version    string
 
 	// Activity is the per-slot consumer attribution registry (shared with
 	// the router + smith — one instance wired in cmd/forge). nil = status
@@ -172,14 +185,6 @@ type Deps struct {
 	// along with it.
 	CompressorProvisioner *compressorctl.Provisioner
 
-	// TTSProvisioner drives the forge-tts voice/speech engine lifecycle
-	// (Tier 1 Sprint 2, Voice & Speech settings, 2026-08-27): env-file write
-	// + systemd start/stop/restart, same shape as CompressorProvisioner but
-	// against one fixed (non-templated) unit. nil = PUT /api/v1/voice/settings
-	// still persists the setting but skips applying it live (the Phase 4
-	// stub environment and most tests).
-	TTSProvisioner *ttsctl.Provisioner
-
 	// Providers is the per-provider clients + read-side assembly surface
 	// (Sprint 0 §0.3, BE-3). nil = not yet wired; handleProvidersList
 	// returns an empty providers list (the frozen shape requires an
@@ -220,6 +225,9 @@ type Deps struct {
 	// docs/v5-profiling-benchmarks.md). nil = not yet wired; profile routes
 	// return 503 and the fit check falls back to the registry/weight estimate.
 	Profiles *profile.Runner
+
+	// ProfileNight is the "Profile tonight" overnight run; nil leaves its routes at 503.
+	ProfileNight *profile.Night
 
 	// Prober optionally triggers an immediate collector poll. When non-nil,
 	// lifecycle-heavy operations (profile runs) call it to force a fresh
@@ -269,6 +277,9 @@ type Deps struct {
 	// CONTRACTS C2); the same instance is wired into router.Deps. nil = not
 	// wired; the context routes return 503 not_wired.
 	CtxLedger *ctxledger.Ledger
+	// InFlight is the a0 router's gauge of requests being served right now (the same instance router.Deps.InFlight holds).
+	// Nil → /status carries no a0_in_flight and the metrics route answers 503 not_wired.
+	InFlight *inflight.Gauge
 
 	// SchedulerJobs is the cron-style forced-load job surface (P3 track,
 	// migration 0066). nil = not yet wired; scheduler-jobs routes return
@@ -297,6 +308,8 @@ type Deps struct {
 	// write persists but the running daemon only picks it up on its next
 	// SIGHUP or restart (Phase 4 stub environment, and most unit tests).
 	ReloadConfig func()
+	// SlotLog returns up to maxLines of a unit'"'"'s recent log output (raw; the handler redacts and caps it). Nil = no log view.
+	SlotLog func(ctx context.Context, unit string, maxLines int) string
 
 	// SystemRestart issues a real systemd restart of forge-daemon.service
 	// itself via the shared D-Bus connection (Sprint 12, was H, Phase 3 —
@@ -321,7 +334,18 @@ type Deps struct {
 // Server is the dashboard HTTP server. The zero value is not usable —
 // callers must construct via New.
 type Server struct {
+	// Step-up throttles. A 6-digit TOTP code or a recovery code is otherwise brute-forceable from a stolen low-assurance session. The tight
+	// limit is per SESSION, so a thief burning attempts on a stolen session cannot lock the real user out of their own; the looser per-USER
+	// cap still bounds guessing spread across several sessions. Success resets both.
+	stepUpLimiter     *authz.RateLimiter // per session: 5 failures / 5 min
+	stepUpUserLimiter *authz.RateLimiter // per user: 20 failures / 15 min
+
 	deps Deps
+
+	// slotAddMu serializes adding specialist slots: the next free name is chosen by reading the slot list, so two concurrent adds would pick the same one.
+	slotAddMu sync.Mutex
+	// speechSetupMu serializes speech engine registrations (speech_setup_handlers.go).
+	speechSetupMu sync.Mutex
 
 	// In-process transition state, mirroring V4's _switch_state /
 	// _slot_loading / _slot_unloading. The collector publishes what it
@@ -333,6 +357,10 @@ type Server struct {
 	switchState   switchState
 	slotLoading   map[string]slotTransition
 	slotUnloading map[string]slotTransition
+	// slotLastLoad is the last load result per slot (guarded by mu) and ops the pollable record of recent
+	// load/unload requests; see operations.go.
+	slotLastLoad  map[string]loadRecord
+	ops           *operationRegistry
 	heartbeatStop chan struct{}
 	heartbeatOnce sync.Once
 
@@ -400,6 +428,8 @@ type lifecycleResult struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	NCtx    int    `json:"n_ctx,omitempty"`
+	// Detail is the failed unit's own last log lines (redacted, capped), when the engine had them.
+	Detail string `json:"detail,omitempty"`
 }
 
 // New builds a Server on its dependencies.
@@ -409,6 +439,10 @@ func New(deps Deps) *Server {
 		deps:          deps,
 		slotLoading:   map[string]slotTransition{},
 		slotUnloading: map[string]slotTransition{},
+		slotLastLoad:  map[string]loadRecord{},
+		ops:           newOperationRegistry(),
+		stepUpLimiter:     authz.NewRateLimiter(5, 5*time.Minute),
+		stepUpUserLimiter: authz.NewRateLimiter(20, 15*time.Minute),
 		heartbeatStop: make(chan struct{}),
 		bgCtx:         bgCtx,
 		bgCancel:      bgCancel,
@@ -469,12 +503,16 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 
 	// Snapshot readers (Contract 1 §2 #3–9, 16, 22).
 	mux.HandleFunc("GET /api/v1/status", s.handleStatus)
+	mux.HandleFunc("GET /api/v1/operations", s.handleOperationsList)
+	mux.HandleFunc("GET /api/v1/operations/{id}", s.handleOperationGet)
 	mux.HandleFunc("GET /api/v1/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/v1/scheduler/status", s.handleSchedulerStatus)
 	mux.HandleFunc("GET /api/v1/scheduler/could-load", s.handleSchedulerCouldLoad)
 	mux.HandleFunc("GET /api/v1/infra-services", s.handleInfraServices)
 	mux.HandleFunc("GET /api/v1/usage", s.handleUsage)
 	mux.HandleFunc("GET /api/v1/usage/events", s.handleUsageEvents)
+	mux.Handle("GET /api/v1/usage/concurrency", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleUsageConcurrency)))
+	mux.Handle("GET /api/v1/a0/in-flight/metrics", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleInFlightMetrics)))
 	mux.HandleFunc("GET /api/v1/usage/heatmap", s.handleUsageHeatmap)
 	mux.HandleFunc("GET /api/v1/models/cards", s.handleModelCards)
 	mux.HandleFunc("GET /api/v1/configs/cards", s.handleConfigCards)
@@ -624,10 +662,8 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/smith/settings", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithSettingsGet)))
 	mux.Handle("PUT /api/v1/smith/settings", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithSettingsPut)))
 
-	// Voice & Speech settings (Tier 1 Sprint 2, 2026-08-27).
-	mux.Handle("GET /api/v1/voice/settings", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleVoiceSettingsGet)))
-	mux.Handle("PUT /api/v1/voice/settings", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleVoiceSettingsPut)))
-	// List all saved voices by engine (Sprint 1 UI papercuts, 2026-08-27).
+	// Voice & Speech: the saved voices with the engine each uses. Engine behavior and the default engine per kind are on /api/v1/specialists/... and
+	// /api/v1/speech/defaults.
 	mux.Handle("GET /api/v1/voice/list", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleVoiceList)))
 	mux.Handle("POST /api/v1/smith/investigations/{id}/analyze", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSmithInvestigationAnalyze)))
 	// Smith P4 — knowledge base (docs/v5-smith.md §4.7/§5): the embedded doc
@@ -692,6 +728,9 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	// no way to fix it without a source edit).
 	mux.Handle("GET /api/v1/service-links", s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleServiceLinksGet))))
 	mux.Handle("PUT /api/v1/service-links", s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleServiceLinksPut))))
+	// infra.external_tools (live) — link-only Console entries for tools that run elsewhere (2026-11-20).
+	mux.Handle("GET /api/v1/external-tools", s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleExternalToolsGet))))
+	mux.Handle("PUT /api/v1/external-tools", s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleExternalToolsPut))))
 	// ADR-0011: custom dashboard pages — system-wide settings key
 	// "dashboard.pages", full-replace PUT (frontend sends complete layout).
 	mux.Handle("GET /api/v1/dashboard/layout", s.requireRole(authz.RoleOperator)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleDashboardLayoutGet))))
@@ -757,6 +796,7 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	// carve-out needs the decoded body). DELETE: requireStrictAssurance, no
 	// bearer exception at all — see both functions' doc comments.
 	mux.Handle("POST /api/v1/keys", s.requireRole(authz.RoleAdmin)(http.HandlerFunc(s.handleKeyCreate)))
+	mux.Handle("DELETE /api/v1/keys/self", http.HandlerFunc(s.handleKeyRevokeSelf))
 	mux.Handle("DELETE /api/v1/keys/{keyid}", s.requireRole(authz.RoleAdmin)(s.requireStrictAssurance(authz.ResourceAreaSettingsSecurity)(http.HandlerFunc(s.handleKeyRevoke))))
 
 	// Sprint C — audit_log's first read surface (see audit_handlers.go).
@@ -847,140 +887,244 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 	// Genealogy + Family CRUD (product/QA sprint, 2026-07-29 — families
 	// were list-only before this; genealogy is new, the level above family).
 	mux.HandleFunc("GET /api/v1/catalog/genealogies", s.handleCatalogGenealogiesList)
-	mux.HandleFunc("GET /api/v1/catalog/genealogies/{id}", s.handleCatalogGenealogyGet)
+	mux.HandleFunc("GET /api/v1/catalog/genealogies/{id}", s.catalogGet(s.handleCatalogGenealogyGet))
 	mux.Handle("POST /api/v1/catalog/genealogies",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogGenealogyCreate))))
 	mux.Handle("PUT /api/v1/catalog/genealogies/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogGenealogyUpdate))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogGenealogyGet, s.handleCatalogGenealogyUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/genealogies/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogGenealogyGet, s.catalogPatch(s.handleCatalogGenealogyGet, s.handleCatalogGenealogyUpdate)))))
 	mux.Handle("DELETE /api/v1/catalog/genealogies/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogGenealogyDelete))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogGenealogyGet, s.handleCatalogGenealogyDelete))))
 	mux.Handle("PUT /api/v1/catalog/genealogies/{id}/icon",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogGenealogyIcon))))
 
 	mux.HandleFunc("GET /api/v1/catalog/families", s.handleCatalogFamiliesList)
-	mux.HandleFunc("GET /api/v1/catalog/families/{id}", s.handleCatalogFamilyGet)
+	mux.HandleFunc("GET /api/v1/catalog/families/{id}", s.catalogGet(s.handleCatalogFamilyGet))
 	mux.Handle("POST /api/v1/catalog/families",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogFamilyCreate))))
 	mux.Handle("PUT /api/v1/catalog/families/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogFamilyUpdate))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogFamilyGet, s.handleCatalogFamilyUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/families/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogFamilyGet, s.catalogPatch(s.handleCatalogFamilyGet, s.handleCatalogFamilyUpdate)))))
 	mux.Handle("DELETE /api/v1/catalog/families/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogFamilyDelete))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogFamilyGet, s.handleCatalogFamilyDelete))))
 	mux.Handle("PUT /api/v1/catalog/families/{id}/icon",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogFamilyIcon))))
 	mux.HandleFunc("GET /api/v1/catalog/quantizations", s.handleCatalogQuantizationsList)
 	mux.HandleFunc("GET /api/v1/catalog/formats", s.handleCatalogFormatsList)
 	mux.HandleFunc("GET /api/v1/catalog/engines", s.handleCatalogEnginesList)
 	mux.HandleFunc("GET /api/v1/catalog/builds", s.handleCatalogBuildsList)
+	mux.HandleFunc("GET /api/v1/catalog/builds/{id}", s.catalogGet(s.handleCatalogBuildGet))
+	mux.Handle("POST /api/v1/catalog/builds",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogBuildCreate))))
+	mux.Handle("PUT /api/v1/catalog/builds/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogBuildGet, s.handleCatalogBuildUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/builds/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogBuildGet, s.catalogPatch(s.handleCatalogBuildGet, s.handleCatalogBuildUpdate)))))
+	mux.Handle("DELETE /api/v1/catalog/builds/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogBuildGet, s.handleCatalogBuildDelete))))
+	mux.Handle("POST /api/v1/catalog/builds/validate",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogBuildValidate))))
+	mux.Handle("POST /api/v1/catalog/builds/{id}/validate",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogBuildValidate))))
 
 	// CapabilityTier CRUD (capability-tier substitution, Sprint P1, 2026-09-13 —
 	// see store.CapabilityTier's doc comment).
 	mux.HandleFunc("GET /api/v1/catalog/capability-tiers", s.handleCatalogCapabilityTiersList)
-	mux.HandleFunc("GET /api/v1/catalog/capability-tiers/{id}", s.handleCatalogCapabilityTierGet)
+	mux.HandleFunc("GET /api/v1/catalog/capability-tiers/{id}", s.catalogGet(s.handleCatalogCapabilityTierGet))
 	mux.Handle("POST /api/v1/catalog/capability-tiers",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogCapabilityTierCreate))))
 	mux.Handle("PUT /api/v1/catalog/capability-tiers/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogCapabilityTierUpdate))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogCapabilityTierGet, s.handleCatalogCapabilityTierUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/capability-tiers/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogCapabilityTierGet, s.catalogPatch(s.handleCatalogCapabilityTierGet, s.handleCatalogCapabilityTierUpdate)))))
 	mux.Handle("DELETE /api/v1/catalog/capability-tiers/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogCapabilityTierDelete))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogCapabilityTierGet, s.handleCatalogCapabilityTierDelete))))
 
 	// VirtualModel CRUD (2026-09-15 — see store.VirtualModel's doc comment).
 	mux.HandleFunc("GET /api/v1/catalog/virtual-models", s.handleCatalogVirtualModelsList)
-	mux.HandleFunc("GET /api/v1/catalog/virtual-models/{id}", s.handleCatalogVirtualModelGet)
+	mux.HandleFunc("GET /api/v1/catalog/virtual-models/{id}", s.catalogGet(s.handleCatalogVirtualModelGet))
 	mux.Handle("POST /api/v1/catalog/virtual-models",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogVirtualModelCreate))))
 	mux.Handle("PUT /api/v1/catalog/virtual-models/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogVirtualModelUpdate))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogVirtualModelGet, s.handleCatalogVirtualModelUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/virtual-models/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogVirtualModelGet, s.catalogPatch(s.handleCatalogVirtualModelGet, s.handleCatalogVirtualModelUpdate)))))
 	mux.Handle("DELETE /api/v1/catalog/virtual-models/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogVirtualModelDelete))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogVirtualModelGet, s.handleCatalogVirtualModelDelete))))
 
 	// ModelAlias CRUD (per-request thinking control, Sprint T3, 2026-09-14
 	// — see store.ModelAlias's doc comment).
 	mux.HandleFunc("GET /api/v1/catalog/model-aliases", s.handleCatalogModelAliasesList)
-	mux.HandleFunc("GET /api/v1/catalog/model-aliases/{id}", s.handleCatalogModelAliasGet)
+	mux.HandleFunc("GET /api/v1/catalog/model-aliases/{id}", s.catalogGet(s.handleCatalogModelAliasGet))
 	mux.Handle("POST /api/v1/catalog/model-aliases",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogModelAliasCreate))))
 	mux.Handle("PUT /api/v1/catalog/model-aliases/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogModelAliasUpdate))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogModelAliasGet, s.handleCatalogModelAliasUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/model-aliases/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogModelAliasGet, s.catalogPatch(s.handleCatalogModelAliasGet, s.handleCatalogModelAliasUpdate)))))
 	mux.Handle("DELETE /api/v1/catalog/model-aliases/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogModelAliasDelete))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogModelAliasGet, s.handleCatalogModelAliasDelete))))
 	mux.HandleFunc("GET /api/v1/catalog/artifacts", s.handleCatalogArtifactsList)
+	mux.HandleFunc("GET /api/v1/catalog/artifacts/{id}", s.catalogGet(s.handleCatalogArtifactGet))
+	mux.Handle("POST /api/v1/catalog/artifacts",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogArtifactCreate))))
+	mux.Handle("PUT /api/v1/catalog/artifacts/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogArtifactGet, s.handleCatalogArtifactUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/artifacts/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogArtifactGet, s.catalogPatch(s.handleCatalogArtifactGet, s.handleCatalogArtifactUpdate)))))
+	mux.Handle("DELETE /api/v1/catalog/artifacts/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogArtifactGet, s.handleCatalogArtifactDelete))))
+	mux.Handle("POST /api/v1/catalog/artifacts/validate",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogArtifactValidate))))
+	mux.Handle("POST /api/v1/catalog/artifacts/{id}/validate",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogArtifactValidate))))
 
 	mux.HandleFunc("GET /api/v1/catalog/models", s.handleCatalogModelsList)
-	mux.HandleFunc("GET /api/v1/catalog/models/{id}", s.handleCatalogModelGet)
+	mux.HandleFunc("GET /api/v1/catalog/models/{id}", s.catalogGet(s.handleCatalogModelGet))
 	mux.Handle("POST /api/v1/catalog/models",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogModelCreate))))
 	mux.Handle("PUT /api/v1/catalog/models/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogModelUpdate))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogModelGet, s.handleCatalogModelUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/models/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogModelGet, s.catalogPatch(s.handleCatalogModelGet, s.handleCatalogModelUpdate)))))
 	mux.Handle("DELETE /api/v1/catalog/models/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogModelDelete))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogModelGet, s.handleCatalogModelDelete))))
 	mux.Handle("POST /api/v1/catalog/models/validate",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogModelValidate))))
+	mux.Handle("POST /api/v1/catalog/models/{id}/validate",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogModelValidate))))
+	mux.Handle("GET /api/v1/catalog/models/{id}/removal",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.handleCatalogRemovalPlan(store.RemoveKindModel))))
+	mux.Handle("POST /api/v1/catalog/models/{id}/remove",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.handleCatalogRemove(store.RemoveKindModel))))
 	mux.Handle("PUT /api/v1/catalog/models/{id}/icon",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogModelIcon))))
 
 	mux.HandleFunc("GET /api/v1/catalog/variants", s.handleCatalogVariantsList)
-	mux.HandleFunc("GET /api/v1/catalog/variants/{id}", s.handleCatalogVariantGet)
+	mux.HandleFunc("GET /api/v1/catalog/variants/{id}", s.catalogGet(s.handleCatalogVariantGet))
 	mux.Handle("POST /api/v1/catalog/variants",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogVariantCreate))))
 	mux.Handle("PUT /api/v1/catalog/variants/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogVariantUpdate))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogVariantGet, s.handleCatalogVariantUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/variants/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogVariantGet, s.catalogPatch(s.handleCatalogVariantGet, s.handleCatalogVariantUpdate)))))
 	mux.Handle("DELETE /api/v1/catalog/variants/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogVariantDelete))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogVariantGet, s.handleCatalogVariantDelete))))
 	mux.Handle("POST /api/v1/catalog/variants/validate",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogVariantValidate))))
+	mux.Handle("POST /api/v1/catalog/variants/{id}/validate",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogVariantValidate))))
 
 	mux.HandleFunc("GET /api/v1/catalog/configs", s.handleCatalogConfigsList)
-	mux.HandleFunc("GET /api/v1/catalog/configs/{id}", s.handleCatalogConfigGet)
+	mux.HandleFunc("GET /api/v1/catalog/configs/{id}", s.catalogGet(s.handleCatalogConfigGet))
 	mux.Handle("POST /api/v1/catalog/configs",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogConfigCreate))))
 	mux.Handle("PUT /api/v1/catalog/configs/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogConfigUpdate))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogConfigGet, s.handleCatalogConfigUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/configs/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogConfigGet, s.catalogPatch(s.handleCatalogConfigGet, s.handleCatalogConfigUpdate)))))
 	mux.Handle("DELETE /api/v1/catalog/configs/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogConfigDelete))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogConfigGet, s.handleCatalogConfigDelete))))
 	mux.Handle("POST /api/v1/catalog/configs/validate",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogConfigValidate))))
+	mux.Handle("POST /api/v1/catalog/configs/{id}/validate",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogConfigValidate))))
+	mux.Handle("GET /api/v1/catalog/configs/{id}/removal",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.handleCatalogRemovalPlan(store.RemoveKindConfig))))
+	mux.Handle("POST /api/v1/catalog/configs/{id}/remove",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.handleCatalogRemove(store.RemoveKindConfig))))
 	mux.Handle("PUT /api/v1/catalog/configs/{id}/icon",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogConfigIcon))))
 
 	mux.HandleFunc("GET /api/v1/catalog/offerings", s.handleCatalogOfferingsList)
-	mux.HandleFunc("GET /api/v1/catalog/offerings/{id}", s.handleCatalogOfferingGet)
+	mux.HandleFunc("GET /api/v1/catalog/offerings/{id}", s.catalogGet(s.handleCatalogOfferingGet))
 	mux.Handle("POST /api/v1/catalog/offerings",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogOfferingCreate))))
 	mux.Handle("PUT /api/v1/catalog/offerings/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogOfferingUpdate))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogOfferingGet, s.handleCatalogOfferingUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/offerings/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogOfferingGet, s.catalogPatch(s.handleCatalogOfferingGet, s.handleCatalogOfferingUpdate)))))
 	mux.Handle("DELETE /api/v1/catalog/offerings/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogOfferingDelete))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogOfferingGet, s.handleCatalogOfferingDelete))))
 	mux.Handle("POST /api/v1/catalog/offerings/validate",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogOfferingValidate))))
+	mux.Handle("POST /api/v1/catalog/offerings/{id}/validate",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogOfferingValidate))))
 
 	mux.HandleFunc("GET /api/v1/catalog/benchmarks", s.handleCatalogBenchmarksList)
-	mux.HandleFunc("GET /api/v1/catalog/benchmarks/{id}", s.handleCatalogBenchmarkGet)
+	mux.HandleFunc("GET /api/v1/catalog/benchmarks/{id}", s.catalogGet(s.handleCatalogBenchmarkGet))
 	mux.Handle("POST /api/v1/catalog/benchmarks",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogBenchmarkCreate))))
 	mux.Handle("PUT /api/v1/catalog/benchmarks/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogBenchmarkUpdate))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogBenchmarkGet, s.handleCatalogBenchmarkUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/benchmarks/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogBenchmarkGet, s.catalogPatch(s.handleCatalogBenchmarkGet, s.handleCatalogBenchmarkUpdate)))))
 	mux.Handle("DELETE /api/v1/catalog/benchmarks/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogBenchmarkDelete))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogBenchmarkGet, s.handleCatalogBenchmarkDelete))))
 	mux.Handle("POST /api/v1/catalog/benchmarks/validate",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogBenchmarkValidate))))
+	mux.Handle("POST /api/v1/catalog/benchmarks/{id}/validate",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogBenchmarkValidate))))
 
 	mux.HandleFunc("GET /api/v1/catalog/notes", s.handleCatalogNotesList)
-	mux.HandleFunc("GET /api/v1/catalog/notes/{id}", s.handleCatalogNoteGet)
+	mux.HandleFunc("GET /api/v1/catalog/notes/{id}", s.catalogGet(s.handleCatalogNoteGet))
 	mux.Handle("POST /api/v1/catalog/notes",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogNoteCreate))))
 	mux.Handle("PUT /api/v1/catalog/notes/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogNoteUpdate))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogNoteGet, s.handleCatalogNoteUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/notes/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogNoteGet, s.catalogPatch(s.handleCatalogNoteGet, s.handleCatalogNoteUpdate)))))
 	mux.Handle("DELETE /api/v1/catalog/notes/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogNoteDelete))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogNoteGet, s.handleCatalogNoteDelete))))
 
 	mux.HandleFunc("GET /api/v1/catalog/services", s.handleCatalogServicesList)
-	mux.HandleFunc("GET /api/v1/catalog/services/{id}", s.handleCatalogServiceGet)
+	mux.HandleFunc("GET /api/v1/catalog/services/{id}", s.catalogGet(s.handleCatalogServiceGet))
 	mux.Handle("POST /api/v1/catalog/services",
 		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogServiceCreate))))
 	mux.Handle("PUT /api/v1/catalog/services/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogServiceUpdate))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogServiceGet, s.handleCatalogServiceUpdate))))
+	mux.Handle("PATCH /api/v1/catalog/services/{id}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogServiceGet, s.catalogPatch(s.handleCatalogServiceGet, s.handleCatalogServiceUpdate)))))
 	mux.Handle("DELETE /api/v1/catalog/services/{id}",
-		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleCatalogServiceDelete))))
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(s.catalogWrite(s.handleCatalogServiceGet, s.handleCatalogServiceDelete))))
+
+	// Specialist slot pool (ADR-0022): viewers read; admins change. Changes to what the pool is made of also need the settings step-up.
+	mux.HandleFunc("GET /api/v1/specialists", s.handleSpecialistsGet)
+	mux.Handle("POST /api/v1/specialists/load", s.requireRole(authz.RoleAdmin)(http.HandlerFunc(s.handleSpecialistLoad)))
+	mux.Handle("POST /api/v1/specialists/unload", s.requireRole(authz.RoleAdmin)(http.HandlerFunc(s.handleSpecialistUnload)))
+	mux.Handle("POST /api/v1/specialists/occupants",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleSpecialistOccupantCreate))))
+	mux.Handle("PUT /api/v1/specialists/occupants/{name}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleSpecialistOccupantUpdate))))
+	mux.Handle("DELETE /api/v1/specialists/occupants/{name}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleSpecialistOccupantDelete))))
+	mux.Handle("POST /api/v1/specialists/occupants/{name}/policy",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleSpecialistPolicy))))
+	mux.Handle("POST /api/v1/specialists/occupants/{name}/behavior",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleSpecialistBehavior))))
+	mux.Handle("GET /api/v1/specialists/slots/{slot}/log", s.requireRole(authz.RoleAdmin)(http.HandlerFunc(s.handleSpecialistSlotLog)))
+	mux.Handle("POST /api/v1/specialists/slots",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleSpecialistSlotAdd))))
+	mux.Handle("DELETE /api/v1/specialists/slots/{slot}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleSpecialistSlotRemove))))
+	// Speech engine resolution for the speech front door (docs/speech-routing-plan.md, P1): resolve and release are what a speech-scoped key may call;
+	// the defaults are read by operators and changed by admins with the settings step-up.
+	mux.Handle("POST /api/v1/speech/resolve", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSpeechResolve)))
+	mux.Handle("POST /api/v1/speech/release", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSpeechRelease)))
+	mux.Handle("POST /api/v1/duplex/resolve", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleDuplexResolve)))
+	mux.Handle("POST /api/v1/duplex/renew", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleDuplexRenew)))
+	mux.Handle("POST /api/v1/duplex/release", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleDuplexRelease)))
+	mux.Handle("GET /api/v1/speech/defaults", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSpeechDefaultsGet)))
+	mux.Handle("GET /api/v1/speech/readiness", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSpeechReadiness)))
+	mux.Handle("GET /api/v1/speech/recipes", s.requireRole(authz.RoleOperator)(http.HandlerFunc(s.handleSpeechRecipes)))
+	mux.Handle("POST /api/v1/speech/recipes/{id}/register",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleSpeechRecipeRegister))))
+	mux.Handle("PUT /api/v1/speech/defaults",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleSpeechDefaultsPut))))
+	mux.Handle("PUT /api/v1/specialists/defaults/{function}",
+		s.requireRole(authz.RoleAdmin)(s.requireAssurance(authz.ResourcePageSettings)(http.HandlerFunc(s.handleSpecialistDefault))))
 
 	// SSE (Contract 1 §4) — authed, but role-agnostic (any authed viewer
 	// may subscribe; payloads are no more privileged than GET /api/v1/status).
@@ -992,6 +1136,15 @@ func (s *Server) registerV1Routes(mux *http.ServeMux) {
 		s.requireRole(authz.RoleAdmin)(
 			s.requireAssurance(authz.ResourceActionModelProfile)(
 				http.HandlerFunc(s.handleProfileRun))))
+	mux.HandleFunc("GET /api/v1/profile-night", s.handleProfileNightGet)
+	mux.Handle("POST /api/v1/profile-night",
+		s.requireRole(authz.RoleAdmin)(
+			s.requireAssurance(authz.ResourceActionModelProfile)(
+				http.HandlerFunc(s.handleProfileNightArm))))
+	mux.Handle("DELETE /api/v1/profile-night",
+		s.requireRole(authz.RoleAdmin)(
+			s.requireAssurance(authz.ResourceActionModelProfile)(
+				http.HandlerFunc(s.handleProfileNightCancel))))
 	mux.HandleFunc("GET /api/v1/profile", s.handleProfilesList)
 	mux.HandleFunc("GET /api/v1/profile/{mode}", s.handleProfileGet)
 	mux.Handle("DELETE /api/v1/profile/{mode}",
@@ -1092,9 +1245,16 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		// store before any cutover.
 		if r.Method != "GET" && r.Method != "HEAD" && bearerToken(r) == "" {
 			if !s.csrfOKForSession(r, sess) {
-				writeError(w, http.StatusForbidden, "CSRF token missing or invalid")
+				writeErrorCode(w, http.StatusForbidden, "csrf_invalid", nil, "CSRF token missing or invalid")
 				return
 			}
+		}
+
+		// A scoped key reaches only its scope (ADR-0020 F11); everything else is refused before any handler runs.
+		if ident.Scope != "" && !scopeAllows(ident.Scope, r.Method, r.URL.Path) {
+			writeErrorCode(w, http.StatusForbidden, "scope_denied", map[string]any{"scope": ident.Scope, "path": r.URL.Path},
+				"this key is limited to "+ident.Scope+" access and cannot call "+r.URL.Path)
+			return
 		}
 
 		ctx := context.WithValue(r.Context(), identityKey, ident)
@@ -1103,6 +1263,37 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// scopeAllows reports whether a key of the given scope may call method path. The catalog scope admits the catalog API, the caller's own session,
+// and revoking itself; the speech scope admits only the two speech-engine calls, the reads of the engine list and of speech readiness; the speech setup
+// scope admits listing the engine recipes, registering one, and reading readiness and the external tool links; each also has the session and health
+// reads and may revoke itself.
+func scopeAllows(scope, method, path string) bool {
+	common := (method == "GET" && (path == "/api/v1/session" || path == "/api/v1/health")) || (method == "DELETE" && path == "/api/v1/keys/self")
+	switch scope {
+	case authz.ScopeCatalog:
+		return strings.HasPrefix(path, "/api/v1/catalog/") || common
+	case authz.ScopeSpeech:
+		return (method == "POST" && (path == "/api/v1/speech/resolve" || path == "/api/v1/speech/release")) ||
+			(method == "GET" && (path == "/api/v1/speech/defaults" || path == "/api/v1/speech/readiness")) || common
+	case authz.ScopeSpeechSetup:
+		return (method == "GET" && (path == "/api/v1/speech/recipes" || path == "/api/v1/speech/readiness" || path == "/api/v1/external-tools")) ||
+			(method == "POST" && isRecipeRegisterPath(path)) || common
+	case authz.ScopeDuplex:
+		return (method == "POST" && (path == "/api/v1/duplex/resolve" || path == "/api/v1/duplex/renew" || path == "/api/v1/duplex/release")) || common
+	}
+	return false
+}
+
+// isRecipeRegisterPath reports whether path is POST /api/v1/speech/recipes/{id}/register for one plain id.
+func isRecipeRegisterPath(path string) bool {
+	id, ok := strings.CutPrefix(path, "/api/v1/speech/recipes/")
+	if !ok {
+		return false
+	}
+	id, ok = strings.CutSuffix(id, "/register")
+	return ok && id != "" && !strings.ContainsAny(id, "/.%")
 }
 
 // resolveSession verifies the session cookie and returns the Identity +
@@ -1257,7 +1448,7 @@ func (s *Server) requireRole(need authz.Role) func(http.Handler) http.Handler {
 				return
 			}
 			if !ident.Role.Allows(need) {
-				writeError(w, http.StatusForbidden, string(need)+" role required")
+				writeErrorCode(w, http.StatusForbidden, "role_required", map[string]any{"role": string(need)}, string(need)+" role required")
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -1481,23 +1672,10 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-// writeError emits the V4 generic error shape {"error": "<message>"}. `msg`
-// is English prose and stays wire-compatible forever — the a0 router, MCP,
-// the CLI, and every existing test key on this exact field (i18n ADR-0016
-// §3: those surfaces are deliberately never localized). New call sites that
-// want a translatable client message should prefer writeErrorCode instead;
-// this bare form remains for call sites not yet migrated and for callers
-// that never need a code (there are none — writeErrorCode's `code` is
-// optional-in-spirit but not optional-in-signature, see below).
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
-}
-
 // writeErrorCode is writeError's additive companion (i18n Phase 2,
 // docs/adr/0016-localization.md): the response gains a stable machine `code`
 // and optional `params` alongside the unchanged English `error` string.
-// `error` is byte-identical to what writeError(w, status, msg) would have
-// sent — no existing consumer (a0/MCP/CLI/tests) is affected by adopting
+// `error` is the English message, exactly what the retired bare writeError sent — no existing consumer (a0/MCP/CLI/tests) is affected by adopting
 // this at a call site. The web PWA's apiErrorMessage (lib/api.ts) renders
 // `t("errors:"+code, params)` when the errors.json catalog has an entry for
 // `code`, falling back to `error` verbatim otherwise — so a call site may
@@ -1509,6 +1687,18 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // guard keeping the Go code list and the JSON catalogs from drifting apart.
 func writeErrorCode(w http.ResponseWriter, status int, code string, params map[string]any, msg string) {
 	body := map[string]any{"error": msg, "code": code}
+	if len(params) > 0 {
+		body["params"] = params
+	}
+	writeJSON(w, status, body)
+}
+
+// writeOpError is the envelope for the load/unload/switch/profile operation endpoints, whose bodies used to be
+// {"success": false, "message": ...}. It keeps `message` and adds the envelope's `error` (the same English message)
+// and `code`, so a client reads every Forge error the same way. The legacy `success:false` was dropped in phase 5
+// (ADR-0020): HTTP status is the success signal, and no client read the key on an error body.
+func writeOpError(w http.ResponseWriter, status int, code string, params map[string]any, msg string) {
+	body := map[string]any{"message": msg, "error": msg, "code": code}
 	if len(params) > 0 {
 		body["params"] = params
 	}
@@ -1551,6 +1741,7 @@ func writeValidationErrorCodes(w http.ResponseWriter, fields map[string]string, 
 	}
 	body := map[string]any{
 		"error":  "validation_failed",
+		"code":   "validation_failed",
 		"fields": fields,
 	}
 	if len(codes) > 0 {

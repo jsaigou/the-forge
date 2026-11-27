@@ -7,6 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { CopyButton } from "../../components/CopyButton";
+import { RestartOverlay } from "../../components/RestartOverlay";
 import { apiErrorMessage, api } from "../../lib/api";
 import { useSystemPreflight, useSystemRestart, useSystemSettings, useUpdateSystemSettings } from "../../lib/queries";
 import { useStepUpGate } from "../../lib/useStepUpGate";
@@ -130,24 +131,6 @@ function SystemDangerZone({ canAdmin }: { canAdmin: boolean }) {
         </>
       )}
     />
-  );
-}
-
-function RestartOverlay({ onDone }: { onDone: (ok: boolean) => void }) {
-  const { t } = useTranslation("settings");
-  return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <h3>{t("danger.restart_overlay_title")}</h3>
-        <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.6, marginBottom: 14 }}>
-          <Trans i18nKey="danger.restart_overlay_body" ns="settings" components={{ b0: <b />, b1: <b /> }} />
-        </div>
-        <div className="dot-busy" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--warn)", boxShadow: "0 0 7px var(--warn)", margin: "0 auto" }} />
-        <div className="form-actions" style={{ marginTop: 16 }}>
-          <button className="btn" onClick={() => onDone(false)}>{t("danger.give_up")}</button>
-        </div>
-      </div>
-    </div>
   );
 }
 

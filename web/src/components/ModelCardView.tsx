@@ -1,5 +1,7 @@
 import { lazy, Suspense, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { useCatalogModels, useCatalogOfferings, useConfigCards, useProviders } from "../lib/queries";
+import { useRemoteOnly } from "../lib/useRemoteOnly";
 import { providerIconSlug } from "../lib/providerPresets";
 import type { ModelCard, Status } from "../lib/types";
 import { CapabilityBar } from "./CapabilityBar";
@@ -34,6 +36,7 @@ export function ModelCardView({
   displayCurrency?: string;
   interactive?: boolean;
 }) {
+  const { t } = useTranslation("common");
   const [showDetail, setShowDetail] = useState(false);
   const [detailRect, setDetailRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   // configCards is already fetched by the Models page's sibling queries
@@ -65,6 +68,9 @@ export function ModelCardView({
     providerChips.push({ provider: o.provider, enabled: o.enabled && providerEnabled(o.provider) });
   }
 
+  // Served only by external providers: nothing of it is hosted here, and the card says so in the offer colour.
+  const remoteOnly = useRemoteOnly()(card.name);
+
   function openDetail(e?: MouseEvent<HTMLDivElement>) {
     if (!interactive) return;
     // The hero FLIP zoom wants the card's on-screen rect at tap time.
@@ -91,7 +97,7 @@ export function ModelCardView({
       logoDark={card.logo_dark}
       badges={card.badges}
       watermarkName={card.creator}
-      className={`portrait${interactive ? " interactive" : ""}`}
+      className={`portrait${interactive ? " interactive" : ""}${remoteOnly ? " offer" : ""}`}
       nameExtra={interactive ? <CopyButton text={card.name} title="Copy model name" /> : undefined}
       rootProps={{
         role: interactive ? "button" : undefined,
@@ -100,6 +106,7 @@ export function ModelCardView({
         onKeyDown: interactive ? onCardKeyDown : undefined,
       }}
     >
+      {remoteOnly && <span className="chip offer">{t("offer.remote_only")}</span>}
       <div className="mmaker">
         {card.creator}{card.license_name ? ` · ${card.license_name}` : ""}
       </div>

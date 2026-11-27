@@ -12,13 +12,15 @@ import { useTranslation } from "react-i18next";
 import type { CapsOverride } from "./ChatTemplateCapsOverrideEditor";
 import { ChatTemplateCapsOverrideEditor } from "./ChatTemplateCapsOverrideEditor";
 import { countryFlag, formatCurrencyPrecise, formatGB } from "../lib/format";
-import type { ConfigWritePayload } from "../lib/configPayload";
+import { toConfigWritePayload, type ConfigWritePayload } from "../lib/configPayload";
 import { familyInheritedIcon, modelInheritedIcon } from "../lib/iconInheritance";
 import { preferredOfferingIds } from "../lib/offeringPreference";
 import { providerIconSlug } from "../lib/providerPresets";
 import { useErrorState } from "../lib/useErrorState";
 import { subjectLabel } from "./catalog/BenchmarkForm";
+import { BuildsFilesSection } from "./catalog/BuildsFilesSection";
 import { OfferingForm, useCatalogProviders } from "./catalog/OfferingForm";
+import { RemovalDialog } from "./RemovalDialog";
 import { ConfirmButton } from "./ConfirmButton";
 import { Icon } from "./Icon";
 import { IconPicker } from "./IconPicker";
@@ -46,10 +48,8 @@ import {
   useCreateCatalogOffering,
   useCreateCatalogService,
   useCreateCatalogVariant,
-  useDeleteCatalogConfig,
   useDeleteCatalogFamily,
   useDeleteCatalogGenealogy,
-  useDeleteCatalogModel,
   useDeleteCatalogNote,
   useDeleteCatalogOffering,
   useDeleteCatalogService,
@@ -81,11 +81,11 @@ import type {
   CatalogVariant,
 } from "../lib/types";
 
-export type SubTab = "configs" | "offerings" | "models" | "taxonomy" | "notes" | "services";
+export type SubTab = "configs" | "offerings" | "models" | "taxonomy" | "notes" | "services" | "builds";
 
 // Labels come from the "settings" translation namespace (catalog.tabs.<key>),
 // built inside CatalogPanel where useTranslation is available.
-const SUB_TAB_KEYS: SubTab[] = ["configs", "offerings", "models", "taxonomy", "notes", "services"];
+const SUB_TAB_KEYS: SubTab[] = ["configs", "offerings", "models", "taxonomy", "notes", "services", "builds"];
 // Sprint I: genealogy/family editing — the backend has had full CRUD for
 // both since 2026-07-29, this is the frontend that was never built.
 // Sprint 12 (was H) Phase 5: Benchmarks and Profiling promoted to their
@@ -144,6 +144,7 @@ export function CatalogPanel({ canAdmin, tab: propTab, onTabChange }: { canAdmin
         {tab === "taxonomy" && <TaxonomySection canAdmin={canAdmin} />}
         {tab === "notes" && <NotesSection canAdmin={canAdmin} />}
         {tab === "services" && <ServicesSection canAdmin={canAdmin} />}
+        {tab === "builds" && <BuildsFilesSection canAdmin={canAdmin} />}
       </div>
     </>
   );
@@ -181,9 +182,9 @@ function ConfigsSection({ canAdmin }: { canAdmin: boolean }) {
   const modelFiles = useModelFiles();
   const create = useCreateCatalogConfig();
   const update = useUpdateCatalogConfig();
-  const remove = useDeleteCatalogConfig();
   const uploadIcon = useUploadConfigIcon();
 
+  const [removing, setRemoving] = useState<number | null>(null);
   const [editing, setEditing] = useState<number | "new" | null>(null);
   const [showFiles, setShowFiles] = useState(false);
   const { error, showError, clearError } = useErrorState();
@@ -230,22 +231,10 @@ function ConfigsSection({ canAdmin }: { canAdmin: boolean }) {
   // comment for why the type alone can't catch this at a spread site; same
   // id fix as Routing.tsx's submitPatch).
   function handleIconSelect(id: number, c: CatalogConfig, slug: string, dark = false) {
-    const { id: _cid, chat_template_caps: _caps, chat_template_caps_probed_at: _probedAt, ...rest } = c;
-    update.mutate({ id, c: dark ? { ...rest, logo_dark: slug } : { ...rest, logo: slug } }, { onError: showError });
+    update.mutate({ id, c: toConfigWritePayload(c, dark ? { logo_dark: slug } : { logo: slug }) }, { onError: showError });
   }
   function handleIconClear(id: number, c: CatalogConfig, dark = false) {
-    const { id: _cid, chat_template_caps: _caps, chat_template_caps_probed_at: _probedAt, ...rest } = c;
-    update.mutate({ id, c: dark ? { ...rest, logo_dark: "" } : { ...rest, logo: "" } }, { onError: showError });
-  }
-
-  // Sprint K: the confirm() gate moved into ConfirmButton itself (arm →
-  // confirm, replacing window.confirm at the operator's call) — this just
-  // fires the mutation now. Also drops the `loaded`/force-delete parameter
-  // this always had: its one real call site below never actually passed a
-  // third argument, so `force` was dead on every invocation before this
-  // change too — not something this migration introduces.
-  function handleDelete(id: number) {
-    remove.mutate({ id }, { onError: showError, onSuccess: () => setEditing(null) });
+    update.mutate({ id, c: toConfigWritePayload(c, dark ? { logo_dark: "" } : { logo: "" }) }, { onError: showError });
   }
 
   if (configs.isError) {
@@ -254,7 +243,7 @@ function ConfigsSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+      {error && <div className="error-note cat-mb3">{error}</div>}
 
       {editing !== null ? (
         <ConfigForm
@@ -301,34 +290,28 @@ function ConfigsSection({ canAdmin }: { canAdmin: boolean }) {
                   </span>
                   <span className="chip">{c.visibility}</span>
                   {canAdmin && (
-                    <div className="actions" style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                      <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(c.id); clearError(); }}>{t("catalog.configs.edit")}</button>
-                      <ConfirmButton
-                        className="btn"
-                        style={{ fontSize: 11, padding: "4px 8px" }}
-                        pending={remove.isPending}
-                        onConfirm={() => handleDelete(c.id)}
-                        warning={t("catalog.configs.delete_confirm", { name: c.name })}
-                      />
+                    <div className="actions cat-ml-auto-row">
+                      <button className="btn cat-chip-btn" onClick={() => { setEditing(c.id); clearError(); }}>{t("catalog.configs.edit")}</button>
+                      <button className="btn cat-chip-btn" onClick={() => { setRemoving(c.id); clearError(); }}>{t("common:removal.open_config")}</button>
                     </div>
                   )}
                 </div>
                 <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--mono)" }}>
                   {m ? `${m.name} / ` : ""}{v?.name ?? `#${c.variant_id}`}
                   {" · "}n_ctx {c.n_ctx.toLocaleString()}
-                  {" · "}parallel {c.parallel}
-                  {c.extra_args.length > 0 && <span style={{ color: "var(--text-mute)" }}>{" · "}{c.extra_args.join(" ")}</span>}
+                  {c.extra_args.length > 0 && <span className="cat-mute">{" · "}{c.extra_args.join(" ")}</span>}
                 </div>
               </div>
             );
           })}
           {canAdmin && (
-            <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); setShowFiles(false); }}>
+            <button className="btn cat-mt3" onClick={() => { setEditing("new"); clearError(); setShowFiles(false); }}>
               {t("catalog.configs.new_button")}
             </button>
           )}
         </>
       )}
+      {removing !== null && <RemovalDialog kind="config" id={removing} onClose={() => setRemoving(null)} />}
     </>
   );
 }
@@ -390,7 +373,6 @@ export function ConfigForm({
   const [buildId, setBuildId] = useState(existing?.build_id ?? 0);
   const [mmprojArtifactId, setMmprojArtifactId] = useState(existing?.mmproj_artifact_id ?? 0);
   const [nCtx, setNCtx] = useState(existing?.n_ctx ?? 0);
-  const [parallel, setParallel] = useState(existing?.parallel ?? 1);
   const [extraArgsText, setExtraArgsText] = useState(existing ? extraArgsToText(existing.extra_args) : "");
   const [status, setStatus] = useState(existing?.status ?? "unverified");
   const [visibility, setVisibility] = useState(existing?.visibility ?? "visible");
@@ -404,6 +386,15 @@ export function ConfigForm({
   );
   const [overrideVision, setOverrideVision] = useState(existing?.modalities?.includes("vision") ?? false);
   const [overrideAudio, setOverrideAudio] = useState(existing?.modalities?.includes("audio") ?? false);
+  // ADR-0021: the OUTPUT override mirrors the input one — undefined from the
+  // server = derive; an array = override. Unlike input, "text" is a real toggle
+  // here (a decision model produces no text).
+  const [outputsMode, setOutputsMode] = useState<"inherit" | "override">(
+    existing?.output_modalities !== undefined ? "override" : "inherit",
+  );
+  const [overrideOutText, setOverrideOutText] = useState(existing?.output_modalities?.includes("text") ?? true);
+  const [overrideOutSpeech, setOverrideOutSpeech] = useState(existing?.output_modalities?.includes("audio") ?? false);
+  const [overrideOutDecisions, setOverrideOutDecisions] = useState(existing?.output_modalities?.includes("decisions") ?? false);
   const [capabilityTierId, setCapabilityTierId] = useState(existing?.capability_tier_id ?? 0);
   const [capabilityRank, setCapabilityRank] = useState(existing?.capability_rank ?? 0);
   const [reasoningEffortDefault, setReasoningEffortDefault] = useState(existing?.reasoning_effort_default ?? "");
@@ -418,6 +409,15 @@ export function ConfigForm({
   // what this config would actually get without waiting on a round-trip.
   const model = variant ? models.find((m) => m.id === variant.model_id) : undefined;
   const derivedModalities = mmprojArtifactId === 0 ? ["text"] : (model?.modalities ?? ["text"]);
+  // Client-side mirror of store.ResolveOutputModalities' derive branch: the
+  // model's outputs, minus "audio" when no mmproj is linked (never empty).
+  const derivedOutputs = (() => {
+    const outs = (model?.output_modalities?.length ? model.output_modalities : ["text"]).filter(
+      (m) => !(m === "audio" && mmprojArtifactId === 0),
+    );
+    return outs.length ? outs : ["text"];
+  })();
+  const outputsGapNoMmproj = mmprojArtifactId === 0 && !!model && model.output_modalities?.includes("audio");
 
   function submit() {
     const payload: ConfigWritePayload = {
@@ -428,7 +428,6 @@ export function ConfigForm({
       build_id: buildId,
       mmproj_artifact_id: mmprojArtifactId,
       n_ctx: nCtx,
-      parallel,
       extra_args: extraArgsFromText(extraArgsText),
       status,
       visibility,
@@ -442,6 +441,12 @@ export function ConfigForm({
         modalitiesMode === "override"
           ? ["text", ...(overrideVision ? ["vision"] : []), ...(overrideAudio ? ["audio"] : [])]
           : undefined,
+      // Derive mode OMITS the key (undefined drops out of JSON), which on this
+      // full-replace PUT puts the config back in derive mode — never a stale override.
+      output_modalities:
+        outputsMode === "override"
+          ? [...(overrideOutText ? ["text"] : []), ...(overrideOutSpeech ? ["audio"] : []), ...(overrideOutDecisions ? ["decisions"] : [])]
+          : undefined,
       capability_tier_id: capabilityTierId,
       capability_rank: capabilityRank,
       chat_template_caps_override: capsOverride,
@@ -451,7 +456,7 @@ export function ConfigForm({
   }
 
   return (
-    <div className="form-grid" style={{ marginTop: 4 }}>
+    <div className="form-grid cat-mt1">
       <label className="form-row">{t("catalog.config_form.name_label")}
         <input value={name} placeholder="qwen36" onChange={(e) => setName(e.target.value)} />
       </label>
@@ -506,28 +511,58 @@ export function ConfigForm({
           ))}
         </select>
       </label>
-      <div className="form-row" style={{ gridColumn: "1 / -1" }}>
+      <div className="form-row cat-span">
         {t("catalog.config_form.modalities_label")}
-        <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="cat-wrap-row">
           <select value={modalitiesMode} onChange={(e) => setModalitiesMode(e.target.value as "inherit" | "override")}>
             <option value="inherit">{t("catalog.config_form.inherit_from_model")}</option>
             <option value="override">{t("catalog.config_form.override")}</option>
           </select>
           {modalitiesMode === "inherit" ? (
-            <span className="chip" style={{ opacity: 0.7 }}>
+            <span className="chip cat-dim70">
               {t("catalog.config_form.inherited_prefix", { modalities: derivedModalities.join(", ") })}
               {mmprojArtifactId === 0 && model && model.modalities.some((m) => m !== "text") ? t("catalog.config_form.no_mmproj_suffix") : ""}
             </span>
           ) : (
             <>
-              <span className="chip" style={{ opacity: 0.6 }}>{t("catalog.config_form.text_always")}</span>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+              <span className="chip cat-dim60">{t("catalog.config_form.text_always")}</span>
+              <label className="cat-inline-row">
                 <input type="checkbox" checked={overrideVision} onChange={(e) => setOverrideVision(e.target.checked)} />
                 {t("catalog.config_form.vision")}
               </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+              <label className="cat-inline-row">
                 <input type="checkbox" checked={overrideAudio} onChange={(e) => setOverrideAudio(e.target.checked)} />
                 {t("catalog.config_form.audio")}
+              </label>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="form-row cat-span">
+        {t("catalog.config_form.outputs_label")}
+        <div className="cat-wrap-row">
+          <select value={outputsMode} onChange={(e) => setOutputsMode(e.target.value as "inherit" | "override")}>
+            <option value="inherit">{t("catalog.config_form.inherit_from_model")}</option>
+            <option value="override">{t("catalog.config_form.override")}</option>
+          </select>
+          {outputsMode === "inherit" ? (
+            <span className="chip cat-dim70">
+              {t("catalog.config_form.inherited_prefix", { modalities: derivedOutputs.join(", ") })}
+              {outputsGapNoMmproj ? t("catalog.config_form.no_mmproj_suffix") : ""}
+            </span>
+          ) : (
+            <>
+              <label className="cat-inline-row">
+                <input type="checkbox" checked={overrideOutText} disabled={overrideOutText && !overrideOutSpeech && !overrideOutDecisions} onChange={(e) => setOverrideOutText(e.target.checked)} />
+                {t("catalog.config_form.output_text")}
+              </label>
+              <label className="cat-inline-row">
+                <input type="checkbox" checked={overrideOutSpeech} disabled={overrideOutSpeech && !overrideOutText && !overrideOutDecisions} onChange={(e) => setOverrideOutSpeech(e.target.checked)} />
+                {t("catalog.config_form.output_speech")}
+              </label>
+              <label className="cat-inline-row">
+                <input type="checkbox" checked={overrideOutDecisions} disabled={overrideOutDecisions && !overrideOutText && !overrideOutSpeech} onChange={(e) => setOverrideOutDecisions(e.target.checked)} />
+                {t("catalog.config_form.output_decisions")}
               </label>
             </>
           )}
@@ -544,7 +579,7 @@ export function ConfigForm({
       {capabilityTierId !== 0 && (
         <label className="form-row">{t("catalog.config_form.rank_label")}
           <input type="number" value={capabilityRank} onChange={(e) => setCapabilityRank(Number(e.target.value))} />
-          <span style={{ color: "var(--text-mute)", fontSize: 11 }}>{t("catalog.config_form.rank_hint")}</span>
+          <span className="cat-xs-mute">{t("catalog.config_form.rank_hint")}</span>
         </label>
       )}
       <label className="form-row">{t("catalog.config_form.reasoning_effort_label")}
@@ -555,7 +590,7 @@ export function ConfigForm({
           <option value="medium">medium</option>
           <option value="high">high</option>
         </select>
-        <span style={{ color: "var(--text-mute)", fontSize: 11 }}>
+        <span className="cat-xs-mute">
           {t("catalog.config_form.reasoning_effort_hint")}
         </span>
       </label>
@@ -566,9 +601,6 @@ export function ConfigForm({
       />
       <label className="form-row">{t("catalog.config_form.context_label")}
         <input type="number" min={0} value={nCtx} placeholder="131072" onChange={(e) => setNCtx(Number(e.target.value))} />
-      </label>
-      <label className="form-row">{t("catalog.config_form.parallel_label")}
-        <input type="number" min={1} value={parallel} onChange={(e) => setParallel(Number(e.target.value))} />
       </label>
       <label className="form-row">{t("catalog.config_form.status_label")}
         <select value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -582,12 +614,12 @@ export function ConfigForm({
           <option value="hidden">hidden</option>
         </select>
       </label>
-      <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("catalog.config_form.extra_args_label")}
+      <label className="form-row cat-span">{t("catalog.config_form.extra_args_label")}
         <textarea
           value={extraArgsText}
           placeholder="--ctx-checkpoints&#10;16&#10;--swa-full"
           rows={3}
-          style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "8px 10px", fontFamily: "var(--mono)", fontSize: 12, resize: "vertical" }}
+          className="cat-textarea-mono"
           onChange={(e) => setExtraArgsText(e.target.value)}
         />
         {/* BUG-2 (Sprint B, docs/v5-prerelease-readiness.md): the launcher
@@ -600,13 +632,13 @@ export function ConfigForm({
           {t("catalog.config_form.extra_args_hint")}
         </div>
       </label>
-      <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <label className="form-row cat-hrow">
         <input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} />
         {t("catalog.config_form.default_checkbox")}
       </label>
 
       {existing && onIconSelect && onIconClear && onIconUpload && (
-        <div className="form-row" style={{ gridColumn: "1 / -1" }}>
+        <div className="form-row cat-span">
           {t("catalog.config_form.icon_label")}
           <IconPicker
             value={existing.logo}
@@ -627,10 +659,10 @@ export function ConfigForm({
           {modelFiles.length === 0 && <div className="empty-note">{t("catalog.config_form.no_gguf_files")}</div>}
           {modelFiles.map((f) => (
             <div key={f.path} style={{ display: "flex", gap: 8, fontSize: 11, padding: "4px 0", borderBottom: "1px solid var(--border)", fontFamily: "var(--mono)" }}>
-              <span style={{ flex: 1, color: "var(--text-dim)" }}>{f.path}</span>
-              <span style={{ color: "var(--text-mute)" }}>{formatGB(f.size_bytes, 1)} GB</span>
+              <span className="cat-flex-dim">{f.path}</span>
+              <span className="cat-mute">{formatGB(f.size_bytes, 1)} GB</span>
               {f.arch && <span style={{ color: "var(--cool)" }}>{f.arch}</span>}
-              {f.trained_ctx > 0 && <span style={{ color: "var(--text-mute)" }}>ctx:{f.trained_ctx.toLocaleString()}</span>}
+              {f.trained_ctx > 0 && <span className="cat-mute">ctx:{f.trained_ctx.toLocaleString()}</span>}
               {f.is_shard_set && <span className="chip">{t("catalog.config_form.shard_set_chip")}</span>}
             </div>
           ))}
@@ -642,7 +674,7 @@ export function ConfigForm({
         </div>
       )}
 
-      <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
+      <div className="form-actions cat-span">
         <button className="btn" onClick={onCancel}>{t("catalog.config_form.cancel")}</button>
         <SaveButton
           pending={pending}
@@ -709,7 +741,7 @@ function OfferingsSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+      {error && <div className="error-note cat-mb3">{error}</div>}
 
       {editing !== null ? (
         <OfferingForm
@@ -725,13 +757,13 @@ function OfferingsSection({ canAdmin }: { canAdmin: boolean }) {
         />
       ) : (
         <>
-          <div className="qrow" style={{ color: "var(--text-mute)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em" }}>
-            <span style={{ width: 140 }}>{t("catalog.offerings.col_provider")}</span>
-            <span style={{ width: 180 }}>{t("catalog.offerings.col_wire_model")}</span>
-            <span style={{ width: 140 }}>{t("catalog.offerings.col_model")}</span>
-            <span style={{ width: 100 }}>{t("catalog.offerings.col_price")}</span>
-            <span style={{ width: 64 }}>{t("catalog.offerings.col_priority")}</span>
-            <span style={{ width: 64 }}>{t("catalog.offerings.col_currency")}</span>
+          <div className="qrow cat-mini-eyebrow">
+            <span className="cat-w140">{t("catalog.offerings.col_provider")}</span>
+            <span className="cat-w180">{t("catalog.offerings.col_wire_model")}</span>
+            <span className="cat-w140">{t("catalog.offerings.col_model")}</span>
+            <span className="cat-w100">{t("catalog.offerings.col_price")}</span>
+            <span className="cat-w64">{t("catalog.offerings.col_priority")}</span>
+            <span className="cat-w64">{t("catalog.offerings.col_currency")}</span>
             <span style={{ width: 72 }}>{t("catalog.offerings.col_context")}</span>
             <span>{t("catalog.offerings.col_enabled")}</span>
           </div>
@@ -741,12 +773,12 @@ function OfferingsSection({ canAdmin }: { canAdmin: boolean }) {
             const prov = providerList.find((p) => p.name === o.provider);
             const providerDisabled = prov !== undefined && !prov.enabled;
             return (
-              <div className="qrow" key={o.id} style={{ alignItems: "flex-start", opacity: providerDisabled ? 0.55 : undefined }}>
+              <div className="qrow offer" key={o.id} style={{ alignItems: "flex-start", opacity: providerDisabled ? 0.55 : undefined }}>
                 <span style={{ width: 140, fontSize: 12, fontWeight: 600 }}>
                   <Icon slug={providerIconSlug(o.provider)} name={o.provider} />
                   {o.provider}
                   {prov?.country && <span style={{ marginLeft: 6, fontSize: 14 }}>{countryFlag(prov.country)}</span>}
-                  {providerDisabled && <span className="chip" style={{ marginLeft: 4, color: "var(--warn)" }}>{t("catalog.offerings.provider_off_chip")}</span>}
+                  {providerDisabled && <span className="chip cat-warn-note">{t("catalog.offerings.provider_off_chip")}</span>}
                 </span>
                 <span style={{ width: 180, fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)" }}>
                   {o.wire_model}
@@ -763,15 +795,15 @@ function OfferingsSection({ canAdmin }: { canAdmin: boolean }) {
                 <span style={{ width: 100, fontFamily: "var(--mono)", fontSize: 11 }}>
                   {formatCurrencyPrecise(o.price_in_per_1m, o.currency)}/{formatCurrencyPrecise(o.price_out_per_1m, o.currency)}
                   {o.price_cached_in_per_1m != null && (
-                    <span style={{ color: "var(--text-dim)" }}>{t("catalog.offerings.cached_suffix", { price: formatCurrencyPrecise(o.price_cached_in_per_1m, o.currency) })}</span>
+                    <span className="cat-dim">{t("catalog.offerings.cached_suffix", { price: formatCurrencyPrecise(o.price_cached_in_per_1m, o.currency) })}</span>
                   )}
                   {(o.price_in_per_1m_peak != null || o.price_out_per_1m_peak != null) && (
-                    <span style={{ color: "var(--text-dim)" }}>
+                    <span className="cat-dim">
                       {t("catalog.offerings.peak_suffix", { in: formatCurrencyPrecise(o.price_in_per_1m_peak ?? o.price_in_per_1m, o.currency), out: formatCurrencyPrecise(o.price_out_per_1m_peak ?? o.price_out_per_1m, o.currency) })}
                     </span>
                   )}
                   {prov?.peakActiveNow && (
-                    <span className="chip" style={{ marginLeft: 4, color: "var(--warn)" }} title={t("catalog.offerings.peak_now_title")}>
+                    <span className="chip cat-warn-note" title={t("catalog.offerings.peak_now_title")}>
                       {t("catalog.offerings.peak_now_chip")}
                     </span>
                   )}
@@ -785,11 +817,10 @@ function OfferingsSection({ canAdmin }: { canAdmin: boolean }) {
                   </span>
                 </span>
                 {canAdmin && (
-                  <div className="actions" style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(o.id); clearError(); }}>{t("catalog.offerings.edit")}</button>
+                  <div className="actions cat-ml-auto-row">
+                    <button className="btn cat-chip-btn" onClick={() => { setEditing(o.id); clearError(); }}>{t("catalog.offerings.edit")}</button>
                     <ConfirmButton
-                      className="btn"
-                      style={{ fontSize: 11, padding: "4px 8px" }}
+                      className="btn cat-chip-btn"
                       pending={remove.isPending}
                       onConfirm={() => handleDelete(o.id)}
                       warning={t("catalog.offerings.delete_confirm", { name: o.wire_model })}
@@ -800,7 +831,7 @@ function OfferingsSection({ canAdmin }: { canAdmin: boolean }) {
             );
           })}
           {canAdmin && (
-            <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); }}>
+            <button className="btn cat-mt3" onClick={() => { setEditing("new"); clearError(); }}>
               + New offering
             </button>
           )}
@@ -831,13 +862,13 @@ function TaxonomySection({ canAdmin }: { canAdmin: boolean }) {
   return (
     <>
       <div className="eyebrow" style={{ marginTop: 0 }}>{t("catalog.taxonomy.genealogies_title")}</div>
-      <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 10 }}>
+      <div className="cat-hint">
         {t("catalog.taxonomy.genealogies_intro")}
       </div>
       <GenealogiesSection canAdmin={canAdmin} />
 
       <div className="eyebrow" style={{ marginTop: 22 }}>{t("catalog.taxonomy.families_title")}</div>
-      <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 10 }}>
+      <div className="cat-hint">
         {t("catalog.taxonomy.families_intro")}
       </div>
       <FamiliesSection canAdmin={canAdmin} />
@@ -908,7 +939,7 @@ function GenealogiesSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+      {error && <div className="error-note cat-mb3">{error}</div>}
       {editing !== null ? (
         <GenealogyForm
           key={editing === "new" ? "new" : editing}
@@ -927,16 +958,15 @@ function GenealogiesSection({ canAdmin }: { canAdmin: boolean }) {
           {list.map((g) => (
             <div className="qrow" key={g.id}>
               {g.logo && <Icon slug={g.logo} name={g.name} sm />}
-              <span style={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>{g.name}</span>
-              <span style={{ fontSize: 11, color: "var(--text-mute)" }}>
+              <span className="cat-flex-heading">{g.name}</span>
+              <span className="cat-xs-mute">
                 {t("catalog.genealogies.family_count", { count: familyList.filter((f) => f.genealogy_id === g.id).length })}
               </span>
               {canAdmin && (
-                <div className="actions" style={{ marginLeft: 12, display: "flex", gap: 6 }}>
-                  <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(g.id); clearError(); }}>{t("catalog.genealogies.edit")}</button>
+                <div className="actions cat-ml-row">
+                  <button className="btn cat-chip-btn" onClick={() => { setEditing(g.id); clearError(); }}>{t("catalog.genealogies.edit")}</button>
                   <ConfirmButton
-                    className="btn"
-                      style={{ fontSize: 11, padding: "4px 8px" }}
+                    className="btn cat-chip-btn"
                     pending={remove.isPending}
                     onConfirm={() => handleDelete(g.id)}
                     warning={deleteWarning(g.id, g.name)}
@@ -946,7 +976,7 @@ function GenealogiesSection({ canAdmin }: { canAdmin: boolean }) {
             </div>
           ))}
           {canAdmin && (
-            <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); }}>
+            <button className="btn cat-mt3" onClick={() => { setEditing("new"); clearError(); }}>
               {t("catalog.genealogies.new_button")}
             </button>
           )}
@@ -979,12 +1009,12 @@ function GenealogyForm({
   const [name, setName] = useState(existing?.name ?? "");
 
   return (
-    <div className="form-grid" style={{ marginTop: 4 }}>
+    <div className="form-grid cat-mt1">
       <label className="form-row">{t("catalog.genealogies.name_label")}
         <input value={name} placeholder={t("catalog.genealogies.name_placeholder")} onChange={(e) => setName(e.target.value)} />
       </label>
       {existing && (
-        <div className="form-row" style={{ gridColumn: "1 / -1" }}>
+        <div className="form-row cat-span">
           {t("catalog.genealogies.icon_label")}
           <IconPicker
             value={existing.logo}
@@ -995,7 +1025,7 @@ function GenealogyForm({
           />
         </div>
       )}
-      <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
+      <div className="form-actions cat-span">
         <button className="btn" onClick={onCancel}>{t("catalog.genealogies.cancel")}</button>
         <SaveButton
           className="go"
@@ -1069,7 +1099,7 @@ function FamiliesSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+      {error && <div className="error-note cat-mb3">{error}</div>}
       {editing !== null ? (
         <FamilyForm
           key={editing === "new" ? "new" : editing}
@@ -1091,17 +1121,16 @@ function FamiliesSection({ canAdmin }: { canAdmin: boolean }) {
             return (
               <div className="qrow" key={f.id}>
                 {f.logo && <Icon slug={f.logo} name={f.name} sm />}
-                <span style={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>{f.name}</span>
+                <span className="cat-flex-heading">{f.name}</span>
                 <span style={{ fontSize: 11, color: "var(--text-dim)", width: 140 }}>{genealogy?.name ?? t("catalog.families.no_genealogy")}</span>
-                <span style={{ fontSize: 11, color: "var(--text-mute)" }}>
+                <span className="cat-xs-mute">
                   {t("catalog.families.model_count", { count: modelList.filter((m) => m.family_id === f.id).length })}
                 </span>
                 {canAdmin && (
-                  <div className="actions" style={{ marginLeft: 12, display: "flex", gap: 6 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(f.id); clearError(); }}>{t("catalog.families.edit")}</button>
+                  <div className="actions cat-ml-row">
+                    <button className="btn cat-chip-btn" onClick={() => { setEditing(f.id); clearError(); }}>{t("catalog.families.edit")}</button>
                     <ConfirmButton
-                      className="btn"
-                      style={{ fontSize: 11, padding: "4px 8px" }}
+                      className="btn cat-chip-btn"
                       pending={remove.isPending}
                       onConfirm={() => handleDelete(f.id)}
                       warning={deleteWarning(f.id, f.name)}
@@ -1112,7 +1141,7 @@ function FamiliesSection({ canAdmin }: { canAdmin: boolean }) {
             );
           })}
           {canAdmin && (
-            <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); }}>
+            <button className="btn cat-mt3" onClick={() => { setEditing("new"); clearError(); }}>
               {t("catalog.families.new_button")}
             </button>
           )}
@@ -1153,7 +1182,7 @@ function FamilyForm({
     : null;
 
   return (
-    <div className="form-grid" style={{ marginTop: 4 }}>
+    <div className="form-grid cat-mt1">
       <label className="form-row">{t("catalog.families.name_label")}
         <input value={name} placeholder={t("catalog.families.name_placeholder")} onChange={(e) => setName(e.target.value)} />
       </label>
@@ -1164,7 +1193,7 @@ function FamilyForm({
         </select>
       </label>
       {existing && (
-        <div className="form-row" style={{ gridColumn: "1 / -1" }}>
+        <div className="form-row cat-span">
           {t("catalog.families.icon_label")}
           <IconPicker
             value={existing.logo}
@@ -1176,7 +1205,7 @@ function FamilyForm({
           />
         </div>
       )}
-      <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
+      <div className="form-actions cat-span">
         <button className="btn" onClick={onCancel}>{t("catalog.families.cancel")}</button>
         <SaveButton
           className="go"
@@ -1199,11 +1228,13 @@ function ModelsSection({ canAdmin }: { canAdmin: boolean }) {
   const artifacts = useCatalogArtifacts();
   const quantizations = useCatalogQuantizations();
   const formats = useCatalogFormats();
+  const offerings = useCatalogOfferings();
+  const configs = useCatalogConfigs();
   const create = useCreateCatalogModel();
   const update = useUpdateCatalogModel();
-  const remove = useDeleteCatalogModel();
   const uploadIcon = useUploadModelIcon();
 
+  const [removing, setRemoving] = useState<number | null>(null);
   const [editing, setEditing] = useState<number | "new" | null>(null);
   const [variantFor, setVariantFor] = useState<number | null>(null);
   const { error, showError, clearError } = useErrorState();
@@ -1245,17 +1276,13 @@ function ModelsSection({ canAdmin }: { canAdmin: boolean }) {
     update.mutate({ id, m: dark ? { ...m, logo_dark: "" } : { ...m, logo: "" } }, { onError: showError });
   }
 
-  function handleDelete(id: number) {
-    remove.mutate(id, { onError: showError });
-  }
-
   if (models.isError) {
     return <div className="empty-note">{t("catalog.catalog_unavailable")}</div>;
   }
 
   return (
     <>
-      {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+      {error && <div className="error-note cat-mb3">{error}</div>}
 
       {editing !== null ? (
         <ModelForm
@@ -1273,25 +1300,34 @@ function ModelsSection({ canAdmin }: { canAdmin: boolean }) {
         />
       ) : (
         <>
-          <div className="qrow" style={{ color: "var(--text-mute)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em" }}>
-            <span style={{ width: 180 }}>{t("catalog.models.col_model")}</span>
-            <span style={{ width: 120 }}>{t("catalog.models.col_family")}</span>
-            <span style={{ width: 100 }}>{t("catalog.models.col_architecture")}</span>
+          <div className="qrow cat-mini-eyebrow">
+            <span className="cat-w180">{t("catalog.models.col_model")}</span>
+            <span className="cat-w120">{t("catalog.models.col_family")}</span>
+            <span className="cat-w100">{t("catalog.models.col_architecture")}</span>
             <span style={{ width: 80 }}>{t("catalog.models.col_params")}</span>
-            <span style={{ width: 60 }}>{t("catalog.models.col_variants")}</span>
+            <span className="cat-w60">{t("catalog.models.col_variants")}</span>
             <span>{t("catalog.models.col_description")}</span>
           </div>
           {modelList.length === 0 && <div className="empty-note">{t("catalog.models.empty")}</div>}
           {modelList.map((m) => {
             const f = familyList.find((f) => f.id === m.family_id);
             const modelVariants = variantList.filter((v) => v.model_id === m.id);
+            const offered = (offerings.data ?? []).filter((o) => o.model_id === m.id);
+            const local = (configs.data ?? []).some((c) => modelVariants.some((v) => v.id === c.variant_id));
+            // Only claim "remote only" once the configs are known.
+            const remoteOnly = offered.length > 0 && configs.data !== undefined && !local;
             return (
               <div key={m.id}>
-                <div className="qrow" style={{ alignItems: "flex-start" }}>
+                <div className={`qrow cat-align-start${remoteOnly ? " offer" : ""}`}>
                   <span style={{ width: 180, fontWeight: 600, fontSize: 12.5 }}>
                     {m.logo && <Icon slug={m.logo} name={m.name} />}
                     {m.name}
                     {m.visibility === "hidden" && <span className="chip" style={{ marginLeft: 6, opacity: 0.7 }}>{t("catalog.models.hidden_chip")}</span>}
+                    {offered.length > 0 && (
+                      <span className="chip offer" style={{ marginLeft: 6 }} title={t("common:offer.providers", { names: [...new Set(offered.map((o) => o.provider))].join(", ") })}>
+                        {t(remoteOnly ? "common:offer.remote_only" : "common:offer.also")}
+                      </span>
+                    )}
                   </span>
                   <span style={{ width: 120, fontSize: 11, color: "var(--text-dim)" }}>{f?.name ?? "—"}</span>
                   <span style={{ width: 100, fontSize: 11, fontFamily: "var(--mono)", color: "var(--cool)" }}>{m.architecture || "—"}</span>
@@ -1301,17 +1337,11 @@ function ModelsSection({ canAdmin }: { canAdmin: boolean }) {
                       {t("catalog.models.variant_count", { count: modelVariants.length })}
                     </button>
                   </span>
-                  <span style={{ fontSize: 11, color: "var(--text-dim)", flex: 1 }}>{m.description || "—"}</span>
+                  <span className="cat-xs-dim-flex">{m.description || "—"}</span>
                   {canAdmin && (
-                    <div className="actions" style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                      <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(m.id); clearError(); }}>{t("catalog.models.edit")}</button>
-                      <ConfirmButton
-                        className="btn"
-                      style={{ fontSize: 11, padding: "4px 8px" }}
-                        pending={remove.isPending}
-                        onConfirm={() => handleDelete(m.id)}
-                        warning={t("catalog.models.delete_confirm", { name: m.name })}
-                      />
+                    <div className="actions cat-ml-auto-row">
+                      <button className="btn cat-chip-btn" onClick={() => { setEditing(m.id); clearError(); }}>{t("catalog.models.edit")}</button>
+                      <button className="btn cat-chip-btn" onClick={() => { setRemoving(m.id); clearError(); }}>{t("common:removal.open_model")}</button>
                     </div>
                   )}
                 </div>
@@ -1329,12 +1359,13 @@ function ModelsSection({ canAdmin }: { canAdmin: boolean }) {
             );
           })}
           {canAdmin && (
-            <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); }}>
+            <button className="btn cat-mt3" onClick={() => { setEditing("new"); clearError(); }}>
               {t("catalog.models.new_button")}
             </button>
           )}
         </>
       )}
+      {removing !== null && <RemovalDialog kind="model" id={removing} onClose={() => setRemoving(null)} />}
     </>
   );
 }
@@ -1378,6 +1409,12 @@ function ModelForm({
   // for how a config's own modalities narrow this default.
 	const [hasVision, setHasVision] = useState(existing?.modalities.includes("vision") ?? false);
 	const [hasAudio, setHasAudio] = useState(existing?.modalities.includes("audio") ?? false);
+	// ADR-0021: outputs. "text" is a real toggle (decision-only models produce no text);
+	// "audio" means the model speaks. Empty is not allowed — the server treats it as ["text"].
+	const [outText, setOutText] = useState(existing ? existing.output_modalities.includes("text") : true);
+	const [outSpeech, setOutSpeech] = useState(existing?.output_modalities.includes("audio") ?? false);
+	const [outDecisions, setOutDecisions] = useState(existing?.output_modalities.includes("decisions") ?? false);
+	const outCount = [outText, outSpeech, outDecisions].filter(Boolean).length;
 	const [visibility, setVisibility] = useState(existing?.visibility ?? "visible");
 
   function submit() {
@@ -1394,6 +1431,7 @@ function ModelForm({
         hf_repo: hfRepo,
         key_features: keyFeaturesText.split("\n").map((s) => s.trim()).filter((s) => s.length > 0),
 			modalities: ["text", ...(hasVision ? ["vision"] : []), ...(hasAudio ? ["audio"] : [])],
+			output_modalities: [...(outText ? ["text"] : []), ...(outSpeech ? ["audio"] : []), ...(outDecisions ? ["decisions"] : [])],
 			visibility,
         // Carried through unchanged — UpdateModel is full-replace, and icon
         // changes go through the immediate onIconSelect/Upload/Clear
@@ -1408,7 +1446,7 @@ function ModelForm({
   }
 
   return (
-    <div className="form-grid" style={{ marginTop: 4 }}>
+    <div className="form-grid cat-mt1">
       <label className="form-row">{t("catalog.model_form.name_label")}
         <input value={name} placeholder="Qwen3-Coder-Next" onChange={(e) => setName(e.target.value)} />
       </label>
@@ -1424,8 +1462,8 @@ function ModelForm({
       <label className="form-row">{t("catalog.model_form.param_count_label")}
         <input value={parameterCount} placeholder="31B" onChange={(e) => setParameterCount(e.target.value)} />
       </label>
-      <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("catalog.model_form.description_label")}
-        <textarea value={description} rows={2} style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "8px 10px", fontSize: 13, resize: "vertical" }} onChange={(e) => setDescription(e.target.value)} />
+      <label className="form-row cat-span">{t("catalog.model_form.description_label")}
+        <textarea value={description} rows={2} onChange={(e) => setDescription(e.target.value)} />
       </label>
       <label className="form-row">{t("catalog.model_form.creator_label")}
         <input value={creator} placeholder="Qwen" onChange={(e) => setCreator(e.target.value)} />
@@ -1439,20 +1477,37 @@ function ModelForm({
       <label className="form-row">{t("catalog.model_form.license_url_label")}
         <input value={licenseUrl} placeholder="https://…" onChange={(e) => setLicenseUrl(e.target.value)} />
       </label>
-      <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("catalog.model_form.key_features_label")}
-        <textarea value={keyFeaturesText} rows={2} style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "8px 10px", fontSize: 12, resize: "vertical" }} onChange={(e) => setKeyFeaturesText(e.target.value)} />
+      <label className="form-row cat-span">{t("catalog.model_form.key_features_label")}
+        <textarea value={keyFeaturesText} rows={2} onChange={(e) => setKeyFeaturesText(e.target.value)} />
       </label>
-	<div className="form-row" style={{ gridColumn: "1 / -1" }}>
+	<div className="form-row cat-span">
 		{t("catalog.model_form.modalities_label")}
 		<div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-			<span className="chip" style={{ opacity: 0.6 }}>{t("catalog.model_form.text_always")}</span>
-			<label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+			<span className="chip cat-dim60">{t("catalog.model_form.text_always")}</span>
+			<label className="cat-inline-row">
 				<input type="checkbox" checked={hasVision} onChange={(e) => setHasVision(e.target.checked)} />
 				{t("catalog.model_form.vision")}
 			</label>
-			<label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+			<label className="cat-inline-row">
 				<input type="checkbox" checked={hasAudio} onChange={(e) => setHasAudio(e.target.checked)} />
 				{t("catalog.model_form.audio")}
+			</label>
+		</div>
+	</div>
+	<div className="form-row cat-span">
+		{t("catalog.model_form.outputs_label")}
+		<div className="cat-wrap-row">
+			<label className="cat-inline-row">
+				<input type="checkbox" checked={outText} disabled={outText && outCount === 1} onChange={(e) => setOutText(e.target.checked)} />
+				{t("catalog.model_form.output_text")}
+			</label>
+			<label className="cat-inline-row">
+				<input type="checkbox" checked={outSpeech} disabled={outSpeech && outCount === 1} onChange={(e) => setOutSpeech(e.target.checked)} />
+				{t("catalog.model_form.output_speech")}
+			</label>
+			<label className="cat-inline-row">
+				<input type="checkbox" checked={outDecisions} disabled={outDecisions && outCount === 1} onChange={(e) => setOutDecisions(e.target.checked)} />
+				{t("catalog.model_form.output_decisions")}
 			</label>
 		</div>
 	</div>
@@ -1463,7 +1518,7 @@ function ModelForm({
 		</select>
 	</label>
 	{existing && (
-        <div className="form-row" style={{ gridColumn: "1 / -1" }}>
+        <div className="form-row cat-span">
           {t("catalog.model_form.icon_label")}
           <IconPicker
             value={existing.logo}
@@ -1475,7 +1530,7 @@ function ModelForm({
           />
         </div>
       )}
-      <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
+      <div className="form-actions cat-span">
         <button className="btn" onClick={onCancel}>{t("catalog.model_form.cancel")}</button>
         <SaveButton pending={pending} isError={isError} disabled={pending || !name} onClick={submit} label={existing ? undefined : t("common:save_button.create")} />
       </div>
@@ -1566,10 +1621,10 @@ function VariantsSubList({
                   const f = formats.find((f) => f.id === a.format_id);
                   return (
                     <div key={a.id} style={{ display: "flex", gap: 6, fontFamily: "var(--mono)", fontSize: 10.5, padding: "2px 0" }}>
-                      <span style={{ color: "var(--text-mute)" }}>{a.artifact_type}:</span>
-                      <span style={{ flex: 1, color: "var(--text-dim)" }}>{a.file_path}</span>
-                      {q && <span className="chip" style={{ fontSize: 9.5 }}>{q.name}</span>}
-                      {f && <span className="chip" style={{ fontSize: 9.5 }}>{f.name}</span>}
+                      <span className="cat-mute">{a.artifact_type}:</span>
+                      <span className="cat-flex-dim">{a.file_path}</span>
+                      {q && <span className="chip cat-note-2xs">{q.name}</span>}
+                      {f && <span className="chip cat-note-2xs">{f.name}</span>}
                       {a.missing && <span style={{ color: "var(--crit)" }}>{t("catalog.variants.missing_label")}</span>}
                     </div>
                   );
@@ -1598,14 +1653,14 @@ function VariantsSubList({
           <label className="form-row">{t("catalog.variants.trained_ctx_label")}
             <input type="number" min={0} value={trainedCtx} placeholder="131072" onChange={(e) => setTrainedCtx(Number(e.target.value))} />
           </label>
-          <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <label className="form-row cat-hrow">
             <input type="checkbox" checked={isAbliterated} onChange={(e) => setIsAbliterated(e.target.checked)} />
             {t("catalog.variants.abliterated_checkbox")}
           </label>
           <label className="form-row">{t("catalog.variants.abliteration_quality_label")}
             <input value={abliterationQuality} placeholder={t("catalog.variants.abliteration_quality_placeholder")} onChange={(e) => setAbliterationQuality(e.target.value)} />
           </label>
-          <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
+          <div className="form-actions cat-span">
             <button className="btn" onClick={() => { setCreating(false); clearError(); }}>{t("catalog.variants.cancel")}</button>
             <button className="btn primary" disabled={createVar.isPending || !varName} onClick={submitVariant}>{t("catalog.variants.create")}</button>
           </div>
@@ -1669,10 +1724,10 @@ function NotesSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+      {error && <div className="error-note cat-mb3">{error}</div>}
 
       {creating && (
-        <div className="form-grid" style={{ marginTop: 4 }}>
+        <div className="form-grid cat-mt1">
           <label className="form-row">{t("catalog.notes.subject_type_label")}
             <select value={subjectType} onChange={(e) => { setSubjectType(e.target.value); setSubjectId(0); }}>
               <option value="model">model</option>
@@ -1689,10 +1744,10 @@ function NotesSection({ canAdmin }: { canAdmin: boolean }) {
           <label className="form-row">{t("catalog.notes.author_label")}
             <input value={author} placeholder={t("catalog.notes.author_placeholder")} onChange={(e) => setAuthor(e.target.value)} />
           </label>
-          <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("catalog.notes.body_label")}
-            <textarea value={body} rows={3} style={{ background: "var(--bg-2)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", padding: "8px 10px", fontSize: 12, resize: "vertical" }} onChange={(e) => setBody(e.target.value)} />
+          <label className="form-row cat-span">{t("catalog.notes.body_label")}
+            <textarea value={body} rows={3} onChange={(e) => setBody(e.target.value)} />
           </label>
-          <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
+          <div className="form-actions cat-span">
             <button className="btn" onClick={() => { setCreating(false); clearError(); }}>{t("catalog.notes.cancel")}</button>
             <button className="btn primary" disabled={create.isPending || !subjectId || !author || !body} onClick={submit}>{t("catalog.notes.create")}</button>
           </div>
@@ -1701,9 +1756,9 @@ function NotesSection({ canAdmin }: { canAdmin: boolean }) {
 
       {!creating && (
         <>
-          <div className="qrow" style={{ color: "var(--text-mute)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em" }}>
-            <span style={{ width: 100 }}>{t("catalog.notes.col_subject")}</span>
-            <span style={{ width: 100 }}>{t("catalog.notes.col_author")}</span>
+          <div className="qrow cat-mini-eyebrow">
+            <span className="cat-w100">{t("catalog.notes.col_subject")}</span>
+            <span className="cat-w100">{t("catalog.notes.col_author")}</span>
             <span>{t("catalog.notes.col_body")}</span>
           </div>
           {list.length === 0 && <div className="empty-note">{t("catalog.notes.empty")}</div>}
@@ -1729,7 +1784,7 @@ function NotesSection({ canAdmin }: { canAdmin: boolean }) {
             );
           })}
           {canAdmin && (
-            <button className="btn" style={{ marginTop: 14 }} onClick={() => { setCreating(true); clearError(); }}>{t("catalog.notes.add_button")}</button>
+            <button className="btn cat-mt3" onClick={() => { setCreating(true); clearError(); }}>{t("catalog.notes.add_button")}</button>
           )}
         </>
       )}
@@ -1778,7 +1833,7 @@ function ServicesSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+      {error && <div className="error-note cat-mb3">{error}</div>}
 
       {editing !== null ? (
         <ServiceForm
@@ -1791,28 +1846,27 @@ function ServicesSection({ canAdmin }: { canAdmin: boolean }) {
         />
       ) : (
         <>
-          <div className="qrow" style={{ color: "var(--text-mute)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em" }}>
-            <span style={{ width: 120 }}>{t("catalog.services.col_name")}</span>
-            <span style={{ width: 120 }}>{t("catalog.services.col_label")}</span>
-            <span style={{ width: 60 }}>{t("catalog.services.col_unit")}</span>
+          <div className="qrow cat-mini-eyebrow">
+            <span className="cat-w120">{t("catalog.services.col_name")}</span>
+            <span className="cat-w120">{t("catalog.services.col_label")}</span>
+            <span className="cat-w60">{t("catalog.services.col_unit")}</span>
             <span>{t("catalog.services.col_description")}</span>
           </div>
           {list.length === 0 && <div className="empty-note">{t("catalog.services.empty")}</div>}
           {list.map((s) => (
-            <div className="qrow" key={s.id} style={{ alignItems: "flex-start" }}>
+            <div className="qrow cat-align-start" key={s.id}>
               <span style={{ width: 120, fontFamily: "var(--mono)", fontSize: 12 }}>
                 {s.icon && <span style={{ marginRight: 4 }}>{s.icon}</span>}
                 {s.name}
               </span>
               <span style={{ width: 120, fontSize: 12, fontWeight: 600 }}>{s.label}</span>
               <span style={{ width: 60, fontSize: 11, color: "var(--text-dim)" }}>{s.unit || "—"}</span>
-              <span style={{ fontSize: 11, color: "var(--text-dim)", flex: 1 }}>{s.description || "—"}</span>
+              <span className="cat-xs-dim-flex">{s.description || "—"}</span>
               {canAdmin && (
-                <div className="actions" style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                  <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(s.id); clearError(); }}>{t("catalog.services.edit")}</button>
+                <div className="actions cat-ml-auto-row">
+                  <button className="btn cat-chip-btn" onClick={() => { setEditing(s.id); clearError(); }}>{t("catalog.services.edit")}</button>
                   <ConfirmButton
-                    className="btn"
-                    style={{ fontSize: 11, padding: "4px 8px" }}
+                    className="btn cat-chip-btn"
                     pending={remove.isPending}
                     onConfirm={() => handleDelete(s.id)}
                     warning={t("catalog.services.delete_confirm", { name: s.name })}
@@ -1822,7 +1876,7 @@ function ServicesSection({ canAdmin }: { canAdmin: boolean }) {
             </div>
           ))}
           {canAdmin && (
-            <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); }}>
+            <button className="btn cat-mt3" onClick={() => { setEditing("new"); clearError(); }}>
               {t("catalog.services.new_button")}
             </button>
           )}
@@ -1862,14 +1916,14 @@ function ServiceForm({
   }
 
   return (
-    <div className="form-grid" style={{ marginTop: 4 }}>
+    <div className="form-grid cat-mt1">
       <label className="form-row">{t("catalog.services.name_label")}
         <input value={name} placeholder="comfyui" onChange={(e) => setName(e.target.value)} />
       </label>
       <label className="form-row">{t("catalog.services.label_label")}
         <input value={label} placeholder="ComfyUI" onChange={(e) => setLabel(e.target.value)} />
       </label>
-      <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("catalog.services.description_label")}
+      <label className="form-row cat-span">{t("catalog.services.description_label")}
         <input value={description} placeholder={t("catalog.services.description_placeholder")} onChange={(e) => setDescription(e.target.value)} />
       </label>
       <label className="form-row">{t("catalog.services.icon_label")}
@@ -1884,7 +1938,7 @@ function ServiceForm({
       <label className="form-row">{t("catalog.services.health_check_label")}
         <input value={healthCheck} placeholder="{}" onChange={(e) => setHealthCheck(e.target.value)} />
       </label>
-      <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
+      <div className="form-actions cat-span">
         <button className="btn" onClick={onCancel}>{t("catalog.services.cancel")}</button>
         <SaveButton pending={pending} isError={isError} disabled={pending || !name || !label} onClick={submit} label={existing ? undefined : t("common:save_button.create")} />
       </div>

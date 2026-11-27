@@ -195,25 +195,24 @@ pf_check_gtt() {
         return
     fi
     gb=$(( gtt / 1024 / 1024 / 1024 ))
-    if (( gb < 48 )); then
-        pf_fail "gtt" "${gb} GB — below 48 GB minimum; large-context loads will fail. Check amdgpu.gttsize kernel param and BIOS GART aperture"
-    elif (( gb < 96 )); then
-        pf_warn "gtt" "${gb} GB — below 96 GB recommended ceiling (~120 GB expected on Strix Halo)"
+    if (( gb < 32 )); then
+        pf_fail "gtt" "${gb} GB — below 32 GB; large-context loads will fail. Check amdgpu.gttsize kernel param and BIOS GART aperture"
+    elif (( gb < 48 )); then
+        pf_warn "gtt" "${gb} GB — below 48 GB; a 64 GB machine wants most of its memory in the GTT pool"
     else
         pf_pass "gtt" "${gb} GB"
     fi
 }
 
 pf_check_ram() {
-    local kb gb required=96
+    # 64 GB is the smallest supported machine; the kernel reports a little less than is fitted.
+    local kb gb
     kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
     gb=$(( kb / 1024 / 1024 ))
     if (( gb <= 0 )); then
         pf_fail "ram" "cannot read MemTotal from /proc/meminfo"
-    elif (( gb < 96 )); then
-        pf_fail "ram" "${gb} GB — below 96 GB minimum; 128 GB expected (unified-memory APU)"
-    elif (( gb < 128 )); then
-        pf_warn "ram" "${gb} GB — below 128 GB expected; largest models may not fit"
+    elif (( gb < 60 )); then
+        pf_fail "ram" "${gb} GB — below the 64 GB minimum"
     else
         pf_pass "ram" "${gb} GB"
     fi

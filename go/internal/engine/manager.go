@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -45,6 +46,10 @@ type Deps struct {
 	// to on-disk weight size.
 	WeightEstimateBytes func(configID int64) (int64, bool)
 
+	// CuratedFigures lists the tuple-bound curated memory figures recorded for a config (registry.CuratedMemory). The fit gate of an engine kind with
+	// Spec.NeedsCuratedMemory consults only this, never WeightEstimateBytes or the file size. Nil: no figures exist, so such a kind is always refused.
+	CuratedFigures func(configID int64) []CuratedFigure
+
 	// ProfileBytes is the profiled safe-memory footprint (PROFILE track,
 	// docs/v5-profiling-benchmarks.md). When a fresh profile exists this is
 	// the authoritative needBytes — consulted before WeightEstimateBytes /
@@ -62,6 +67,23 @@ type Deps struct {
 	// footprint (it rides in GTT like any other consumer — S1 of the ops
 	// sprint series made it an eviction candidate).
 	ComfyUIFootprintBytes func() int64
+
+	// SpecialistDeclaredBytes sums the declared peak footprint of every enabled, always-on specialist-pool member, running or not. It is the
+	// specialist share of the memory partition (internal/memledger). Nil: nothing is declared.
+	SpecialistDeclaredBytes func() int64
+
+	// ReservedBytes reports memory still owed to always-on specialist-pool members that are meant to be running but are not yet. It is
+	// subtracted from the free budget so an LLM load cannot starve a restarting specialist (ADR-0022). Nil = nothing is reserved.
+	ReservedBytes func() int64
+
+	// PooledConfig reports whether the named catalog config is hosted by the specialist pool. A pooled config is never loaded into an LLM slot:
+	// it has exactly one owner (ADR-0022). Nil = nothing is pooled.
+	PooledConfig func(ctx context.Context, config string) bool
+
+	// LogTail returns up to maxLines of a unit's most recent log output since the given time, or "" when
+	// unavailable. Optional: nil means failed loads carry no Detail. It is only called on a failed start,
+	// and the engine redacts and caps whatever it returns.
+	LogTail func(ctx context.Context, unit string, since time.Time, maxLines int) string
 
 	// Notify opens the post-switch hang-detection cooldown.
 	Notify SwitchNotifier
@@ -97,6 +119,22 @@ type Deps struct {
 	// skipped entirely rather than probing a slot for data nobody persists.
 	UpdateChatTemplateCaps func(ctx context.Context, configID int64, caps map[string]bool) error
 
+	// SlotLaunches is the slot_launches store (db.SlotLaunches()). Nil switches the row dual write, the disarm and the adopt step off.
+	SlotLaunches SlotLaunchStore
+
+	// SlotLaunchEnforce decides what a failure to build or write the slot_launches row does. false (shadow, the d1 default): the load goes ahead
+	// exactly as before, the failure is logged, counted, reported through OnSlotLaunchWarning and returned in Result.Detail, and the previous row is
+	// disarmed. true: the load fails. The production daemon sets true (cmd/forge slotLaunchWiring, Phase 1b step e5) because the slot shim launches from the row; false
+	// is the Deps zero value and is kept only for the shadow-mode tests.
+	SlotLaunchEnforce bool
+
+	// OnSlotLaunchWarning is called for each shadow-mode failure (slot, mode, text). main.go publishes it as a notification. Optional.
+	OnSlotLaunchWarning func(slot, mode, message string)
+
+	// Procs reads live process command lines for the adopt step. Default (when SlotLaunches is set): NewHostProc(""), which reports unavailable
+	// off Linux.
+	Procs ProcInspector
+
 	Now  func() time.Time
 	Logf func(format string, args ...any)
 }
@@ -111,9 +149,17 @@ type Manager struct {
 	// app.py "switching" flag, now engine-owned.
 	opMu sync.Mutex
 
-	// mu guards slots.
+	// disarmFailures collects slot_launches disarm errors during one operation; guarded by opMu (see disarmAfterStop).
+	disarmFailures []string
+
+	// launchWarnings counts shadow-mode slot launch failures.
+	launchWarnings atomic.Int64
+
+	// mu guards slots and freedAt.
 	mu    sync.Mutex
 	slots map[string]*slotRec
+	// freedAt is when each slot was last emptied (slot_order.go). In memory only: after a daemon restart every slot counts as rested.
+	freedAt map[string]time.Time
 
 	// metaMu guards metaCache, the KV-cache estimator's GGUF-header cache
 	// (kvcache.go). FitPlan is on the scheduler's hot decision path (polled
@@ -142,7 +188,7 @@ var _ Engine = (*Manager)(nil)
 var _ collector.SlotStateSource = (*Manager)(nil)
 
 // NewManager builds a Manager and reconciles initial slot state from
-// sysconfig env files + live unit states (restart recovery without any
+// slot launch rows + live unit states (restart recovery without any
 // slots.json — V5 design decision 3).
 func NewManager(d Deps) (*Manager, error) {
 	if d.Cfg == nil || d.Sys == nil {
@@ -175,7 +221,11 @@ func NewManager(d Deps) (*Manager, error) {
 	for name := range d.Cfg().Slots {
 		m.slots[name] = &slotRec{}
 	}
+	if d.SlotLaunches != nil && m.d.Procs == nil {
+		m.d.Procs = NewHostProc("")
+	}
 	m.reconcileLive(context.Background())
+	m.adoptRunningSlots(context.Background())
 	return m, nil
 }
 
@@ -341,7 +391,7 @@ func allIn(a, b map[string]bool) bool {
 // reconciliation (port of engine._reconcile_slot_state).
 //
 //   - A slot whose unit is ACTIVE but untracked gets its mode inferred from
-//     the sysconfig env file.
+//     the slot's armed launch row (config_name).
 //   - A tracked slot whose unit has left is cleared ONLY when the unit is
 //     genuinely gone (inactive/failed) — NEVER while "deactivating"
 //     (TimeoutStopSec=300: large models shut down for minutes; clearing
@@ -364,8 +414,11 @@ func (m *Manager) SlotStates(units map[string]collector.UnitState) map[string]co
 		switch {
 		case st.Active():
 			if rec.mode == "" {
-				if inferred := inferSlotMode(cfg, collector.ReadSlotEnv(cfg.Paths.SysconfigDir, name)); inferred != "" {
-					rec.mode = inferred
+				// Only an ARMED row describes a launch that may be running; a disarmed one is history.
+				if row, ok := m.slotRow(name); ok && row.Armed {
+					if inferred := modeFromRow(cfg, row); inferred != "" {
+						rec.mode = inferred
+					}
 				}
 			}
 		case rec.mode != "" && (st.ActiveState == "inactive" || st.ActiveState == "failed" || st.ActiveState == "dead"):
@@ -411,6 +464,19 @@ func (m *Manager) setSlotMode(slot, mode string) {
 	if rec, ok := m.slots[slot]; ok {
 		rec.mode = mode
 	}
+}
+
+// occupiedSlots names the slots the engine believes hold a model.
+func (m *Manager) occupiedSlots() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []string
+	for name, rec := range m.slots {
+		if rec.mode != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func (m *Manager) clearAllSlots() {

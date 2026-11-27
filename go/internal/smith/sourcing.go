@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/hf"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -210,6 +211,9 @@ func (s *Smith) Evaluate(ctx context.Context, repo string, budgetBytes int64) (S
 	if repo == "" {
 		return SourcingEvaluation{}, errors.New("smith: sourcing evaluate requires a non-empty hf_repo")
 	}
+	if !hf.ValidRepo(repo) {
+		return SourcingEvaluation{}, fmt.Errorf("%w: %q", hf.ErrInvalidRepo, repo)
+	}
 	if s.d.Web == nil {
 		return SourcingEvaluation{}, errors.New("smith: web research not wired")
 	}
@@ -359,10 +363,16 @@ func downloadSteps(repo, filename string) []RunbookStep {
 	return []RunbookStep{
 		{
 			Title:         "Download the model file",
-			Command:       fmt.Sprintf("cd /opt/forge/models && hf download %s %s --local-dir .", repo, filename),
+			Command:       fmt.Sprintf("cd /opt/forge/models && hf download %s %s --local-dir .", shellQuote(repo), shellQuote(filename)),
 			Why:           "smith only evaluates candidates against the memory budget — the download itself can be tens of GB and stays behind an operator's own bandwidth/disk judgment (§4.9)",
 			Verify:        "the file appears in the models directory at the expected size",
-			VerifyCommand: fmt.Sprintf("ls -lh /opt/forge/models/%s", filename),
+			VerifyCommand: "ls -lh " + shellQuote("/opt/forge/models/"+filename),
 		},
 	}
+}
+
+// shellQuote wraps s in single quotes for a POSIX shell, so a repo or file name (the latter comes from HuggingFace's tree API) can never
+// be read as a command, expansion, redirection or extra argument by the operator who pastes the runbook step.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

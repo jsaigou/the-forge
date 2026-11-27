@@ -62,7 +62,7 @@ func (s *Server) handleMaintenanceEnter(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeErrorCode(w, http.StatusInternalServerError, "maintenance_failed", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	s.audit(r, actor, "maintenance_enter", st.LeaseID, b.Reason)
@@ -81,11 +81,11 @@ func (s *Server) handleMaintenanceExit(w http.ResponseWriter, r *http.Request) {
 	actor := identity(r).Name
 	prev, err := s.deps.Maintenance.Exit("", true)
 	if err == maintenance.ErrNotActive {
-		writeError(w, http.StatusConflict, "no maintenance window is active")
+		writeErrorCode(w, http.StatusConflict, "no_maintenance_window", nil, "no maintenance window is active")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeErrorCode(w, http.StatusInternalServerError, "maintenance_failed", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	s.audit(r, actor, "maintenance_exit", prev.LeaseID, "")

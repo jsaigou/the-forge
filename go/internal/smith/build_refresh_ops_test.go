@@ -250,7 +250,7 @@ func seedBuildRefreshCatalog(t *testing.T, db *store.DB, sourceRef string) (oldB
 
 func TestBuildsForSourceTree_ExactTreeOnlyNoPrefixLeak(t *testing.T) {
 	db := openDB(t)
-	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), Logf: func(string, ...any) {}})
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), ConfigBuilds: store.ConfigWrites{Cat: db.Catalog()}, Builds: store.BuildWrites{Cat: db.Catalog()}, Logf: func(string, ...any) {}})
 	root := "/opt/forge/llama.cpp"
 	seedBuildRefreshCatalog(t, db, root)
 
@@ -265,7 +265,7 @@ func TestBuildsForSourceTree_ExactTreeOnlyNoPrefixLeak(t *testing.T) {
 
 func TestFindCandidateBuildID_DistinguishesCandidateFromOld(t *testing.T) {
 	db := openDB(t)
-	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), Logf: func(string, ...any) {}})
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), ConfigBuilds: store.ConfigWrites{Cat: db.Catalog()}, Builds: store.BuildWrites{Cat: db.Catalog()}, Logf: func(string, ...any) {}})
 	root := "/opt/forge/llama.cpp-puzzle"
 	_, candidate := seedBuildRefreshCatalog(t, db, root)
 
@@ -299,7 +299,7 @@ func TestConfigsForBuild_OnlyMatchingBuildID(t *testing.T) {
 		t.Fatalf("UpdateConfig: %v", err)
 	}
 
-	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: cat, Logf: func(string, ...any) {}})
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: cat, ConfigBuilds: store.ConfigWrites{Cat: cat}, Builds: store.BuildWrites{Cat: cat}, Logf: func(string, ...any) {}})
 	got, err := s.configsForBuild(ctx, buildA)
 	if err != nil {
 		t.Fatalf("configsForBuild: %v", err)
@@ -420,7 +420,7 @@ func TestOpBuildCatalogPromote_RevertsAllOnPartialFailure(t *testing.T) {
 		art, _ := cat.CreateArtifact(ctx, store.Artifact{VariantID: v, FormatID: gguf.ID, ArtifactType: "weight", FilePath: name + ".gguf", FileSizeBytes: 1})
 		if _, err := cat.CreateConfig(ctx, store.Config{
 			Name: name, VariantID: v, WeightArtifactID: art, EngineID: eng.ID, BuildID: oldID,
-			NCtx: 4096, Parallel: 1, Status: "unverified", Visibility: "visible",
+			NCtx: 4096, Status: "unverified", Visibility: "visible",
 		}); err != nil {
 			t.Fatalf("CreateConfig %s: %v", name, err)
 		}
@@ -433,7 +433,7 @@ func TestOpBuildCatalogPromote_RevertsAllOnPartialFailure(t *testing.T) {
 	}))
 	placer := &stubPlacer{unloadResult: &engine.Result{Success: false, Message: "stub unload failure"}}
 	sched := newStubSched(map[string]string{"a2": "configB"}) // only configB is resident
-	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: cat, Placer: placer, Sched: sched, Logf: func(string, ...any) {}})
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: cat, ConfigBuilds: store.ConfigWrites{Cat: cat}, Builds: store.BuildWrites{Cat: cat}, Placer: placer, Sched: sched, Logf: func(string, ...any) {}})
 
 	res, err := s.opBuildCatalogPromote(ctx, map[string]string{"binary": "promote-test"})
 	if err == nil {
@@ -488,7 +488,7 @@ func TestOpBuildCatalogPromote_NilPlacerFailsClosed(t *testing.T) {
 	setSetting(t, db, SettingBinariesTracked, mustBinariesJSON(t, TrackedBinary{
 		Name: "nil-placer-test", Path: mustExecutable(t), SourceKind: "git", SourceRef: root, UpstreamRef: "origin/master",
 	}))
-	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), Logf: func(string, ...any) {}}) // no Placer wired
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), ConfigBuilds: store.ConfigWrites{Cat: db.Catalog()}, Builds: store.BuildWrites{Cat: db.Catalog()}, Logf: func(string, ...any) {}}) // no Placer wired
 
 	_, err := s.opBuildCatalogPromote(context.Background(), map[string]string{"binary": "nil-placer-test"})
 	if !errors.Is(err, ErrPlacerUnwired) {
@@ -670,7 +670,7 @@ func TestFindOrCreateCandidateBuild_AdoptsRowFromInterruptedRun(t *testing.T) {
 	db := openDB(t)
 	root := "/opt/forge/llama.cpp"
 	oldBuild, candidate := seedBuildRefreshCatalog(t, db, root)
-	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), Logf: func(string, ...any) {}})
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), ConfigBuilds: store.ConfigWrites{Cat: db.Catalog()}, Builds: store.BuildWrites{Cat: db.Catalog()}, Logf: func(string, ...any) {}})
 
 	newBin := filepath.Join(root, buildRefreshDirName("rocm"), "bin", "llama-server")
 	id, adopted, err := s.findOrCreateCandidateBuild(context.Background(), oldBuild, newBin)
@@ -708,7 +708,7 @@ func TestLoadConfigViaPlacer_UnloadsResidentBeforeLoading(t *testing.T) {
 	db := openDB(t)
 	placer := &stubPlacer{plan: engine.Plan{Fits: true, Slot: "a2"}}
 	sched := newStubSched(map[string]string{"a1": "canary-config"})
-	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), Placer: placer, Sched: sched, Logf: func(string, ...any) {}})
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), ConfigBuilds: store.ConfigWrites{Cat: db.Catalog()}, Builds: store.BuildWrites{Cat: db.Catalog()}, Placer: placer, Sched: sched, Logf: func(string, ...any) {}})
 
 	slot, err := s.loadConfigViaPlacer(context.Background(), "canary-config")
 	if err != nil {
@@ -736,7 +736,7 @@ func TestLoadConfigViaPlacer_ResidentUnloadFailureFailsClosed(t *testing.T) {
 		unloadResult: &engine.Result{Success: false, Message: "stub unload failure"},
 	}
 	sched := newStubSched(map[string]string{"a1": "canary-config"})
-	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), Placer: placer, Sched: sched, Logf: func(string, ...any) {}})
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), ConfigBuilds: store.ConfigWrites{Cat: db.Catalog()}, Builds: store.BuildWrites{Cat: db.Catalog()}, Placer: placer, Sched: sched, Logf: func(string, ...any) {}})
 
 	if _, err := s.loadConfigViaPlacer(context.Background(), "canary-config"); err == nil {
 		t.Fatal("expected an error when the resident unload fails")
@@ -780,7 +780,7 @@ func TestPromoteRepointPlan_NamesEveryConfigThePromoteWillTouch(t *testing.T) {
 		art, _ := cat.CreateArtifact(ctx, store.Artifact{VariantID: v, FormatID: gguf.ID, ArtifactType: "weight", FilePath: name + ".gguf", FileSizeBytes: 1})
 		if _, err := cat.CreateConfig(ctx, store.Config{
 			Name: name, VariantID: v, WeightArtifactID: art, EngineID: eng.ID, BuildID: oldID,
-			NCtx: 4096, Parallel: 1, Status: "unverified", Visibility: "visible",
+			NCtx: 4096, Status: "unverified", Visibility: "visible",
 		}); err != nil {
 			t.Fatalf("CreateConfig %s: %v", name, err)
 		}
@@ -794,7 +794,7 @@ func TestPromoteRepointPlan_NamesEveryConfigThePromoteWillTouch(t *testing.T) {
 		SourceRef: root, Remote: "origin", UpstreamRef: "origin/master",
 		Backends: map[string]buildBackendFlags{"rocm": {Backend: "rocm"}},
 	}
-	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: cat, Logf: func(string, ...any) {}})
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: cat, ConfigBuilds: store.ConfigWrites{Cat: cat}, Builds: store.BuildWrites{Cat: cat}, Logf: func(string, ...any) {}})
 
 	note, err := s.promoteRepointPlan(ctx, fork, []store.Build{old, cand})
 	if err != nil {
@@ -807,5 +807,114 @@ func TestPromoteRepointPlan_NamesEveryConfigThePromoteWillTouch(t *testing.T) {
 	}
 	if strings.Contains(note, "no configs to repoint") {
 		t.Errorf("note = %q, must not claim there is nothing to repoint when two configs sit on the old build", note)
+	}
+}
+
+// ADR-0020 F8: a candidate the shared build-binary guard rejects is never registered, so smith cannot put a row in the
+// catalog that the builds API would have refused. With no guard wired (as in every other test) nothing is checked.
+func TestFindOrCreateCandidateBuild_RefusesWhatTheSharedGuardRejects(t *testing.T) {
+	db := openDB(t)
+	root := "/opt/forge/llama.cpp"
+	oldBuild, _ := seedBuildRefreshCatalog(t, db, root)
+	before, _ := db.Catalog().ListBuilds(context.Background())
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: db.Catalog(), ConfigBuilds: store.ConfigWrites{Cat: db.Catalog()}, Builds: store.BuildWrites{Cat: db.Catalog()}, Logf: func(string, ...any) {},
+		CheckBuildBinary: func(_ context.Context, path string) string { return "is not executable" }})
+
+	other := store.Build{EngineID: oldBuild.EngineID, Name: "other-build", Backend: "rocm"}
+	_, _, err := s.findOrCreateCandidateBuild(context.Background(), other, filepath.Join(root, "build-smith-other", "bin", "llama-server"))
+	if err == nil || !strings.Contains(err.Error(), "is not executable") {
+		t.Fatalf("err = %v, want a refusal carrying the guard's reason", err)
+	}
+	after, _ := db.Catalog().ListBuilds(context.Background())
+	if len(after) != len(before) {
+		t.Errorf("a refused candidate still created a row: %d -> %d builds", len(before), len(after))
+	}
+}
+
+// A build refresh holds its Config copy for minutes. Repointing must change only the Build: writing that copy back would silently undo an edit the
+// operator made to the Config in the meantime (and the revert path would do the same).
+func TestSetConfigBuild_KeepsAnEditMadeAfterTheConfigWasRead(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+	cat := db.Catalog()
+	seedBrainCatalog(t, db)
+	eng, _ := cat.EngineByName(ctx, "llama.cpp")
+	buildA, _ := cat.CreateBuild(ctx, store.Build{EngineID: eng.ID, Name: "a", BinaryPath: "/x/a/bin/llama-server", Backend: "rocm"})
+	buildB, _ := cat.CreateBuild(ctx, store.Build{EngineID: eng.ID, Name: "b", BinaryPath: "/x/b/bin/llama-server", Backend: "rocm"})
+	held, err := cat.ConfigByName(ctx, "ornith-35b") // what the refresh read at the start
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ...and the operator edits the Config while the refresh benchmarks its candidate.
+	edited := held
+	edited.NCtx, edited.Visibility = 131072, "hidden"
+	if err := cat.UpdateConfig(ctx, edited); err != nil {
+		t.Fatal(err)
+	}
+
+	changed := 0
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: cat,
+		ConfigBuilds: store.ConfigWrites{Cat: cat, Changed: func() { changed++ }}, Logf: func(string, ...any) {}})
+	for _, target := range []int64{buildA, buildB} { // promote, then revert
+		if err := s.setConfigBuild(ctx, held.ID, target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := cat.ConfigByName(ctx, "ornith-35b")
+	if got.BuildID != buildB || got.NCtx != 131072 || got.Visibility != "hidden" {
+		t.Errorf("config = build %d, n_ctx %d, visibility %q: the repoint must keep the operator's edit", got.BuildID, got.NCtx, got.Visibility)
+	}
+	if changed != 2 {
+		t.Errorf("the config caches were cleared %d times, want once per repoint", changed)
+	}
+}
+
+func TestSetConfigBuild_RefusesWhenUnwired(t *testing.T) {
+	s := New(Deps{Logf: func(string, ...any) {}})
+	if err := s.setConfigBuild(context.Background(), 1, 2); !errors.Is(err, ErrConfigBuildsUnwired) {
+		t.Errorf("err = %v, want ErrConfigBuildsUnwired", err)
+	}
+}
+
+// Retiring a cleaned-up build goes through the catalog's retire write: it keeps the row's other fields, refuses while a Config still runs on the
+// build (the old code only logged a warning, after the directory was already removed), and clears the config caches.
+func TestRetireBuild_GuardsAndAnnouncesTheChange(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+	cat := db.Catalog()
+	seedBrainCatalog(t, db)
+	eng, _ := cat.EngineByName(ctx, "llama.cpp")
+	buildID, _ := cat.CreateBuild(ctx, store.Build{EngineID: eng.ID, Name: "old-rocm", BinaryPath: "/x/old/bin/llama-server", Backend: "rocm", Reason: "first"})
+	changed := 0
+	s := New(Deps{Store: db, Settings: db.Settings(), Catalog: cat,
+		Builds: store.BuildWrites{Cat: cat, Changed: func() { changed++ }}, Logf: func(string, ...any) {}})
+
+	cfg, err := cat.ConfigByName(ctx, "ornith-35b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.BuildID = buildID
+	if err := cat.UpdateConfig(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	var inUse *store.BuildInUseError
+	if err := s.retireBuild(ctx, buildID, " — retired"); !errors.As(err, &inUse) {
+		t.Fatalf("retire while a config runs on it: %v", err)
+	}
+	if b, _ := cat.GetBuild(ctx, buildID); b.Retired || changed != 0 {
+		t.Fatal("a refused retire changed the build or announced a change")
+	}
+
+	other, _ := cat.CreateBuild(ctx, store.Build{EngineID: eng.ID, Name: "new-rocm", BinaryPath: "/x/new/bin/llama-server", Backend: "rocm"})
+	cfg.BuildID = other
+	if err := cat.UpdateConfig(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.retireBuild(ctx, buildID, " — retired"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := cat.GetBuild(ctx, buildID)
+	if !got.Retired || got.BinaryPath != "" || got.Reason != "first — retired" || got.Name != "old-rocm" || got.Backend != "rocm" || changed != 1 {
+		t.Errorf("retired build = %+v, changed=%d", got, changed)
 	}
 }

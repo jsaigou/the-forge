@@ -44,6 +44,7 @@ export function CopyButton({
       type="button"
       className={`icon-btn copy-btn ${sm ? "sm" : ""} ${copied ? "copied" : ""}`.trim()}
       title={copied ? "Copied!" : title}
+      aria-label={copied ? "Copied!" : title}
       onClick={onClick}
     >
       <span className="copy-glyph" aria-hidden="true">{copied ? "✓" : "⧉"}</span>

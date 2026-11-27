@@ -366,6 +366,21 @@ func TestBillingSettingsPutFxFields(t *testing.T) {
 	}
 }
 
+// The daemon fetches fx_source_url itself, so a private, loopback, credentialed or non-http target is refused at save time and nothing is persisted.
+func TestBillingSettingsPutRejectsNonPublicFxSource(t *testing.T) {
+	for _, u := range []string{"http://169.254.169.254/latest", "http://127.0.0.1:8095/v1", "http://100.64.0.9/", "https://user:pw@fxhost/", "ftp://fx.example.com/", "file:///etc/passwd"} {
+		s, _, fs := newSettingsTestServer(t)
+		body := strings.NewReader(`{"display_currency":"USD","fx_source_url":"` + u + `"}`)
+		w := do(t, s, authedRequest("PUT", "/api/v1/billing/settings", body))
+		if w.Code != 422 || !strings.Contains(w.Body.String(), "invalid_url") {
+			t.Errorf("PUT fx_source_url=%q = %d, want 422 invalid_url: %s", u, w.Code, w.Body.String())
+		}
+		if _, err := fs.Get(context.Background(), SettingBillingFxSourceURL); err == nil {
+			t.Errorf("fx_source_url=%q was persisted despite the rejection", u)
+		}
+	}
+}
+
 // ── Provider CRUD tests ──────────────────────────────────────────────────────
 
 func TestProviderCreate(t *testing.T) {
@@ -855,5 +870,25 @@ func TestCompressorPassthroughProxyUnknownService(t *testing.T) {
 		strings.NewReader(`{"scope":"proxy","service":"nonexistent","enabled":true}`)))
 	if w.Code != 404 {
 		t.Fatalf("PUT passthrough for unknown service = %d, want 404", w.Code)
+	}
+}
+
+// Service links render as <a href>; a javascript:, data: or file: link must never be stored.
+func TestServiceLinksPutRefusesNonHTTPSchemes(t *testing.T) {
+	for _, link := range []string{"javascript://x/%0aalert(1)", "JAVASCRIPT://host/x", "data://host/x", "file://host/etc/passwd", "ftp://host/x"} {
+		s, _, fs := newSettingsTestServer(t)
+		body := strings.NewReader(`{"links":{"a0":"` + link + `"}}`)
+		w := do(t, s, authedRequest("PUT", "/api/v1/service-links", body))
+		if w.Code != 422 {
+			t.Errorf("link %q = %d, want 422: %s", link, w.Code, w.Body.String())
+		}
+		if _, err := fs.Get(context.Background(), "infra.service_links"); err == nil {
+			t.Errorf("link %q was persisted", link)
+		}
+	}
+	s, _, _ := newSettingsTestServer(t)
+	w := do(t, s, authedRequest("PUT", "/api/v1/service-links", strings.NewReader(`{"links":{"a0":"https://ops.example.ts.net/a0","x":"http://100.64.0.1:5000"}}`)))
+	if w.Code != 200 {
+		t.Errorf("valid http(s) links = %d, want 200: %s", w.Code, w.Body.String())
 	}
 }

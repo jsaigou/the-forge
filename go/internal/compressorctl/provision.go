@@ -101,7 +101,28 @@ func (p *Provisioner) UnitName(service string) string { return p.templatePrefix(
 // rewriting it — Reconcile refuses on anything else rather than silently
 // restarting a unit without actually changing what it points at.
 func (p *Provisioner) isTemplateUnit(unit string) bool {
-	return strings.HasPrefix(unit, p.templatePrefix())
+	// The instance becomes a file name under EnvDir (Teardown removes it), so it must be a plain name: "forge-compress@../../x" is not an instance.
+	inst := p.instanceOf(unit)
+	return strings.HasPrefix(unit, p.templatePrefix()) && instanceRE.MatchString(inst) && !strings.Contains(inst, "..")
+}
+
+// instanceRE is the instance names this package will turn into a file name: no separators, no leading dot, no "..", no whitespace or control characters.
+// A dot is allowed after the first character (a service such as "deepseek-v3.2"), ".." never is, and a separator or leading dot never is.
+var instanceRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
+// envValueOK reports whether v can sit on the right of KEY=v in an EnvironmentFile line without ending the line or being re-read as quoting
+// or a continuation: no control characters (newline included), no quotes, no backslash, no leading or trailing space. Internal spaces are
+// kept verbatim by systemd, and the shared "external" proxy's placeholder target ("dynamic (per-request via x-compress-base-url)") has some.
+func envValueOK(v string) bool {
+	if v != strings.TrimSpace(v) {
+		return false
+	}
+	for _, r := range v {
+		if r < ' ' || r == 0x7f || r == '"' || r == '\'' || r == '\\' {
+			return false
+		}
+	}
+	return true
 }
 
 // instanceOf returns the %i instance name systemd substitutes into
@@ -161,6 +182,9 @@ func (p *Provisioner) writeEnv(row store.ProxyRow) error {
 	}
 	if err := os.MkdirAll(p.EnvDir, 0o700); err != nil {
 		return fmt.Errorf("compressorctl: env dir: %w", err)
+	}
+	if !envValueOK(row.TargetURL) || !envValueOK(row.Token) {
+		return fmt.Errorf("compressorctl: proxy %q: target URL or token contains a character that is not allowed in an environment file", row.Service)
 	}
 	budgetMS := row.FailOpenBudgetMS
 	if budgetMS <= 0 {

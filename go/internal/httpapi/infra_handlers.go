@@ -490,9 +490,10 @@ func (s *Server) handleServiceLinksPut(w http.ResponseWriter, r *http.Request) {
 		if link == "" {
 			continue // clears the override for this service
 		}
+		// Links render as <a href> in the dashboard: only http(s) may be stored, never javascript:, data: or file:.
 		u, err := url.Parse(link)
-		if err != nil || u.Scheme == "" || u.Host == "" {
-			writeValidationError(w, map[string]string{"links": fmt.Sprintf("%q is not a valid absolute URL", link)})
+		if err != nil || (!strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https")) || u.Host == "" {
+			writeValidationError(w, map[string]string{"links": fmt.Sprintf("%q is not a valid absolute http(s) URL", link)})
 			return
 		}
 		cleaned[name] = link

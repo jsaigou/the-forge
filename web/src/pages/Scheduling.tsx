@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ConfirmButton } from "../components/ConfirmButton";
 import { ReservationModal } from "../components/ReservationModal";
 import { SchedulerJobs } from "../components/SchedulerJobs";
 import { SchedulerTunables } from "../components/SchedulerTunables";
@@ -43,12 +44,20 @@ export function Scheduling() {
                   <div
                     className={`resblk ${r.scope === "whole_box" ? "box" : ""}`}
                     key={r.label}
-                    onClick={() => canOperate && confirm(t("calendar.cancel_confirm", { label: r.label })) && cancel.mutate(r.label)}
-                    title={canOperate ? t("calendar.cancel_title") : undefined}
                   >
                     <div className="rt">{formatClock(r.start)}–{formatClock(r.end)}</div>
                     <div className="rl">{r.label}</div>
                     <div className="rs">{r.scope === "bay" ? t("calendar.bay_hold_suffix", { slot: status.data?.slot_labels[r.bay ?? ""] ?? r.bay }) : r.scope}</div>
+                    {canOperate && (
+                      <ConfirmButton
+                        className="btn-mini"
+                        style={{ fontSize: 10.5, padding: "3px 9px", minHeight: 0, marginTop: 6 }}
+                        label={t("reservation_modal.cancel")}
+                        warning={t("calendar.cancel_confirm", { label: r.label })}
+                        pending={cancel.isPending}
+                        onConfirm={() => cancel.mutate(r.label)}
+                      />
+                    )}
                   </div>
                 ))}
               </div>

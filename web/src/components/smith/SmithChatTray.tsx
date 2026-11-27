@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AskSmith } from "../help/AskSmith";
 
 // SmithChatTray — Console's collapsible clone of the "Ask the smith" chat
@@ -14,6 +15,7 @@ import { AskSmith } from "../help/AskSmith";
 // was a disconnected `.tab`-styled pill floating above the chat, low-contrast
 // and easy to miss).
 function TrayHeader({ open, onClick }: { open: boolean; onClick: () => void }) {
+  const { t } = useTranslation("console");
   return (
     <button
       type="button"
@@ -26,7 +28,8 @@ function TrayHeader({ open, onClick }: { open: boolean; onClick: () => void }) {
         cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 700,
       }}
     >
-      <span style={{ letterSpacing: "0.02em" }}>SMITH</span>
+      <span style={{ letterSpacing: "0.02em" }}>{t("smith_tray.title")}</span>
+      {!open && <span style={{ fontWeight: 400, color: "var(--text-mute)" }}>{t("smith_tray.expand_hint")}</span>}
       <span
         style={{
           marginLeft: "auto", color: "var(--text-mute)",

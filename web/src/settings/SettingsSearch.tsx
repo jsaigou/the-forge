@@ -130,18 +130,21 @@ export function SettingsSearch({
               onClick={() => pick(rec)}
             >
               <span>{fieldLabel(t, rec)}</span>
-              <span className="path">
-                {rec.kind === "field" ? `${t(`sections.${rec.section}`)} · ${rec.storeKey}` : t(`sections.${rec.section}`)}
+              {/* Section is the breadcrumb; the raw store key (what
+                  `forge config get` wants) is secondary metadata, tooltip only
+                  — it stays searchable (see INDEX) but never leads a result. */}
+              <span className="path" title={rec.storeKey || undefined}>
+                {t(`sections.${rec.section}`)}
               </span>
             </div>
           ))}
           {matches.length > MAX_RESULTS && (
-            <div className="search-result" style={{ cursor: "default", color: "var(--text-mute)" }}>
+            <div className="search-result search-result-note">
               {t("search.more_results", { count: matches.length - MAX_RESULTS })}
             </div>
           )}
           {results.length === 0 && (
-            <div className="search-result" style={{ cursor: "default", color: "var(--text-mute)" }}>
+            <div className="search-result search-result-note">
               {t("search.no_matches", { query: query.trim() })}
             </div>
           )}

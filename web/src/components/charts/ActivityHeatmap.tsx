@@ -123,7 +123,11 @@ export function ActivityHeatmap({
     maxCol = Math.max(maxCol, col);
     if (weekday === 0 && date.getUTCMonth() !== lastMonthLabeled) {
       lastMonthLabeled = date.getUTCMonth();
-      monthLabels.push({ x: LEFT_PAD + col * STEP, text: MONTH_NAMES[date.getUTCMonth()] });
+      const x = LEFT_PAD + col * STEP;
+      // A window that starts mid-month would put two labels a column or two apart; keep the later one.
+      const prev = monthLabels[monthLabels.length - 1];
+      if (prev && x - prev.x < 3 * STEP) monthLabels.pop();
+      monthLabels.push({ x, text: MONTH_NAMES[date.getUTCMonth()] });
     }
   }
 

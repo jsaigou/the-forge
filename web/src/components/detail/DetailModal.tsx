@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { isTopmostDialog, useDialogSemantics } from "../Modal";
 import type { ConfigCard, SchedulerStatus, Status } from "../../lib/types";
 import { ConfigDetailView } from "./ConfigDetailView";
 import { ConfigEditView } from "./ConfigEditView";
@@ -23,6 +24,15 @@ export type DetailViewEntry =
 // the backdrop close the whole stack, matching every other modal in the
 // app (.modal-backdrop's existing convention) rather than only popping one
 // level.
+//
+// ADR-0023 contract b is applied inline via the Modal shell's
+// useDialogSemantics hook — this surface is too custom for the shell
+// itself: its heading lives in whichever sub-view tops the stack (nothing
+// this file renders is a heading, so there is no aria-labelledby target),
+// and Escape pops one level instead of closing. It still gets
+// role="dialog" + aria-modal, initial focus, the Tab trap, focus restore
+// and topmost-only key handling — so a step-up modal opened above it (the
+// notes editor gates on step-up) dismisses first.
 export function DetailModal({
   initial,
   status,
@@ -47,9 +57,15 @@ export function DetailModal({
     else onClose();
   }
 
+  const backdropRef = useRef<HTMLDivElement | null>(null);
+  // Escape routes through the hook (topmost-gated, same backOneLevel
+  // semantics, initial focus on the backdrop container); ArrowUp keeps its
+  // own listener below.
+  useDialogSemantics({ dialogRef: backdropRef, onClose: backOneLevel });
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape" || e.key === "ArrowUp") {
+      if (e.key === "ArrowUp" && isTopmostDialog(backdropRef.current)) {
         e.preventDefault();
         backOneLevel();
       }
@@ -81,6 +97,10 @@ export function DetailModal({
   // "carousel does not work on desktop" traced to exactly this.
   return createPortal(
     <div
+      ref={backdropRef}
+      role="dialog"
+      aria-modal="true"
+      tabIndex={-1}
       className="modal-backdrop"
       onClick={(e) => {
         // Sprint I fix: without stopPropagation, this click bubbles past the
@@ -128,11 +148,12 @@ export function DetailModal({
               displayCurrency={displayCurrency}
               onViewModel={pushModel}
               onEdit={() => pushEditConfig(current.card.id)}
+              onDeleted={onClose}
             />
           ) : current.kind === "editConfig" ? (
-            <ConfigEditView configId={current.configId} onDone={back} onCancel={back} />
+            <ConfigEditView configId={current.configId} onDone={back} onCancel={back} onDeleted={onClose} />
           ) : current.kind === "editModel" ? (
-            <ModelEditView modelId={current.modelId} onDone={back} onCancel={back} />
+            <ModelEditView modelId={current.modelId} onDone={back} onCancel={back} onDeleted={onClose} />
           ) : (
             <ModelBenchmarksView modelId={current.modelId} />
           )}

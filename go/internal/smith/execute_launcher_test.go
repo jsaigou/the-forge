@@ -109,8 +109,13 @@ func TestDispatchInstallLauncher_HappyPath(t *testing.T) {
 	if wrotePath != target {
 		t.Errorf("wrote to %q, want %q", wrotePath, target)
 	}
-	if len(wrote) == 0 {
-		t.Error("wrote empty content")
+	// The restored launcher is the embedded shim for exactly this slot (ADR-0026), not the legacy script.
+	wantShim := "#!/bin/bash\n# Generic slot launcher (ADR-0026): all engine knowledge lives in the database row; this only hands over to forge.\nexec /opt/forge/forge slot-exec a3\n"
+	if string(wrote) != wantShim {
+		t.Errorf("restored content = %q, want the a3 shim", wrote)
+	}
+	if fi, err := os.Stat(target); err != nil || fi.Mode().Perm()&0o111 == 0 {
+		t.Errorf("restored launcher not executable: %v %v", fi, err)
 	}
 	if _, err := os.Stat(target); err != nil {
 		t.Errorf("file not actually created: %v", err)

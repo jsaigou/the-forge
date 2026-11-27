@@ -28,7 +28,7 @@ func TestKokoroBackendSpeechAndList(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	b := NewKokoroBackend(ts.URL, "")
+	b := staticKokoroBackend(ts.URL, "")
 
 	res, err := b.Speech(context.Background(), SynthSpec{Mode: ModeKokoro, ID: "af_heart", Speed: 1.0}, "hello")
 	if err != nil {
@@ -57,7 +57,7 @@ func TestIsKokoroVoice(t *testing.T) {
 			t.Fatalf("%q should be a Kokoro voice", v)
 		}
 	}
-	not := []string{"billie", "samantha", "bmo", "anthony", "me"}
+	not := []string{"billie", "sana", "kit", "arlo", "me"}
 	for _, v := range not {
 		if IsKokoroVoice(v) {
 			t.Fatalf("%q should NOT be a Kokoro voice", v)
@@ -86,12 +86,12 @@ func TestDualEngineRoutesByNamespace(t *testing.T) {
 		w.Write([]byte("KOKOROWAV"))
 	}))
 	defer kts.Close()
-	kokoro := NewKokoroBackend(kts.URL, "")
+	kokoro := staticKokoroBackend(kts.URL, "")
 
 	fb := &fakeBackend{}
 	reg := NewRegistry(t.TempDir())
 	reg.Put(VoiceEntry{ID: "billie", Name: "Billie", Type: "design", Design: &DesignSpec{Instruct: "warm"}})
-	qwen := NewQwenTTS(fb, reg, nil)
+	qwen := NewQwenTTS(fb, reg)
 
 	dual := NewDualEngine(qwen, kokoro, "billie", "af_heart")
 
@@ -133,11 +133,11 @@ func TestDualEngineListMerge(t *testing.T) {
 		}})
 	}))
 	defer kts.Close()
-	kokoro := NewKokoroBackend(kts.URL, "")
+	kokoro := staticKokoroBackend(kts.URL, "")
 
 	reg := NewRegistry(t.TempDir())
 	reg.Put(VoiceEntry{ID: "billie", Name: "Billie", Type: "design", Design: &DesignSpec{Instruct: "warm"}})
-	qwen := NewQwenTTS(&fakeBackend{}, reg, nil)
+	qwen := NewQwenTTS(&fakeBackend{}, reg)
 
 	dual := NewDualEngine(qwen, kokoro, "billie", "af_heart")
 	voices, err := dual.ListVoices(context.Background())

@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { SmithMessageSource } from "../../lib/types";
+import { safeHref } from "../../lib/safeHref";
 
 // SourcesList — P5 (docs/v5-smith.md §4.8). Renders a chat message's
 // web:true sources as a collapsible "Sources (N)" block under the assistant
@@ -24,9 +25,13 @@ export function SourcesList({ sources }: { sources: SmithMessageSource[] }) {
         {sources.map((s, i) => (
           <div className="smith-source-row" key={s.url ?? s.title ?? i}>
             <span className="chip" style={{ fontSize: 9 }}>{s.provider}</span>
-            <a href={s.url} target="_blank" rel="noopener noreferrer" title={s.url}>
-              {s.title || s.url}
-            </a>
+            {safeHref(s.url) ? (
+              <a href={safeHref(s.url)} target="_blank" rel="noopener noreferrer" title={s.url}>
+                {s.title || s.url}
+              </a>
+            ) : (
+              <span title={s.url}>{s.title || s.url}</span>
+            )}
             <span style={{ color: "var(--text-mute)", fontSize: 10.5 }}>{hostOf(s.url)}</span>
             {s.cached && (
               <span className="chip" style={{ fontSize: 9 }} title={t("sources_list.cached_title")}>

@@ -15,6 +15,8 @@ package sched
 import (
 	"context"
 	"time"
+
+	"github.com/jsaigou/the-forge/internal/memledger"
 )
 
 // Scheduler is consumed by httpapi (track C), the a0 router (track D), and
@@ -139,7 +141,10 @@ type Status struct {
 type Budget struct {
 	TotalBytes int64
 	UsedBytes  int64
-	FreeBytes  int64
+	// FreeBytes is what a new model load may still claim: the smallest bound of the host-memory ledger (Ledger.Free).
+	FreeBytes int64
+	// Ledger is the declared partition behind FreeBytes (internal/memledger); zero when the collector has not yet produced one.
+	Ledger memledger.Ledger
 }
 
 // Config mirrors GET/PUT /api/v1/scheduler/config (Contract 1), defaults per

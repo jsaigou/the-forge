@@ -31,6 +31,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -38,7 +39,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -46,6 +46,7 @@ import (
 
 	"github.com/jsaigou/the-forge/internal/activity"
 	"github.com/jsaigou/the-forge/internal/authz"
+	"github.com/jsaigou/the-forge/internal/buildguard"
 	"github.com/jsaigou/the-forge/internal/bus"
 	"github.com/jsaigou/the-forge/internal/collector"
 	"github.com/jsaigou/the-forge/internal/compressorctl"
@@ -55,7 +56,9 @@ import (
 	"github.com/jsaigou/the-forge/internal/fx"
 	"github.com/jsaigou/the-forge/internal/hf"
 	"github.com/jsaigou/the-forge/internal/hfdownload"
+	"github.com/jsaigou/the-forge/internal/hostprobe"
 	"github.com/jsaigou/the-forge/internal/httpapi"
+	"github.com/jsaigou/the-forge/internal/inflight"
 	"github.com/jsaigou/the-forge/internal/maintenance"
 	"github.com/jsaigou/the-forge/internal/mcp"
 	"github.com/jsaigou/the-forge/internal/profile"
@@ -63,16 +66,22 @@ import (
 	"github.com/jsaigou/the-forge/internal/registry"
 	"github.com/jsaigou/the-forge/internal/router"
 	"github.com/jsaigou/the-forge/internal/sched"
+	"github.com/jsaigou/the-forge/internal/settingsvc"
+	"github.com/jsaigou/the-forge/internal/slotexec"
 	"github.com/jsaigou/the-forge/internal/smith"
 	"github.com/jsaigou/the-forge/internal/smith/comfyui"
 	"github.com/jsaigou/the-forge/internal/smith/procedures"
 	smithweb "github.com/jsaigou/the-forge/internal/smith/web"
+	"github.com/jsaigou/the-forge/internal/specialist"
+	"github.com/jsaigou/the-forge/internal/speechsetup"
 	"github.com/jsaigou/the-forge/internal/store"
-	"github.com/jsaigou/the-forge/internal/ttsctl"
 )
 
 // version is stamped via -ldflags "-X main.version=...".
-var version = "v0.6.0-dev"
+var version = "v0.8.0-dev"
+
+// specialistEnvDir is where the daemon writes one <slot>.env per specialist slot (testuser-owned; created once by the operator, see systemd/forge-pool@.service).
+const specialistEnvDir = "/var/lib/forge/pool"
 
 func main() {
 	var (
@@ -88,6 +97,14 @@ func main() {
 	// were one-time TOML-era tools, retired now that the cutover is done and
 	// TOML parsing is gone entirely (TOML decommission Phase 8,
 	// docs/v5-toml-decommission.md §8).
+	// slot-exec is the generic engine launcher (ADR-0026 section 4): read-only, never boots a daemon, and replaces this process with the engine.
+	if len(os.Args) > 1 && os.Args[1] == "slot-exec" {
+		os.Exit(slotexec.Run(os.Args[2:], slotexec.Real()))
+	}
+	// launch-check is the read-only preflight for the slot_launches builder (Radiance phase 1b step d1): never boots a daemon, never writes.
+	if len(os.Args) > 1 && os.Args[1] == "launch-check" {
+		os.Exit(runLaunchCheck(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "mint-key" {
 		if err := runMintKey(os.Args[2:]); err != nil {
 			log.Fatalf("forge mint-key: %v", err)
@@ -100,9 +117,22 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "host-setup" {
+		if err := runHostSetup(os.Args[2:]); err != nil {
+			log.Fatalf("forge host-setup: %v", err)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "keys" {
 		if err := runKeysCLI(os.Args[2:]); err != nil {
 			log.Fatalf("forge keys: %v", err)
+		}
+		return
+	}
+	// radiance register-build: registers a built Radiance engine as a catalog build for the installer (radiance_cli.go).
+	if len(os.Args) > 1 && os.Args[1] == "radiance" {
+		if err := runRadianceCLI(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			log.Fatalf("forge radiance: %v", err)
 		}
 		return
 	}
@@ -263,15 +293,66 @@ func main() {
 	// exist yet. It is pointed at the collector once both exist.
 	notifier := &switchNotifier{}
 
+	// specialistReserved is set once the specialist pool exists (it is built after the engine); the engine reads it through this pointer so
+	// an LLM load never takes memory a restarting always-on specialist needs (ADR-0022).
+	var specialistReserved atomic.Pointer[func() int64]
+	var specialistDeclared atomic.Pointer[func() int64]
+	// pooledConfig answers "is this catalog config hosted by the specialist pool?" for the engine, the scheduler and the router (ADR-0022: a pooled
+	// config has exactly one owner and is never loaded into an LLM slot). Set once the pool exists.
+	var pooledConfig atomic.Pointer[func(context.Context, string) bool]
+	isPooledConfig := func(ctx context.Context, config string) bool {
+		if f := pooledConfig.Load(); f != nil {
+			return (*f)(ctx, config)
+		}
+		return false
+	}
+
 	// ── Engine (mode/slot lifecycle) ───────────────────────────────────────
+	slotLaunchStore, slotLaunchEnforce := slotLaunchWiring(db.SlotLaunches())
 	eng, err := engine.NewManager(engine.Deps{
-		Cfg:                 getCfg,
-		Sys:                 dbusConn,
-		GPU:                 gpu,
-		Proc:                proc,
-		Usage:               db.Usage(),
-		Notify:              notifier,
+		PooledConfig: isPooledConfig,
+		SpecialistDeclaredBytes: func() int64 {
+			if f := specialistDeclared.Load(); f != nil {
+				return (*f)()
+			}
+			return 0
+		},
+		ReservedBytes: func() int64 {
+			if f := specialistReserved.Load(); f != nil {
+				return (*f)()
+			}
+			return 0
+		},
+		Cfg:    getCfg,
+		Sys:    dbusConn,
+		GPU:    gpu,
+		Proc:   proc,
+		Usage:  db.Usage(),
+		Notify: notifier,
+		// SlotLaunches: Phase 1b step d1 dual write of the slot_launches row, disarm on unload, adopt of running slots at start (ADR-0026).
+		SlotLaunches: slotLaunchStore,
+		// Enforcing (Phase 1b step e5): the generic shim (`forge slot-exec`) launches from this row, so a row that cannot be built or written must
+		// fail the load rather than start the engine from stale or missing data. slotLaunchWiring is the one place this is decided (and tested).
+		SlotLaunchEnforce: slotLaunchEnforce,
+		// A shadow failure is a plain warn-level notification (no investigation): the load itself succeeded.
+		OnSlotLaunchWarning: func(slot, mode, message string) {
+			events.Publish(httpapi.EventNotificationNew, map[string]any{
+				"code":    "SLOT_LAUNCH_SHADOW_FAILED",
+				"subject": slot,
+				"message": message,
+			})
+		},
+		// LogTail lets a failed load carry the unit's own last log lines (redacted, capped) in its result, so a
+		// startup crash can be diagnosed from the API instead of the journal (ADR-0020 F4).
+		LogTail:             journalTail,
 		WeightEstimateBytes: reg.WeightEstimateBytes,
+		CuratedFigures: func(configID int64) []engine.CuratedFigure {
+			var out []engine.CuratedFigure
+			for _, f := range reg.CuratedMemory(configID) {
+				out = append(out, engine.CuratedFigure{Bytes: f.Bytes, Tuple: f.Tuple})
+			}
+			return out
+		},
 		// ProfileBytes is the profiled safe-memory footprint (PROFILE track).
 		// nil until profileRunner is set below; the closure dereferences at
 		// call time (fit checks), by which point the runner exists.
@@ -345,15 +426,20 @@ func main() {
 
 	// ── Collector (single probe loop) ──────────────────────────────────────
 	coll := collector.New(collector.Options{
-		Cfg:             getCfg,
-		Systemd:         dbusConn,
-		Slots:           eng,
-		CurrentMode:     eng.CurrentMode,
-		GPU:             gpu,
-		Proc:            proc,
-		Hostname:        hostname,
-		ExtraUnits:      extraUnits(cfg),
-		TTSEngineUnits:  func() []string { return ttsEngineUnits(db.Settings()) },
+		Cfg:         getCfg,
+		Systemd:     dbusConn,
+		Slots:       eng,
+		CurrentMode: eng.CurrentMode,
+		GPU:         gpu,
+		Proc:        proc,
+		Hostname:    hostname,
+		ExtraUnits:  extraUnits(cfg),
+		SpecialistDeclaredBytes: func() int64 {
+			if f := specialistDeclared.Load(); f != nil {
+				return (*f)()
+			}
+			return 0
+		},
 		TailscaleOnline: tsAPI.NodeOnline,
 		// SlotErrorCount is the a0 router's per-slot 5xx/transport window —
 		// the device-lost early-warning (a wedged llama-server 5xxes every
@@ -486,20 +572,6 @@ func main() {
 	reconcileCompressorsOnBoot(ctx, db.Routing(), compressorProvisioner)
 	seedCompressorRetired(ctx, db.Settings())
 
-	// ── TTS provisioner (Tier 1 Sprint 2, Voice & Speech settings) ───────────
-	// Writes forge-tts's env file under <StateDir>/tts (testuser-writable,
-	// EnvironmentFile=-/var/lib/forge/tts/forge-tts.env, a line added to
-	// systemd/forge-tts.service as a one-time root edit — same shape as the
-	// compressor's). Unlike the compressor template, forge-tts.service and
-	// its sub-engine units (forge-tts-custom/-base, kokoro) are already
-	// systemd-enabled and start at boot on their own — no boot-time reconcile
-	// needed here, unlike the compressor's deliberately-not-enabled template
-	// instances.
-	ttsProvisioner := &ttsctl.Provisioner{
-		Systemd: dbusConn,
-		EnvDir:  filepath.Join(cfg.Paths.StateDir, "tts"),
-	}
-
 	// ── Profile runner (PROFILE track — docs/v5-profiling-benchmarks.md) ──
 	// Created after the engine + collector exist. The engine's ProfileMB
 	// closure (above) captures this variable by reference and resolves at
@@ -517,6 +589,7 @@ func main() {
 
 	// ── Scheduler (in-process, one mutex) ──────────────────────────────────
 	scheduler, err := sched.New(sched.Deps{
+		PooledConfig:       isPooledConfig,
 		Engine:             wrappedEng,
 		Source:             coll,
 		Sched:              db.Sched(),
@@ -571,6 +644,7 @@ func main() {
 
 	// Observe-only a0 context-creation ledger (WS-N1): one instance shared by
 	// the router (hook) and httpapi (read side). Stops with ctx.
+	a0InFlight := inflight.New()
 	ctxLedger := ctxledger.New(ctxledger.Config{Sink: db.ContextCreation(), Settings: db.Settings()})
 	ctxLedger.Start(ctx)
 
@@ -593,8 +667,34 @@ func main() {
 	// (search/tree/card) are always wrapped in a short context by their
 	// own callers instead.
 	hfClient := &hf.Client{HTTP: &http.Client{}, Token: hf.TokenFunc(db.Settings())}
+	// checkBuildBinary is the one build guard (internal/buildguard, ADR-0020 F8) over catalog.build_roots: the builds
+	// API, smith's build_refresh and hfdownload's load-mode probe all vet a binary path through it. A setting that
+	// exists but cannot be read is an error, not a reason to fall back to the (possibly wider) defaults.
+	checkBuildBinary := func(ctx context.Context, path string) (string, error) {
+		var configured []string
+		raw, err := settings.Get(ctx, "catalog.build_roots")
+		switch {
+		case err == nil:
+			_ = json.Unmarshal(raw, &configured)
+		case errors.Is(err, store.ErrNotFound):
+		default:
+			return "", err
+		}
+		return buildguard.CheckBinary(path, buildguard.Roots(configured)), nil
+	}
+	// checkBuildBinaryPath is that guard in the shape a caller that cannot fail takes: the reason a path may not run,
+	// or "" when it may. A settings read that fails vetoes the probe rather than defaulting open.
+	checkBuildBinaryPath := func(ctx context.Context, path string) string {
+		reason, err := checkBuildBinary(ctx, path)
+		if err != nil {
+			return "catalog.build_roots could not be read: " + err.Error()
+		}
+		return reason
+	}
 	hfDownloadSvc := hfdownload.New(hfdownload.Deps{
 		Store: db, HF: hfClient, Cfg: getCfg, Source: coll, Publish: events, Logf: log.Printf,
+		OnCatalogChange: mergedProvider.Invalidate,
+		VetBinaryPath:   checkBuildBinaryPath,
 	})
 	// Boot reconcile (mirrors the compressor-proxy pattern elsewhere in
 	// this file): any job the store still shows "running" can only mean
@@ -605,11 +705,35 @@ func main() {
 		log.Printf("forge: hfdownload boot reconcile: %v", err)
 	}
 
+	// specialistProblems is set once the specialist pool exists (it is built after Smith); the specialist_pool check reads it through this pointer.
+	var specialistProblems atomic.Pointer[func(context.Context) []smith.SpecialistProblem]
+	// The host probes smith's checks use (git, journalctl, binary --version): one command runner, with the smith binary-path rule injected.
+	hostProbes := hostprobe.Probes{Run: hostprobe.ExecRunner{}, BinaryPathAllowed: smith.BinaryPathAllowed}
+	var speechReport atomic.Pointer[func(context.Context) (speechsetup.Report, error)]
 	smithAgent := smith.New(smith.Deps{
-		Store:       db,
-		Catalog:     db.Catalog(),
+		SpeechReport: func(ctx context.Context) (speechsetup.Report, error) {
+			f := speechReport.Load()
+			if f == nil {
+				return speechsetup.Report{}, errors.New("the speech engine pool is not up yet")
+			}
+			return (*f)(ctx)
+		},
+		SpecialistProblems: func(ctx context.Context) []smith.SpecialistProblem {
+			f := specialistProblems.Load()
+			if f == nil {
+				return nil
+			}
+			return (*f)(ctx)
+		},
+		Store:   db,
+		Catalog: db.Catalog(),
+		// build_refresh's only Config write: repoint at another build, then clear the merged-config cache like the API's own writes do.
+		ConfigBuilds: store.ConfigWrites{Cat: db.Catalog(), Changed: mergedProvider.Invalidate},
+		// build_refresh's candidate registration and cleanup retire go through the same guards as the API (the build guard over catalog.build_roots).
+		Builds: store.BuildWrites{Cat: db.Catalog(), Changed: mergedProvider.Invalidate,
+			CheckBinary: checkBuildBinary},
 		Registry:    reg,
-		Settings:    db.Settings(),
+		Settings:    settingsvc.Validating(db.Settings()),
 		Sched:       scheduler,
 		Engine:      wrappedEng,
 		Placer:      wrappedEng,
@@ -627,19 +751,21 @@ func main() {
 		TailscalePeers: func(ctx context.Context) ([]collector.Peer, bool) {
 			return tsAPI.Peers(ctx)
 		},
-		BinaryVersion: smithBinaryVersion,
+		BinaryVersion: hostProbes.BinaryVersion,
+		// The same build-binary guard the builds API applies (internal/buildguard, ADR-0020 F8).
+		CheckBuildBinary: checkBuildBinaryPath,
 		// GitAhead is binary_versions' upstream-drift probe: how many
 		// commits the source tree is ahead of its configured upstream ref.
 		// Read-only git rev-list --count; bounded; no shell.
-		GitAhead: smithGitAhead,
+		GitAhead: hostProbes.GitAhead,
 		// GitBehindLog fetches the commit subjects for the same range
 		// GitAhead counts — feeds binary_versions' watchlist match.
-		GitBehindLog: smithGitBehindLog,
+		GitBehindLog: hostProbes.GitBehindLog,
 		// GitLsRemote is the upstream-NIGHTLY tracking probe (P3smith):
 		// resolves a fork's upstream HEAD sha (read-only git ls-remote,
 		// no shell). The URL arrives from operator settings/DB data, so the
 		// implementation re-validates it before exec'ing anything.
-		GitLsRemote: smithGitLsRemote,
+		GitLsRemote: hostProbes.GitLsRemote,
 		// JournalErrors/KernelJournal are smith's device-lost journal seams
 		// (gpu_device_lost check + auto-recovery). The unit list is captured
 		// from the live slot config (read via cfgHolder at call time so
@@ -647,9 +773,15 @@ func main() {
 		// glob, because a glob only matches currently-active units and would
 		// drop a just-unloaded slot's persisted ErrorDeviceLost history.
 		JournalErrors: func(ctx context.Context, n int, since time.Time) ([]string, error) {
-			return smithSlotJournalErrors(ctx, n, cfgHolder.Load(), since)
+			var units []string
+			if cfg := cfgHolder.Load(); cfg != nil {
+				for _, slot := range cfg.Slots {
+					units = append(units, slot.Unit)
+				}
+			}
+			return hostProbes.SlotJournalErrors(ctx, n, units, since)
 		},
-		KernelJournal:       smithKernelJournal,
+		KernelJournal:       hostProbes.KernelJournal,
 		ComfyUI:             &dynamicComfyUIClient{settings: db.Settings()},
 		DeleteFile:          smithDeleteFile,
 		InstallLauncherFile: smithInstallLauncherFile,
@@ -695,6 +827,10 @@ func main() {
 	jobsRunner.AdvanceMissed(ctx)
 	go jobsRunner.Run(ctx)
 
+	// The overnight profiling run idles until an operator arms it.
+	profileNight := newProfileNight(db, profileRunner, wrappedEng, coll, maintGate)
+	go profileNight.Loop(ctx)
+
 	// ── Auth ───────────────────────────────────────────────────────────────
 	auth := authz.New(db)
 
@@ -713,7 +849,91 @@ func main() {
 	defer fxCache.Close()
 
 	// ── HTTP API + embedded PWA (dashboard) ────────────────────────────────
+	// ── Specialist slot pool (ADR-0022) ────────────────────────────────────
+	// Always built, so the first slot added to a running daemon takes effect at once; with no slots it answers ErrNoMatch everywhere and the host
+	// behaves as one without a pool. The supervisor adopts what is already running, then starts always-on members in the background (smallest
+	// first); it never delays serving.
+	specialistPool, err := specialist.New(specialist.Deps{
+		Cfg:          getCfg,
+		Sys:          dbusConn,
+		Store:        db.Specialist(),
+		EnvDir:       specialistEnvDir,
+		Catalog:      catalogResolver{cfg: getCfg, estimate: reg.WeightEstimateBytes},
+		SlotLaunches: db.SlotLaunches(),
+		ModelRoots:   func() []string { return specialist.ModelRoots(getCfg().Paths.ModelsDir, specialist.EngineRoot) },
+		// The same live memory budget the LLM fit gate uses; on a probe error the gate is open and the launcher's own failure handling remains.
+		FreeBytes: func() int64 {
+			b, err := eng.MemoryBudget()
+			if err != nil {
+				log.Printf("forge: specialist fit gate: memory budget unreadable (%v); not gating this load", err)
+				return math.MaxInt64 / 2
+			}
+			return b.FreeBytes
+		},
+		IdleUnload: func() time.Duration { return time.Duration(getCfg().Scheduler.IdleUnloadS) * time.Second },
+		// The default engine per kind of speech (plan P1); read per request, so a change in Voice & Speech applies at once.
+		SpeechDefaults: func(ctx context.Context) (map[string]string, error) {
+			raw, err := db.Settings().Get(ctx, specialist.SpeechDefaultsKey)
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, nil
+			}
+			if err != nil {
+				return nil, err
+			}
+			return specialist.ParseSpeechDefaults(raw)
+		},
+		Logf: log.Printf,
+		OnFailed: func(slot, occupant string, attempts int, err error) {
+			events.Publish(httpapi.EventNotificationNew, map[string]any{
+				"code":    "SPECIALIST_FAILED",
+				"subject": slot,
+				"message": fmt.Sprintf("specialist %s in %s failed to start %d times in a row: %v", occupant, slot, attempts, err),
+			})
+		},
+	})
+	if err != nil {
+		log.Fatalf("forge: specialist pool: %v", err)
+	}
+	reservedFn := specialistPool.ReservedBytes
+	specialistReserved.Store(&reservedFn)
+	declaredFn := specialistPool.DeclaredBytes
+	specialistDeclared.Store(&declaredFn)
+	pooledFn := specialistPool.PooledConfig
+	pooledConfig.Store(&pooledFn)
+	problemsFn := func(ctx context.Context) []smith.SpecialistProblem {
+		var out []smith.SpecialistProblem
+		for _, p := range specialistPool.AlwaysOnProblems(ctx) {
+			out = append(out, smith.SpecialistProblem{Slot: p.Slot, Occupant: p.Occupant, State: p.State, Err: p.Err, Attempts: p.Attempts})
+		}
+		return out
+	}
+	specialistProblems.Store(&problemsFn)
+	speechFn := func(ctx context.Context) (speechsetup.Report, error) {
+		engines, err := db.Specialist().ListOccupants(ctx)
+		if err != nil {
+			return speechsetup.Report{}, err
+		}
+		var defaults map[string]string
+		raw, err := db.Settings().Get(ctx, specialist.SpeechDefaultsKey)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return speechsetup.Report{}, err
+		}
+		if err == nil {
+			if defaults, err = specialist.ParseSpeechDefaults(raw); err != nil {
+				return speechsetup.Report{}, err
+			}
+		}
+		return speechsetup.Inspect(specialist.EngineRoot, engines, defaults, specialistPool.Snapshot(ctx)), nil
+	}
+	speechReport.Store(&speechFn)
+	go specialistPool.Run(ctx)
+	log.Printf("forge: specialist pool supervising %d slot(s)", len(cfg.SpecialistSlots)) //nolint:gosec // G706: the only value logged is a count
+
 	api := httpapi.New(httpapi.Deps{
+		Specialists:           specialistPool,
+		SpecialistStore:       db.Specialist(),
+		SpecialistWriter:      db.Specialist(),
+		SpecialistCatalog:     catalogResolver{cfg: getCfg, estimate: reg.WeightEstimateBytes},
 		Snapshots:             coll,
 		Engine:                wrappedEng,
 		Sched:                 scheduler,
@@ -728,8 +948,7 @@ func main() {
 		Usage:                 db.Usage(),
 		Routing:               db.Routing(),
 		CompressorProvisioner: compressorProvisioner,
-		TTSProvisioner:        ttsProvisioner,
-		Settings:              db.Settings(),
+		Settings:              settingsvc.Validating(db.Settings()),
 		Audit:                 db.Audit(),
 		Sessions:              db.Sessions(),
 		Registry:              reg,
@@ -752,6 +971,7 @@ func main() {
 		WebAuthnService:    webAuthnSvc,
 		RecoveryService:    recoverySvc,
 		Profiles:           profileRunner,
+		ProfileNight:       profileNight,
 		Prober:             func(ctx context.Context) { coll.ProbeNow(ctx) },
 		Catalog:            db.Catalog(),
 		Llama:              collector.NewLlamaClient(nil),
@@ -759,10 +979,14 @@ func main() {
 		InvalidateConfig:   mergedProvider.Invalidate,
 		Favorites:          db.Favorites(),
 		CtxLedger:          ctxLedger,
+		InFlight:           a0InFlight,
 		Smith:              smithAgent,
 		HFDownload:         hfDownloadSvc,
 		HFClient:           hfClient,
 		Maintenance:        maintGate,
+		SlotLog: func(ctx context.Context, unit string, maxLines int) string {
+			return journalTail(ctx, unit, time.Time{}, maxLines)
+		},
 		ReloadConfig: func() {
 			reloadConfigFromStore(ctx, db, &cfgHolder)
 			mergedProvider.Invalidate()
@@ -792,6 +1016,7 @@ func main() {
 
 	// ── a0 router ──────────────────────────────────────────────────────────
 	routerSrv = router.NewWithDeps(router.Deps{
+		Specialists:  specialistPool,
 		Cfg:          routerCfg,
 		Auth:         auth,
 		Sched:        scheduler,
@@ -804,6 +1029,8 @@ func main() {
 		Activity:     activityReg,
 		Registry:     reg,
 		CtxLedger:    ctxLedger,
+		InFlight:     a0InFlight,
+		SlotKind:     slotKindLookup(db.SlotLaunches(), time.Now),
 	})
 
 	// ── MCP server ─────────────────────────────────────────────────────────
@@ -929,9 +1156,6 @@ func (n *switchNotifier) NotifySwitchComplete() {
 // extraUnits lists the always-on auxiliary systemd units the collector probes
 // on top of the config-derived slot/mode units: the aux services in [ports]
 // (embedding, stt) follow the forge-<key> naming, plus the TTS unit.
-// tts.engines' own units are watched separately via
-// collector.Options.TTSEngineUnits (a live closure, not baked in here) —
-// see that field's doc comment for why.
 func extraUnits(cfg *config.Config) []string {
 	var units []string
 	for key := range cfg.Ports {
@@ -941,34 +1165,6 @@ func extraUnits(cfg *config.Config) []string {
 		units = append(units, cfg.Server.TTSUnit)
 	}
 	return units
-}
-
-// ttsEngineUnits reads tts.engines live and returns every configured
-// engine's systemd unit (skipping engines with no unit set — that's the
-// two-layer rule's fresh-install default, and there's nothing to watch
-// either way). Wired as collector.Options.TTSEngineUnits (Tier 1 Sprint 2) —
-// closing the Sprint 0 blind spot where forge-tts-base/forge-tts-custom/
-// kokoro crash-looped for 5 days undetected because the collector's
-// restart-loop alert (collector/run.go's NRestarts comparison) only ever
-// fires for units it's told to probe. Read live every collector cycle
-// (matching CompressorUnits' shape, not a snapshot baked in at daemon
-// startup) so an operator wiring up a new resident engine unit via Settings
-// is watched immediately, not only after the next daemon restart.
-// Best-effort: a nil/unreadable/malformed setting yields no extra units
-// rather than failing a collector cycle.
-func ttsEngineUnits(settings store.Settings) []string {
-	if settings == nil {
-		return nil
-	}
-	raw, err := settings.Get(context.Background(), "tts.engines")
-	if err != nil || len(raw) == 0 {
-		return nil
-	}
-	cfg := ttsctl.DefaultEngines()
-	if json.Unmarshal(raw, &cfg) != nil {
-		return nil
-	}
-	return cfg.WatchedUnits()
 }
 
 // comfyUIHelpers builds the two lazily-resolving closures ComfyUI eviction
@@ -1323,209 +1519,7 @@ func smithBlockedWorkPath(ctx context.Context, settings store.Settings) string {
 	return "/var/lib/forge/smith-blocked-work.md"
 }
 
-// smithBinaryVersion is smith.Deps.BinaryVersion's production
-// implementation (P6 FR6, binary_versions check): fixed argv, no shell,
-// re-validates path against smith.binaryPathAllowed (defense in depth —
-// smith.binaries.tracked is operator-edited settings JSON, not a
-// compile-time constant) before exec'ing anything.
-func smithBinaryVersion(ctx context.Context, path string) (string, error) {
-	if ok, reason := smith.BinaryPathAllowed(path); !ok {
-		return "", fmt.Errorf("forge: binary path %q not allowed: %s", path, reason)
-	}
-	cmd := exec.CommandContext(ctx, path, "--version")
-	out, err := cmd.CombinedOutput() // llama-server writes its version banner to stderr
-	if err != nil && len(out) == 0 {
-		return "", fmt.Errorf("forge: exec %s --version: %w", path, err)
-	}
-	return string(out), nil
-}
-
-// smithGitAhead is smith.Deps.GitAhead's production implementation: counts
-// how many commits root's HEAD is ahead of ref ("git rev-list --count
-// HEAD..<ref>"). Read-only, no shell, bounded by the caller's context. A
-// non-zero count means the tracked build lags its upstream — binary_versions
-// turns that into a "rebuild recommended" finding (the 2026-08-17
-// build-refresh addition). Any error (no such ref, not a git repo, git
-// missing) surfaces as an error, which binary_versions treats as
-// "unmeasurable" — upstream drift is a bonus signal, never a failure.
-func smithGitAhead(ctx context.Context, root, ref string) (int, error) {
-	if err := checkGitRootRef(root, ref); err != nil {
-		return 0, err
-	}
-	cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-list", "--count", "HEAD.."+ref)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return 0, fmt.Errorf("forge: git rev-list in %s: %w: %s", root, err, strings.TrimSpace(string(out)))
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return 0, fmt.Errorf("forge: parse git ahead count %q: %w", strings.TrimSpace(string(out)), err)
-	}
-	return n, nil
-}
-
-// smithGitBehindLog is smith.Deps.GitBehindLog's production implementation:
-// the commit SUBJECT lines for the same HEAD..ref range smithGitAhead
-// counts ("git log --format=%s -n <maxN> HEAD..<ref>"). Read-only, no
-// shell, bounded by the caller's context. maxN caps the output — this feeds
-// a keyword watchlist match, not a full changelog, so there's no reason to
-// fetch more than a screenful.
-func smithGitBehindLog(ctx context.Context, root, ref string, maxN int) ([]string, error) {
-	if err := checkGitRootRef(root, ref); err != nil {
-		return nil, err
-	}
-	if maxN <= 0 {
-		maxN = 50
-	}
-	cmd := exec.CommandContext(ctx, "git", "-C", root, "log", "--format=%s", "-n", strconv.Itoa(maxN), "HEAD.."+ref)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("forge: git log in %s: %w: %s", root, err, strings.TrimSpace(string(out)))
-	}
-	var subjects []string
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-		if line != "" {
-			subjects = append(subjects, line)
-		}
-	}
-	return subjects, nil
-}
-
-// smithGitLsRemote is smith.Deps.GitLsRemote's production implementation
-// (P3smith upstream-nightly tracking): resolves url's HEAD commit via
-// read-only "git ls-remote <url> HEAD" — no shell, bounded by the caller's
-// context. The URL comes from operator-editable settings/DB data, so it is
-// re-validated here (https only, no metacharacters) before anything is
-// exec'd — the same trust posture as BinaryVersion's path re-validation.
-// Any error surfaces to the caller, which treats it as "unmeasurable".
-func smithGitLsRemote(ctx context.Context, url string) (string, error) {
-	if ok, reason := forgeSmithUpstreamURLAllowed(url); !ok {
-		return "", fmt.Errorf("forge: git ls-remote url %q not allowed: %s", url, reason)
-	}
-	cmd := exec.CommandContext(ctx, "git", "ls-remote", url, "HEAD")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("forge: git ls-remote: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
-	sha, _, ok := strings.Cut(line, "\t")
-	if !ok || sha == "" {
-		return "", fmt.Errorf("forge: git ls-remote output unparseable: %q", strings.TrimSpace(string(out)))
-	}
-	return sha, nil
-}
-
-// forgeSmithUpstreamURLAllowed mirrors internal/smith's upstreamURLAllowed
-// guard for the production exec wiring (smith's validator is unexported;
-// this keeps the same rule without exporting a security check for its own
-// sake).
-func forgeSmithUpstreamURLAllowed(url string) (bool, string) {
-	if url == "" {
-		return false, "empty url"
-	}
-	if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://") {
-		return false, "only http(s) git URLs are allowed"
-	}
-	if strings.ContainsAny(url, "\t\n\r ;|&$`\"'\\") {
-		return false, "url contains disallowed characters"
-	}
-	return true, ""
-}
-
-var (
-	gitRefRe      = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
-	systemdUnitRe = regexp.MustCompile(`^[A-Za-z0-9@._-]+$`)
-)
-
-// checkGitRootRef validates the two operator-config values that become git
-// argv: root must be an absolute path and ref must look like a ref name, so
-// neither can ever parse as an option to the git subprocess.
-func checkGitRootRef(root, ref string) error {
-	if root == "" || ref == "" {
-		return fmt.Errorf("forge: git ahead requires root and ref")
-	}
-	if !strings.HasPrefix(root, "/") || strings.ContainsAny(root, "\t\n\r\x00") {
-		return fmt.Errorf("forge: git root %q must be a clean absolute path", root)
-	}
-	if !gitRefRe.MatchString(ref) {
-		return fmt.Errorf("forge: git ref %q contains disallowed characters", ref)
-	}
-	return nil
-}
-
-// smithSlotJournalErrors is smith.Deps.JournalErrors' production implementation:
-// a bounded read of the last n lines from every forge-* inference-slot unit
-// journal (the gpu_device_lost check's unit-journal source). Units are
-// enumerated from the live config's slots (explicit -u flags, NOT a journalctl
-// glob — a glob only matches currently-active units, silently dropping a
-// just-unloaded slot's persisted history). No priority filter: llama-server
-// logs its ErrorDeviceLost/vk::Queue::submit lines at *info* priority (verified
-// live — journald PRIORITY=6), so filtering to warning/err would silently blind
-// the device-lost check; the fixed line count already bounds the read against a
-// chatty unit. journalctl is read-only and safe to run as forge's own user.
-// On any exec failure the seam degrades to the empty slice (the check then
-// reports itself as having nothing to match — never fails the sweep). since,
-// when non-zero, is passed as --since so a caller can bound how far back the
-// read reaches (gpu_device_lost's confirmation gate does; the log-digest
-// answer passes a zero Time for the historical unbounded behavior).
-func smithSlotJournalErrors(ctx context.Context, n int, cfg *config.Config, since time.Time) ([]string, error) {
-	if n <= 0 {
-		n = 300
-	}
-	args := []string{"--no-pager", "-n", strconv.Itoa(n)}
-	if !since.IsZero() {
-		args = append(args, "--since", since.Format("2006-01-02 15:04:05"))
-	}
-	names := map[string]bool{}
-	if cfg != nil {
-		for _, slot := range cfg.Slots {
-			// Unit names come from the live config; only pass well-formed
-			// systemd unit names to journalctl's -u.
-			if slot.Unit != "" && systemdUnitRe.MatchString(slot.Unit) && !names[slot.Unit] {
-				names[slot.Unit] = true
-				args = append(args, "-u", slot.Unit)
-			}
-		}
-	}
-	if len(names) == 0 {
-		return nil, nil
-	}
-	cmd := exec.CommandContext(ctx, "journalctl", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		// journalctl exits non-zero when no units match on some versions —
-		// that's "no error lines", not a failure.
-		if len(out) == 0 {
-			return nil, nil
-		}
-	}
-	return strings.Split(strings.TrimRight(string(out), "\n"), "\n"), nil
-}
-
-// smithKernelJournal is smith.Deps.KernelJournal's production
-// implementation: a bounded read of the kernel journal (journalctl -k). This
-// is the definitive device-lost signal source — amdgpu logs "ring comp_X.Y
-// timeout" / "device wedged" there, the root cause of the 2026-08-16
-// qwen38-27b unresponsiveness. Bounded and read-only, same degrade posture
-// as smithJournalErrors. since is the same --since seam as
-// smithSlotJournalErrors.
-func smithKernelJournal(ctx context.Context, n int, since time.Time) ([]string, error) {
-	if n <= 0 {
-		n = 300
-	}
-	args := []string{"-k", "--no-pager", "-n", strconv.Itoa(n)}
-	if !since.IsZero() {
-		args = append(args, "--since", since.Format("2006-01-02 15:04:05"))
-	}
-	cmd := exec.CommandContext(ctx, "journalctl", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if len(out) == 0 {
-			return nil, nil
-		}
-	}
-	return strings.Split(strings.TrimRight(string(out), "\n"), "\n"), nil
-}
+var systemdUnitRe = regexp.MustCompile(`^[A-Za-z0-9@._-]+$`)
 
 // dynamicComfyUIClient re-resolves smith.comfyui.url from live settings on
 // every call rather than binding one *comfyui.HTTPClient at startup — the
@@ -1569,6 +1563,13 @@ func (c *dynamicComfyUIClient) ObjectInfo(ctx context.Context) (map[string]comfy
 // be a second place for the allowlist to drift out of sync.
 func smithDeleteFile(_ context.Context, path string) error {
 	return os.Remove(path)
+}
+
+// slotLaunchWiring is how the production daemon configures the engine's slot_launches handling (ADR-0026, Phase 1b step e5): the store, and
+// enforcement ON. Enforcing means a failure to build or write a slot's launch row fails the load (Result.Success=false, nothing started) instead of
+// being logged as a shadow warning, because the slot's shim now launches from that row. Kept as a function so a test pins what main() uses.
+func slotLaunchWiring(s engine.SlotLaunchStore) (engine.SlotLaunchStore, bool) {
+	return s, true
 }
 
 // smithInstallLauncherFile is smith.Deps.InstallLauncherFile's production

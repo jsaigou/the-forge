@@ -30,6 +30,8 @@
 // which restores those rows). It's a default, not a constraint: metric stays
 // operator-editable, since one benchmark can legitimately back differently
 // labelled capabilities on different cards.
+import { own } from "./own.ts";
+
 export interface BenchmarkRef {
   floor: number;
   ceiling: number;
@@ -87,7 +89,7 @@ export const BENCHMARK_REFS: Record<string, BenchmarkRef> = {
 // "relative-to-frontier" scale for the given benchmark name. Falls back to
 // the raw score (clamped) when the benchmark has no reference entry.
 export function normalizeScore(rawScore: number, benchmark: string): number {
-  const ref = BENCHMARK_REFS[benchmark];
+  const ref = own(BENCHMARK_REFS, benchmark);
   if (!ref || ref.ceiling <= ref.floor) {
     return Math.min(1, Math.max(0, rawScore));
   }

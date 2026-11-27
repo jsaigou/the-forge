@@ -11,6 +11,8 @@ import (
 
 	"github.com/jsaigou/the-forge/internal/collector"
 	"github.com/jsaigou/the-forge/internal/config"
+	"github.com/jsaigou/the-forge/internal/enginekind"
+	"github.com/jsaigou/the-forge/internal/memledger"
 )
 
 // WeightIdentity resolves a mode's loadable-weight identity: the canonical
@@ -60,45 +62,75 @@ func (m *Manager) WeightIdentity(modeName string) string {
 // A1 (bytes retrofit, 2026-07-24): the budget is bytes-native. sysfs
 // reports bytes; there is no MB conversion at the probe boundary.
 func (m *Manager) MemoryBudget() (Budget, error) {
+	b, _, _ := m.probeMemory()
+	return b, nil
+}
+
+// probeMemory is MemoryBudget together with the policy and measurements it was computed from, so a fit check can ask what the ledger would
+// say with a slot's holdings given back.
+func (m *Manager) probeMemory() (Budget, memledger.Policy, memledger.Inputs) {
 	ctx := context.Background()
 	cfg := m.d.Cfg()
 
 	sample := m.d.GPU.Sample()
-	var total, used float64
+	var total, gttUsed float64
 	if sample.GTTTotalBytes != nil {
 		total = float64(*sample.GTTTotalBytes)
 	}
 	if sample.GTTUsedBytes != nil {
-		used = float64(*sample.GTTUsedBytes)
+		gttUsed = float64(*sample.GTTUsedBytes)
 	}
 
 	slots := m.reconcileLive(ctx)
-	used += m.slotRSSBytes(cfg, slots) // ADDITIVE — never max()
+	slotRSS := m.slotRSSBytes(cfg, slots)
+	used := gttUsed + slotRSS // ADDITIVE — never max()
 
-	free := total - used
+	var declared int64
+	if m.d.SpecialistDeclaredBytes != nil {
+		declared = m.d.SpecialistDeclaredBytes()
+	}
+	st := m.d.Proc.Stats()
+	in := memledger.Inputs{
+		HostTotal: st.MemTotalBytes, HostAvail: st.MemAvailBytes,
+		SwapTotal: st.SwapTotalBytes, SwapUsed: st.SwapTotalBytes - st.SwapFreeBytes,
+		GTTUsed: int64(gttUsed), GTTTotal: int64(total),
+		SlotRSS: slotRSS, SpecialistGPU: m.specialistGPUBytes(ctx, cfg), SpecialistDeclared: declared,
+	}
+	policy := memledger.Policy{
+		OSFloorBytes: cfg.Memory.OSFloorBytes, GrowthMarginBytes: cfg.Memory.GrowthMarginBytes, HostFloorBytes: cfg.Memory.HostFloorBytes,
+	}
+	l := memledger.Compute(policy, in)
 
-	// Host-headroom cap: never plan into the reserve the kernel and
-	// non-forge services need to keep the box responsive (the crash
-	// signature was swap-thrash into a hard amdgpu/KFD wedge, not a clean
-	// OOM kill). A failed meminfo read skips the cap — the GTT math above
-	// still applies.
-	if st := m.d.Proc.Stats(); st.MemAvailBytes > 0 {
-		hostFree := st.MemAvailBytes - float64(hostReserveBytes)
-		if free > hostFree {
-			free = hostFree
-		}
+	// Memory still owed to specialists that should be running and are not is reported for the refusal message only. It is NOT subtracted again:
+	// every enabled always-on specialist's declared peak is already outside the model budget, running or not (ADR-0027).
+	var reserved int64
+	if m.d.ReservedBytes != nil {
+		reserved = m.d.ReservedBytes()
 	}
-	if free < 0 {
-		free = 0
-	}
-	return Budget{TotalBytes: int64(total), UsedBytes: int64(used), FreeBytes: int64(free)}, nil
+	return Budget{TotalBytes: int64(total), UsedBytes: int64(used), FreeBytes: l.Free, ReservedBytes: reserved, Ledger: l}, policy, in
 }
 
-// hostReserveBytes is system RAM the fit gate refuses to plan into: the
-// kernel, always-on services (embedding/STT/aligner/compress proxies), and
-// page-cache headroom live here. Eating into it is how 2026-08-22 turned
-// "model won't fit" into "whole server needs a power cycle".
-const hostReserveBytes int64 = 8 << 30 // 8 GiB
+// specialistGPUBytes is the measured GPU footprint of the specialist pool's processes: GTT that the whole-GPU counter includes but that is not a
+// model's. A unit that is stopped, or whose footprint cannot be read, contributes zero (which only makes the model figure larger: conservative).
+func (m *Manager) specialistGPUBytes(ctx context.Context, cfg *config.Config) float64 {
+	if m.d.Sys == nil {
+		return 0
+	}
+	var total float64
+	for _, slot := range cfg.SpecialistSlots {
+		if slot.Unit == "" {
+			continue
+		}
+		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		pid, err := m.d.Sys.MainPID(cctx, slot.Unit)
+		cancel()
+		if err != nil || pid == 0 {
+			continue
+		}
+		total += float64(m.d.Proc.GPUMemoryBytes(int(pid)))
+	}
+	return total
+}
 
 // slotRSSBytes sums llama-server VmRSS across every loaded inference slot,
 // regardless of backend. (Was unifiedRSSBytes, which counted ROCm slots
@@ -125,12 +157,23 @@ func (m *Manager) slotRSSBytes(cfg *config.Config, slots map[string]collector.Sl
 		return 0
 	}
 	var total float64
-	for _, pid := range m.d.Proc.ByComm("llama-server") {
-		if port, ok := m.d.Proc.PortArg(pid); ok && ports[port] {
-			total += m.d.Proc.RSSBytes(pid)
-		}
+	for _, pid := range m.slotPIDs(ports) {
+		total += m.d.Proc.RSSBytes(pid)
 	}
 	return total
+}
+
+// slotPIDs returns the inference processes serving one of the ports.
+func (m *Manager) slotPIDs(ports map[int]bool) []int {
+	var pids []int
+	for _, name := range enginekind.ProcessNames() {
+		for _, pid := range m.d.Proc.ByComm(name) {
+			if port, ok := m.d.Proc.PortArg(pid); ok && ports[port] {
+				pids = append(pids, pid)
+			}
+		}
+	}
+	return pids
 }
 
 // modeWeightBytes is the on-disk weight of a mode's first service (fallback
@@ -151,49 +194,70 @@ func modeWeightBytes(cfg *config.Config, modeName string) int64 {
 	return collector.WeightSetSizeBytes(model, mmproj, cfg.Paths.ModelsDir)
 }
 
-// slotFootprintBytes estimates memory recovered by evicting a slot. The
-// slot's LIVE measured GPU footprint wins whenever it can be read (the
-// unit's MainPID → Proc.GPUMemoryBytes, the same fdinfo accounting the
-// collector's slot_memory_bytes reports): a model's real footprint
-// routinely exceeds its on-disk weight set — MTP draft state, KV cache,
-// activation buffers, unified-memory overhead. The Sprint 6 build_refresh
-// eval measured exactly this live (2026-08-20): a vulkan canary's 16.8 GB
-// weight set was crediting an eviction while its real footprint was
-// 52.9 GB, and the 36 GB under-credit made the fit check refuse a load
-// that the eviction demonstrably made room for. The on-disk weight set is
-// the fallback when the slot isn't running or nothing is measurable —
-// never a guess, never more than the evidence supports.
-func (m *Manager) slotFootprintBytes(cfg *config.Config, slot string) int64 {
-	if live := m.liveSlotFootprintBytes(cfg, slot); live > 0 {
-		return live
-	}
-	env := m.slotEnv(slot)
-	return collector.WeightSetSizeBytes(env["FORGE_MODEL_PATH"], env["FORGE_MMPROJ"], cfg.Paths.ModelsDir)
+// slotHolding is what a loaded slot would give back if it were evicted, in the terms the ledger counts it.
+type slotHolding struct {
+	gpu     float64 // the process's GPU memory (inside the whole-GPU GTT counter)
+	rss     float64 // its resident set, which the ledger counts beside the GPU memory
+	private float64 // the part of rss that raises MemAvailable when the process exits
 }
 
-// liveSlotFootprintBytes returns the running slot process's real GPU
-// footprint, or 0 when any link in the chain is missing (unknown slot, no
-// unit, unit stopped, no PID, Proc unable to read fdinfo). 0 sends the
-// caller to the weight-set fallback.
-func (m *Manager) liveSlotFootprintBytes(cfg *config.Config, slot string) int64 {
+// total is the slot's footprint as the model budget charges it; it orders eviction candidates.
+func (h slotHolding) total() int64 { return int64(h.gpu + h.rss) }
+
+// returnedTo is the measurements as they would read after the holding is freed.
+func (h slotHolding) returnedTo(in memledger.Inputs) memledger.Inputs {
+	in.GTTUsed -= int64(h.gpu)
+	if in.GTTUsed < 0 {
+		in.GTTUsed = 0
+	}
+	in.SlotRSS -= h.rss
+	if in.SlotRSS < 0 {
+		in.SlotRSS = 0
+	}
+	if in.HostAvail > 0 {
+		in.HostAvail += h.gpu + h.private
+		if in.HostTotal > 0 && in.HostAvail > in.HostTotal {
+			in.HostAvail = in.HostTotal
+		}
+	}
+	return in
+}
+
+// slotHolding measures what evicting a slot recovers. The slot's LIVE figures win whenever they can be read: the GPU memory of the unit's
+// MainPID (the fdinfo accounting the collector's slot_memory_bytes reports) plus the resident memory of the slot's process, which a model can
+// hold in tens of GiB beside it (2026-11-27: crediting 64.6 GiB of GPU memory alone refused a load that evicting a ~95 GiB model made room
+// for). A model's real footprint also routinely exceeds its on-disk weight set (Sprint 6, 2026-08-20: 16.8 GB of weights, 52.9 GB live).
+// The on-disk weight set is the fallback when nothing is measurable: never a guess, never more than the evidence supports.
+func (m *Manager) slotHolding(cfg *config.Config, slot string) slotHolding {
 	sc, ok := cfg.Slots[slot]
-	if !ok || sc.Unit == "" || m.d.Sys == nil {
-		return 0
+	if !ok {
+		return slotHolding{}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	pid, err := m.d.Sys.MainPID(ctx, sc.Unit)
-	if err != nil || pid == 0 {
-		return 0
+	var h slotHolding
+	if sc.Unit != "" && m.d.Sys != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if pid, err := m.d.Sys.MainPID(ctx, sc.Unit); err == nil && pid != 0 {
+			h.gpu = float64(m.d.Proc.GPUMemoryBytes(int(pid)))
+		}
 	}
-	return int64(m.d.Proc.GPUMemoryBytes(int(pid)))
+	for _, pid := range m.slotPIDs(map[int]bool{sc.Port: true}) {
+		h.rss += m.d.Proc.RSSBytes(pid)
+		h.private += m.d.Proc.PrivateRSSBytes(pid)
+	}
+	if h.gpu == 0 && h.rss == 0 {
+		model, mmproj := m.SlotWeightPaths(slot)
+		w := float64(collector.WeightSetSizeBytes(model, mmproj, cfg.Paths.ModelsDir))
+		h = slotHolding{gpu: w}
+	}
+	return h
 }
 
 // SlotFootprintBytes is the exported wrapper the scheduler's optional
 // sched.Footprints seam consumes for exact smallest-footprint-first
 // eviction ordering (see the Phase 5 progress entry's integrator request).
 func (m *Manager) SlotFootprintBytes(slot string) int64 {
-	return m.slotFootprintBytes(m.d.Cfg(), slot)
+	return m.slotHolding(m.d.Cfg(), slot).total()
 }
 
 // Plan is the eviction-aware fit check (port of engine.can_fit +
@@ -202,14 +266,14 @@ func (m *Manager) SlotFootprintBytes(slot string) int64 {
 //
 // A1 (bytes retrofit): all figures are bytes.
 type Plan struct {
-	Fits        bool
-	NeedBytes   float64
-	FreeBytes   float64
-	Slot        string   // proposed placement ("" when nothing fits)
-	Evict       []string // slots to evict first, smallest footprint first
-	EvictComfyUI bool    // stopping ComfyUI is also required to fit
-	ComfyUIBytes float64 // ComfyUI's measured footprint (when EvictComfyUI)
-	Message     string
+	Fits         bool
+	NeedBytes    float64
+	FreeBytes    float64
+	Slot         string   // proposed placement ("" when nothing fits)
+	Evict        []string // slots to evict first, smallest footprint first
+	EvictComfyUI bool     // stopping ComfyUI is also required to fit
+	ComfyUIBytes float64  // ComfyUI's measured footprint (when EvictComfyUI)
+	Message      string
 }
 
 // modeNeedEstimate is FitPlan's need-bytes derivation for any mode: a
@@ -236,6 +300,10 @@ type Plan struct {
 func (m *Manager) modeNeedEstimate(cfg *config.Config, modeName string) (int64, bool) {
 	if _, ok := cfg.Modes[modeName]; !ok {
 		return 0, false
+	}
+	// An engine whose footprint is set by its launch tuple has exactly one defensible figure: the one measured at this tuple (curated.go).
+	if need, ok, handled, _ := m.curatedMemory(cfg, modeName); handled {
+		return need, ok
 	}
 	if m.d.ProfileBytes != nil {
 		if b, ok := m.d.ProfileBytes(modeName); ok && b > 0 {
@@ -283,10 +351,7 @@ func (m *Manager) FitPlan(modeName string) (Plan, error) {
 
 	weightBytes, weightKnown := m.modeNeedEstimate(cfg, modeName)
 
-	budget, err := m.MemoryBudget()
-	if err != nil {
-		return Plan{}, err
-	}
+	budget, policy, inputs := m.probeMemory()
 	free := float64(budget.FreeBytes)
 
 	// Fail closed (F3): a memory requirement that can't be derived from
@@ -295,6 +360,9 @@ func (m *Manager) FitPlan(modeName string) (Plan, error) {
 	// Fits:true and silently over-subscribed. Refuse instead of guessing.
 	if !weightKnown {
 		m.logf("fit %s: REFUSED — no memory requirement derivable (free=%.1f GiB)", modeName, free/(1<<30))
+		if _, _, handled, why := m.curatedMemory(cfg, modeName); handled {
+			return Plan{NeedBytes: 0, FreeBytes: free, Message: "cannot load " + why}, nil
+		}
 		return Plan{NeedBytes: 0, FreeBytes: free, Message: fmt.Sprintf(
 			"cannot determine memory requirement for %s: no curated memory_req_bytes and model weights not found on disk — refusing to load without a size estimate",
 			modeName)}, nil
@@ -318,7 +386,7 @@ func (m *Manager) FitPlan(modeName string) (Plan, error) {
 
 	slots := m.reconcileLive(context.Background())
 	var freeSlots []string
-	for _, name := range m.Slots() {
+	for _, name := range m.LoadOrder() {
 		if slots[name].Mode == "" && slots[name].Unloading == nil && slots[name].Loading == nil {
 			freeSlots = append(freeSlots, name)
 		}
@@ -356,30 +424,35 @@ func (m *Manager) FitPlan(modeName string) (Plan, error) {
 
 	// Evict smallest-footprint-first until the budget covers the need.
 	type cand struct {
-		slot      string
-		footprint int64
+		slot    string
+		holding slotHolding
 	}
 	var candidates []cand
 	for _, name := range m.Slots() {
 		if slots[name].Mode != "" {
-			candidates = append(candidates, cand{name, m.slotFootprintBytes(cfg, name)})
+			candidates = append(candidates, cand{name, m.slotHolding(cfg, name)})
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].footprint != candidates[j].footprint {
-			return candidates[i].footprint < candidates[j].footprint
+		if a, b := candidates[i].holding.total(), candidates[j].holding.total(); a != b {
+			return a < b
 		}
 		return candidates[i].slot < candidates[j].slot
 	})
 
+	// What would be free after each eviction comes from the ledger itself, with that slot's holdings given back: the bounds count memory
+	// differently, so adding a footprint to today's free figure is not the same thing.
 	var evict []string
 	recovered := 0.0
+	after := inputs
+	freed := func() float64 { return float64(memledger.Compute(policy, after).Free) - inFlight - effectiveFree }
 	for _, cd := range candidates {
 		if effectiveFree+recovered >= needBytes {
 			break
 		}
 		evict = append(evict, cd.slot)
-		recovered += float64(cd.footprint)
+		after = cd.holding.returnedTo(after)
+		recovered = freed()
 	}
 
 	// ComfyUI as an eviction candidate (S1, operator feedback F3): its GTT
@@ -392,7 +465,8 @@ func (m *Manager) FitPlan(modeName string) (Plan, error) {
 	if effectiveFree+recovered < needBytes && m.d.ComfyUIFootprintBytes != nil {
 		if fp := m.d.ComfyUIFootprintBytes(); fp > 0 {
 			comfyBytes = float64(fp)
-			recovered += comfyBytes
+			after = slotHolding{gpu: comfyBytes}.returnedTo(after)
+			recovered = freed()
 		}
 	}
 
@@ -425,6 +499,11 @@ func (m *Manager) FitPlan(modeName string) (Plan, error) {
 	msg := fmt.Sprintf(
 		"not enough VRAM to load %s: it needs %.1f GiB but only %.1f GiB is available, and evicting every loaded model (%.1f GiB recoverable) still leaves too little",
 		modeName, needGiB, freeGiB, recovered/(1<<30))
+	if l := budget.Ledger; l.SpecialistDeclared > 0 {
+		msg += fmt.Sprintf(" (the model budget is %.1f GiB: host %.1f GiB less %.1f GiB OS, %.1f GiB declared for always-on engines and %.1f GiB margin; limited by the %s bound)",
+			float64(l.ModelBudget)/(1<<30), float64(l.HostTotal)/(1<<30), float64(l.OSFloor)/(1<<30),
+			float64(l.SpecialistDeclared)/(1<<30), float64(l.GrowthMargin)/(1<<30), l.Binding)
+	}
 	if comfyBytes > 0 {
 		msg += " — even stopping ComfyUI would not free enough"
 	} else if m.d.ComfyUIFootprintBytes == nil || m.d.ComfyUIFootprintBytes() == 0 {

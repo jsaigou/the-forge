@@ -8,6 +8,8 @@ import { useProfileProgress, useProfileRunTracker, useStatus } from "./lib/queri
 import { useLiveEvents } from "./lib/sse";
 import { useSession } from "./lib/session";
 import { OnboardingTour } from "./onboarding/OnboardingTour";
+import { Backdrop } from "./components/Backdrop";
+import { flashMeEyes } from "./lib/eyes";
 import { Attributions } from "./pages/Attributions";
 import { Console } from "./pages/Console";
 import { Dashboard } from "./pages/Dashboard";
@@ -16,6 +18,7 @@ import { Dashboard } from "./pages/Dashboard";
 // so the initial JS payload drops well below the old 770 KB single bundle.
 // Console/Dashboard stay eager (landing surfaces).
 const Models = lazy(() => import("./pages/Models").then((m) => ({ default: m.Models })));
+const Specialists = lazy(() => import("./pages/Specialists").then((m) => ({ default: m.Specialists })));
 const Scheduling = lazy(() => import("./pages/Scheduling").then((m) => ({ default: m.Scheduling })));
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 const Help = lazy(() => import("./pages/Help").then((m) => ({ default: m.Help })));
@@ -31,6 +34,7 @@ const Help = lazy(() => import("./pages/Help").then((m) => ({ default: m.Help })
 const TABS = [
   { key: "console", Component: Console },
   { key: "dashboard", Component: Dashboard },
+  { key: "specialists", Component: Specialists },
   { key: "models", Component: Models },
   { key: "scheduling", Component: Scheduling },
   { key: "settings", Component: Settings },
@@ -196,10 +200,14 @@ function useTabRouter(): {
 
 const THEME_KEY = "foundry.console.theme";
 
+type Theme = "light" | "dark" | "aurora";
+// The toggle steps through the three schemes; with no saved choice it starts from what the OS shows.
+const THEME_CYCLE: Theme[] = ["dark", "aurora", "light"];
+
 function useThemeToggle() {
-  const [theme, setTheme] = useState<"light" | "dark" | null>(() => {
+  const [theme, setTheme] = useState<Theme | null>(() => {
     const saved = localStorage.getItem(THEME_KEY);
-    return saved === "light" || saved === "dark" ? saved : null;
+    return saved === "light" || saved === "dark" || saved === "aurora" ? saved : null;
   });
 
   useEffect(() => {
@@ -213,11 +221,10 @@ function useThemeToggle() {
   }, [theme]);
 
   const toggle = () => {
-    setTheme((cur) => {
-      if (cur === "dark") return "light";
-      if (cur === "light") return "dark";
-      return matchMedia("(prefers-color-scheme: dark)").matches ? "light" : "dark";
-    });
+    const from: Theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const to = THEME_CYCLE[(THEME_CYCLE.indexOf(from) + 1) % THEME_CYCLE.length];
+    setTheme(to);
+    if (to === "light" && from !== "light") flashMeEyes();
   };
 
   return toggle;
@@ -240,10 +247,10 @@ export function App() {
 
   return (
     <div className="wrap">
+      <Backdrop />
       <PWAUpdateBanner />
       <div className="top">
         <div className="brand">
-          <img src="/favicon.svg" alt="" className="brand-mark" width={34} height={34} />
           <div>
             <h1>The Forge</h1>
           </div>
@@ -258,6 +265,7 @@ export function App() {
           <button
             className="icon-btn"
             title={t("restart_pip.title", { count: restartRequired.keys.length, by: restartRequired.by })}
+            aria-label={t("restart_pip.title", { count: restartRequired.keys.length, by: restartRequired.by })}
             onClick={() => setTab("settings", "general")}
             style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 0, marginRight: 6 }}
           >
@@ -279,6 +287,7 @@ export function App() {
           <button
             className="icon-btn"
             title={t("profile_pip.title", { mode: profileProgress.mode ?? "", phase: profileProgress.phase })}
+            aria-label={t("profile_pip.title", { mode: profileProgress.mode ?? "", phase: profileProgress.phase })}
             onClick={() => setTab("settings", "benchmarks")}
             style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 0, marginRight: 10 }}
           >
@@ -292,9 +301,14 @@ export function App() {
             />
           </button>
         )}
-        <nav className="tabs">
+        <nav className="tabs" aria-label={tNav("main_label")}>
           {NAV_TABS.map((navTab) => (
-            <button key={navTab.key} className={`tab ${tab === navTab.key ? "active" : ""}`} onClick={() => setTab(navTab.key)}>
+            <button
+              key={navTab.key}
+              className={`tab ${tab === navTab.key ? "active" : ""}`}
+              aria-current={tab === navTab.key ? "page" : undefined}
+              onClick={() => setTab(navTab.key)}
+            >
               {tNav(`tabs.${navTab.key}`)}
             </button>
           ))}
@@ -311,7 +325,7 @@ export function App() {
         >
           {lang === "ja" ? "EN" : "JA"}
         </button>
-        <button className="icon-btn" title={t("app.toggle_theme")} onClick={toggleTheme}>◐</button>
+        <button className="icon-btn" title={t("app.toggle_theme")} aria-label={t("app.toggle_theme")} onClick={toggleTheme}>◐</button>
       </div>
       <ErrorBoundary>
         <Suspense fallback={<div className="empty-note">{t("app.loading")}</div>}>
@@ -324,7 +338,7 @@ export function App() {
       <OnboardingTour />
       <div className="foot">
         <span><b>{role}</b> · {username}</span>
-        <a href="#attributions" className={tab === "attributions" ? "active" : undefined}>{tNav("tabs.attributions")}</a>
+        <a href="#attributions" className={tab === "attributions" ? "active" : undefined} aria-current={tab === "attributions" ? "page" : undefined}>{tNav("tabs.attributions")}</a>
         <a
           className="bmc"
           href="https://www.buymeacoffee.com/jsaigou"

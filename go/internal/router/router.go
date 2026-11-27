@@ -18,6 +18,7 @@
 package router
 
 import (
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -26,6 +27,8 @@ import (
 	"github.com/jsaigou/the-forge/internal/activity"
 	"github.com/jsaigou/the-forge/internal/authz"
 	"github.com/jsaigou/the-forge/internal/ctxledger"
+	"github.com/jsaigou/the-forge/internal/enginekind"
+	"github.com/jsaigou/the-forge/internal/inflight"
 	"github.com/jsaigou/the-forge/internal/registry"
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/store"
@@ -70,6 +73,9 @@ type Deps struct {
 	// http.DefaultClient. The catalog's /health+/props+/metrics probes use
 	// a separate client (see ttlCatalog).
 	HTTPClient *http.Client
+	// Specialists is the specialist slot pool (ADR-0022). Nil → the pool is not wired and embeddings and transcription behave exactly as
+	// before it existed.
+	Specialists SpecialistPool
 	// Slots maps slot name → raw llama-server port, from config.Config.Slots
 	// (the V5 read-only config file). Used to pin on-demand loads to the
 	// slot a foundry_slot backend points at. Nil → on-demand load fails
@@ -98,6 +104,13 @@ type Deps struct {
 	// internal/ctxledger). Nil → no observation; never alters a request or
 	// response either way.
 	CtxLedger *ctxledger.Ledger
+	// InFlight is the gauge of requests being served right now, per model and consumer, shared with the dashboard's status
+	// endpoint (one instance wired in cmd/forge). Nil → no gauge; the usage_events rows are written regardless of it.
+	InFlight *inflight.Gauge
+	// SlotKind names the engine kind (enginekind.LlamaCpp | VLLM | Radiance) running on a raw slot port, from what the engine manager launched
+	// there (the armed slot_launches row). It selects the slot probe, the busy series and the ledger's reuse parser. Nil, "" or an unknown kind
+	// read as llama.cpp, the default kind, so a router without it behaves as before engine kinds existed.
+	SlotKind func(port int) string
 }
 
 // Server is the a0 router.
@@ -196,6 +209,8 @@ func (s *Server) SlotErrorCount(port int, windowSeconds int64) (int, int64) {
 //   - GET /healthz              — unauthenticated liveness (systemd ExecStartPost)
 //   - GET /v1/models            — OpenAI-shaped model list (tailnet-conditional auth)
 //   - POST /v1/chat/completions — OpenAI-compatible passthrough (tailnet-conditional auth)
+//   - POST /v1/systemone        — typed decisions from a native decision model (TypeSafe System One
+//     compatible; model in the body, resolved and capability-gated by a0 — see systemone.go)
 //   - POST /v1/embeddings       — static passthrough to the embedding service
 //     (tailnet-conditional auth; no routing/failover — see embeddings.go)
 //   - GET /v1/load-status       — model-keyed load-progress poll (Sprint 1, a0 load
@@ -224,14 +239,27 @@ func (s *Server) Handler() http.Handler {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "router not configured"})
 			return
 		}
-		resp := BuildModelsResponse(r.Context(), s.deps.StoreCatalog, s.providerRows(r.Context()))
+		output := r.URL.Query().Get("output")
+		switch output {
+		case "", store.OutputText, store.OutputAudio, store.OutputDecisions:
+		default:
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"error":  "validation_failed",
+				"fields": map[string]string{"output": "must be one of text, audio, decisions"},
+			})
+			return
+		}
+		resp := BuildModelsResponseFor(r.Context(), s.deps.StoreCatalog, s.providerRows(r.Context()), output)
 		writeJSON(w, http.StatusOK, resp)
 	})
 
-	mux.HandleFunc("POST /v1/chat/completions", s.chatCompletions)
-	mux.HandleFunc("POST /v1/embeddings", s.embeddings)
+	mux.HandleFunc("POST /v1/chat/completions", s.track("", s.chatCompletions))
+	mux.HandleFunc("POST /v1/systemone", s.track("", s.systemOne))
+	mux.HandleFunc("POST /v1/embeddings", s.track("embeddings", s.embeddings))
 	mux.HandleFunc("GET /v1/load-status", s.loadStatus)
-	mux.HandleFunc("POST /v1/audio/speech", s.speechProxy("/audio/speech"))
+	mux.HandleFunc("POST /v1/audio/speech", s.track("tts", s.audioSpeech(s.speechProxy("/audio/speech"))))
+	mux.HandleFunc("POST /v1/audio/transcriptions", s.track("", s.audioTranscriptions))
+	mux.HandleFunc("POST /v1/align", s.track("", s.align))
 	mux.HandleFunc("GET /v1/voices", s.speechProxy("/voices"))
 
 	return mux
@@ -248,6 +276,20 @@ func (s *Server) cfg() *RouterConfig {
 	return &emptyRouterConfig
 }
 
+// slotSpec is the engine Spec of the slot on port. An unknown kind is logged and read as llama.cpp rather than guessed at.
+func (s *Server) slotSpec(port int) enginekind.Spec {
+	kind := ""
+	if s.deps.SlotKind != nil {
+		kind = s.deps.SlotKind(port)
+	}
+	spec, err := enginekind.Lookup(kind)
+	if err != nil {
+		log.Printf("router: slot port %d: %v; reading it as llama.cpp", port, err)
+		spec, _ = enginekind.Lookup("")
+	}
+	return spec
+}
+
 // catalog returns the SlotCatalog, lazily creating a ttlCatalog if none was
 // injected via Deps. The lazy catalog uses http.DefaultClient for /health,
 // /props, /metrics probes against 127.0.0.1:<slot port>.
@@ -257,6 +299,7 @@ func (s *Server) catalog() SlotCatalog {
 	}
 	s.catalogOnce.Do(func() {
 		s.lazyCatalog = newTTLCatalog(s.deps.HTTPClient)
+		s.lazyCatalog.specOf = s.slotSpec
 	})
 	return s.lazyCatalog
 }

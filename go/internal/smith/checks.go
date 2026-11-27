@@ -18,9 +18,11 @@ import (
 
 	"github.com/jsaigou/the-forge/internal/collector"
 	"github.com/jsaigou/the-forge/internal/config"
+	"github.com/jsaigou/the-forge/internal/engine"
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/smith/comfyui"
 	"github.com/jsaigou/the-forge/internal/smith/web"
+	"github.com/jsaigou/the-forge/internal/speechsetup"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -96,6 +98,13 @@ type CheckEnv struct {
 	// only by blocked_work_recheck. nil ⇒ that check reports itself
 	// skipped, zero network calls.
 	Web web.Service
+
+	// SpecialistProblems is the Deps seam of the same name: always-on specialist-pool members that should be running and are not
+	// (ADR-0022). nil = the pool is not running on this host.
+	SpecialistProblems func(ctx context.Context) []SpecialistProblem
+
+	// SpeechReport is the Deps seam of the same name: what the node can do with speech. nil = the engine pool is not wired.
+	SpeechReport func(ctx context.Context) (speechsetup.Report, error)
 
 	// JournalErrors is the Deps seam of the same name (forge-* unit
 	// journals, bounded last-N) — gpu_device_lost's unit-journal source.
@@ -175,6 +184,19 @@ type CheckEnv struct {
 	// full paths proposeComfyUIDelete excludes from any delete proposal.
 	ComfyUIKeepFiles []string
 
+	// SlotLaunches lists the slot_launches rows (ADR-0026). nil falls back to Store.SlotLaunches().List; with neither, the launch checks skip.
+	SlotLaunches func(ctx context.Context) ([]store.SlotLaunch, error)
+	// Proc reads /proc/<pid>/cmdline for slot_launch_matches_process. nil = the host /proc (ErrProcUnavailable off Linux, which skips the check).
+	Proc engine.ProcInspector
+	// LauncherDir is where the slot shims are installed ("" = /usr/local/lib/forge); ReadFile reads them (nil = os.ReadFile).
+	LauncherDir string
+	ReadFile    func(path string) ([]byte, error)
+	// Host, CwsrPath and RadianceBuildEnv are radiance_host_prereqs' inputs: filesystem/environment access (nil = the host's), the amdgpu cwsr_enable
+	// parameter path ("" = the default, unverified on the host) and the per-build launch_env reader (nil = no build has a launch environment).
+	Host             HostFS
+	CwsrPath         string
+	RadianceBuildEnv BuildLaunchEnvReader
+
 	// Logf is the shared diagnostic logger (Smith.logf, copied through
 	// unchanged) — lets the free-function propose* helpers in propose.go
 	// surface a swallowed error instead of silently dropping a proposal.
@@ -210,6 +232,14 @@ var registry = []Check{
 		Run: runGTTCeiling,
 	},
 	{
+		ID: "host_memory", Name: "Host memory headroom", Category: CategoryMemory, Fast: true,
+		Run: runHostMemory,
+	},
+	{
+		ID: "swap_pressure", Name: "Swap pressure", Category: CategoryMemory, Fast: true,
+		Run: runSwapPressure,
+	},
+	{
 		ID: "disk_space", Name: "Disk space", Category: CategoryStorage, Fast: true,
 		Run: runDiskSpace,
 	},
@@ -224,6 +254,23 @@ var registry = []Check{
 	{
 		ID: "slot_model_identity", Name: "Configured vs actually-running model identity", Category: CategorySlots, Fast: true,
 		Run: runSlotModelIdentity,
+	},
+	{
+		ID: "slot_launch_matches_process", Name: "Running process vs armed launch row", Category: CategorySlots, Fast: true,
+		Run: runSlotLaunchMatchesProcess,
+	},
+	{
+		ID: "slot_launch_matches_catalog", Name: "Armed launch row vs catalog rebuild", Category: CategorySlots, Fast: true,
+		Run: runSlotLaunchMatchesCatalog,
+	},
+	{
+		ID: "launcher_matches_embedded", Name: "Installed slot launcher vs embedded shim", Category: CategorySlots, Fast: true,
+		Run: runLauncherMatchesEmbedded,
+	},
+	{
+		ID: "radiance_host_prereqs", Name: "Radiance host prerequisites", Category: CategoryConfig, Fast: false,
+		Skip: radianceNotInUse,
+		Run:  runRadianceHostPrereqs,
 	},
 	{
 		ID: "capability_tier_coverage", Name: "Performance-class coverage", Category: CategoryConfig, Fast: true,
@@ -244,6 +291,14 @@ var registry = []Check{
 	{
 		ID: "always_on_ports", Name: "Always-on service ports", Category: CategoryServices, Fast: true,
 		Run: runAlwaysOnPorts,
+	},
+	{
+		ID: "specialist_pool", Name: "Specialist pool always-on members", Category: CategoryServices, Fast: true,
+		Run: runSpecialistPool,
+	},
+	{
+		ID: "speech_readiness", Name: "Speech readiness", Category: CategoryServices, Fast: true,
+		Run: runSpeechReadiness,
 	},
 	{
 		ID: "forge_self", Name: "forge self-check", Category: CategoryDaemons, Fast: true,
@@ -358,6 +413,8 @@ func (s *Smith) checkEnv(ctx context.Context) *CheckEnv {
 		BinaryVersion:   s.d.BinaryVersion,
 		BinariesEnabled: s.BinariesEnabled(ctx),
 
+		SpecialistProblems:    s.d.SpecialistProblems,
+		SpeechReport:          s.d.SpeechReport,
 		JournalErrors:         s.d.JournalErrors,
 		KernelJournal:         s.d.KernelJournal,
 		GitAhead:              s.d.GitAhead,
@@ -668,6 +725,80 @@ func runGTTCeiling(_ context.Context, env *CheckEnv) Finding {
 			SummaryKey: "checks.gtt_ceiling.ok",
 			Params:     map[string]any{"pct": round1(pct)},
 			Evidence:   ev}
+	}
+}
+
+// runHostMemory — the host, not the GTT ceiling, is the binding limit on a unified-memory machine (2026-11-17 review: GTT showed 24 GiB free while
+// MemAvailable was 12 GiB and swap was full). warn when MemAvailable falls under the dynamic floor plus the growth margin, crit under the floor
+// itself; the floor and margin are infra.memory.
+func runHostMemory(_ context.Context, env *CheckEnv) Finding {
+	const id = "host_memory"
+	if env.Snap == nil {
+		return skipFinding(id, "no collector snapshot")
+	}
+	l := env.Snap.Metrics.Ledger
+	if l.HostTotal <= 0 || l.HostAvail <= 0 {
+		return skipFinding(id, "host memory metrics unavailable this cycle")
+	}
+	var floor, margin int64
+	if env.Cfg != nil {
+		floor, margin = env.Cfg().Memory.HostFloorBytes, env.Cfg().Memory.GrowthMarginBytes
+	}
+	avail := l.HostAvail
+	ev := map[string]any{
+		"host_total_bytes": l.HostTotal, "host_avail_bytes": avail, "floor_bytes": floor, "margin_bytes": margin,
+		"model_budget_bytes": l.ModelBudget, "model_used_bytes": l.ModelUsed, "specialist_declared_bytes": l.SpecialistDeclared,
+		"free_bytes": l.Free, "binding": l.Binding,
+	}
+	gib := func(b int64) float64 { return round1(float64(b) / (1 << 30)) }
+	params := map[string]any{"avail_gib": gib(avail), "floor_gib": gib(floor), "warn_gib": gib(floor + margin)}
+	switch {
+	case floor > 0 && avail < floor:
+		return Finding{CheckID: id, Severity: SeverityCrit,
+			Summary:    fmt.Sprintf("only %.1f GiB of host memory available, below the %.1f GiB floor", gib(avail), gib(floor)),
+			SummaryKey: "checks.host_memory.crit", Params: params, Evidence: ev, KBRefs: []string{"pitfalls:gtt-ceiling"}}
+	case floor > 0 && avail < floor+margin:
+		return Finding{CheckID: id, Severity: SeverityWarn,
+			Summary:    fmt.Sprintf("%.1f GiB of host memory available, within the %.1f GiB growth margin above the %.1f GiB floor", gib(avail), gib(margin), gib(floor)),
+			SummaryKey: "checks.host_memory.warn", Params: params, Evidence: ev, KBRefs: []string{"pitfalls:gtt-ceiling"}}
+	default:
+		return Finding{CheckID: id, Severity: SeverityOK,
+			Summary:    fmt.Sprintf("%.1f GiB of host memory available", gib(avail)),
+			SummaryKey: "checks.host_memory.ok", Params: params, Evidence: ev}
+	}
+}
+
+// runSwapPressure — swap on ForgeHost is zram, i.e. compressed RAM, so swap in use is memory pressure, not spare capacity (it held 7.6 GiB of tmpfs
+// scratch at 1.05:1 on 2026-11-17). Warn when more than infra.memory.swap_warn_bytes is in use; crit when it is exhausted.
+func runSwapPressure(_ context.Context, env *CheckEnv) Finding {
+	const id = "swap_pressure"
+	if env.Snap == nil {
+		return skipFinding(id, "no collector snapshot")
+	}
+	m := env.Snap.Metrics.Memory
+	if m.SwapTotalBytes <= 0 {
+		return Finding{CheckID: id, Severity: SeverityOK, Summary: "no swap configured", SummaryKey: "checks.swap_pressure.none"}
+	}
+	var warn int64 = 1 << 30
+	if env.Cfg != nil && env.Cfg().Memory.SwapWarnBytes > 0 {
+		warn = env.Cfg().Memory.SwapWarnBytes
+	}
+	gib := func(b int64) float64 { return round1(float64(b) / (1 << 30)) }
+	ev := map[string]any{"swap_used_bytes": m.SwapUsedBytes, "swap_total_bytes": m.SwapTotalBytes, "warn_bytes": warn}
+	params := map[string]any{"used_gib": gib(m.SwapUsedBytes), "total_gib": gib(m.SwapTotalBytes), "warn_gib": gib(warn)}
+	switch {
+	case m.SwapUsedBytes >= m.SwapTotalBytes*95/100:
+		return Finding{CheckID: id, Severity: SeverityCrit,
+			Summary:    fmt.Sprintf("swap is exhausted (%.1f of %.1f GiB); it is compressed RAM, so this is memory pressure", gib(m.SwapUsedBytes), gib(m.SwapTotalBytes)),
+			SummaryKey: "checks.swap_pressure.crit", Params: params, Evidence: ev}
+	case m.SwapUsedBytes >= warn:
+		return Finding{CheckID: id, Severity: SeverityWarn,
+			Summary:    fmt.Sprintf("%.1f GiB of swap in use (warn at %.1f GiB); it is compressed RAM", gib(m.SwapUsedBytes), gib(warn)),
+			SummaryKey: "checks.swap_pressure.warn", Params: params, Evidence: ev}
+	default:
+		return Finding{CheckID: id, Severity: SeverityOK,
+			Summary:    fmt.Sprintf("%.1f GiB of swap in use", gib(m.SwapUsedBytes)),
+			SummaryKey: "checks.swap_pressure.ok", Params: params, Evidence: ev}
 	}
 }
 
@@ -1000,11 +1131,18 @@ func runGPUDeviceLost(ctx context.Context, env *CheckEnv) Finding {
 	ev := map[string]any{"since": since.Format(time.RFC3339), "window_minutes": windowMin}
 	matches := []map[string]any{}
 
+	// wanted counts the journals this check set out to read and unreadable names the ones it could not: a clean result from a journal that
+	// was never read is not a clean journal, so confidence (not severity) says how much of the evidence is missing.
+	wanted := 0
+	var unreadable []string
+
 	// Kernel journal: the amdgpu driver's own words.
 	if env.KernelJournal != nil {
+		wanted++
 		lines, err := env.KernelJournal(ctx, 300, since)
 		if err != nil {
 			ev["kernel_journal_error"] = err.Error()
+			unreadable = append(unreadable, "kernel journal")
 		} else {
 			kernel := matchLines(lines, `ring\s+comp_\S+\s+timeout`, `device\s+wedged`, `ErrorDeviceLost`)
 			if len(kernel) > 0 {
@@ -1015,9 +1153,11 @@ func runGPUDeviceLost(ctx context.Context, env *CheckEnv) Finding {
 
 	// Unit journals: llama-server's send_error lines.
 	if env.JournalErrors != nil {
+		wanted++
 		lines, err := env.JournalErrors(ctx, 300, since)
 		if err != nil {
 			ev["unit_journal_error"] = err.Error()
+			unreadable = append(unreadable, "unit journals")
 		} else {
 			unit := matchLines(lines, `ErrorDeviceLost`, `vk::Queue::submit`, `device\s+lost`)
 			if len(unit) > 0 {
@@ -1027,18 +1167,33 @@ func runGPUDeviceLost(ctx context.Context, env *CheckEnv) Finding {
 	}
 
 	ev["matches"] = matches
+	confidence, note := journalConfidence(wanted, unreadable)
 	if len(matches) > 0 {
 		return Finding{CheckID: id, Severity: SeverityCrit,
 			Summary:    fmt.Sprintf("%d device-lost signature(s) in journals (last %dm)", len(matches), windowMin),
 			SummaryKey: "checks.gpu_device_lost.detected",
 			Params:     map[string]any{"count": len(matches), "minutes": windowMin},
-			Evidence:   ev, KBRefs: []string{"pitfalls:inference-hang"}}
+			Evidence:   ev, KBRefs: []string{"pitfalls:inference-hang"},
+			Confidence: confidence, ConfidenceNote: note}
 	}
 	return Finding{CheckID: id, Severity: SeverityOK,
 		Summary:    fmt.Sprintf("no GPU device-lost signatures in journals (last %dm)", windowMin),
 		SummaryKey: "checks.gpu_device_lost.ok",
 		Params:     map[string]any{"minutes": windowMin},
-		Evidence:   ev}
+		Evidence:   ev, Confidence: confidence, ConfidenceNote: note}
+}
+
+// journalConfidence derives gpu_device_lost's confidence from how many of the journals it wanted it could actually read: all of them is high,
+// none is low, some is medium, and the note names what was unreadable.
+func journalConfidence(wanted int, unreadable []string) (Confidence, string) {
+	switch {
+	case len(unreadable) == 0:
+		return ConfidenceHigh, ""
+	case len(unreadable) >= wanted:
+		return ConfidenceLow, "could not read the " + strings.Join(unreadable, " or ") + "; an empty result here is not evidence of a clean journal"
+	default:
+		return ConfidenceMedium, "could not read the " + strings.Join(unreadable, " or ") + "; the result covers only the other journal"
+	}
 }
 
 // matchLines returns up to 5 recent lines matching any of the regexes,
@@ -1117,6 +1272,51 @@ func runAlwaysOnPorts(_ context.Context, env *CheckEnv) Finding {
 		SummaryKey: "checks.always_on_ports.ok",
 		Params:     map[string]any{"count": len(names)},
 		Evidence:   ev}
+}
+
+// SpecialistProblem is one always-on specialist-pool member that should be running and is not.
+type SpecialistProblem struct {
+	Slot     string
+	Occupant string
+	State    string // starting | failed | ...
+	Err      string
+	Attempts int
+}
+
+// runSpecialistPool — every always-on specialist (ADR-0022) should be running. A member the operator stopped is not a problem (the pool does not
+// report it). Warn only: the pool restarts failed members with backoff on its own. This is the check the SPECIALIST_FAILED anomaly clears
+// against, so its investigation closes through the normal self-review once the member is back.
+func runSpecialistPool(ctx context.Context, env *CheckEnv) Finding {
+	const id = "specialist_pool"
+	if env.SpecialistProblems == nil {
+		return skipFinding(id, "specialist pool not running")
+	}
+	problems := env.SpecialistProblems(ctx)
+	if len(problems) == 0 {
+		return Finding{CheckID: id, Severity: SeverityOK, Summary: "all always-on specialists are running",
+			SummaryKey: "checks.specialist_pool.ok", Evidence: map[string]any{"problems": 0}}
+	}
+	first := problems[0]
+	ev := make([]map[string]any, 0, len(problems))
+	for _, p := range problems {
+		ev = append(ev, map[string]any{"slot": p.Slot, "occupant": p.Occupant, "state": p.State, "error": p.Err, "attempts": p.Attempts})
+	}
+	summary := fmt.Sprintf("specialist %q in %s is %s", first.Occupant, first.Slot, first.State)
+	if first.Err != "" {
+		summary += ": " + first.Err
+	}
+	summaryKey := "checks.specialist_pool.down"
+	errSuffix := ""
+	if first.Err != "" {
+		errSuffix = ": " + first.Err // a ready-made suffix so the translated sentence needs no punctuation logic
+	}
+	params := map[string]any{"name": first.Occupant, "slot": first.Slot, "state": first.State, "error": errSuffix}
+	if len(problems) > 1 {
+		summary += fmt.Sprintf(" (+%d more)", len(problems)-1)
+		summaryKey = "checks.specialist_pool.down_more"
+		params["extra"] = len(problems) - 1
+	}
+	return Finding{CheckID: id, Severity: SeverityWarn, Summary: summary, SummaryKey: summaryKey, Params: params, Evidence: map[string]any{"problems": ev}}
 }
 
 // runForgeSelf — the daemon's own integrity surface: PRAGMA quick_check

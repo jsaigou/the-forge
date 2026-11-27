@@ -2,14 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   canonicalFlag,
-  LLAMA_FLAGS,
   parseLoadOptions,
   serializeLoadOptions,
-  VLLM_FLAGS,
   type FlagRef,
   type LoadOption,
 } from "../lib/llamaFlags";
 import { translatedFlagLabel, translatedFlagWhy } from "../lib/flagI18n";
+import { flagTableForKind, requiredFlagsForKind } from "../lib/runtime";
 import { translatedHazardsFor } from "../lib/hazardLabels";
 import { InfoTip } from "./InfoTip";
 
@@ -30,17 +29,19 @@ import { InfoTip } from "./InfoTip";
 export function LoadOptionsEditor({
   value,
   onChange,
-  backend,
+  kind,
   nCtx,
 }: {
   value: string[];
   onChange: (next: string[]) => void;
-  backend: string;
+  // The config's runtime kind (lib/runtime.ts): picks the flag table, help text and per-runtime rules.
+  kind: string;
   nCtx: number;
 }) {
   const { t } = useTranslation("common");
-  const isVllm = backend === "vllm";
-  const flagTable = isVllm ? VLLM_FLAGS : LLAMA_FLAGS;
+  const flagTable = flagTableForKind(kind);
+  const requiredFlags = requiredFlagsForKind(kind);
+  const isRadiance = kind === "radiance";
   const nextId = useRef(0);
   const [rows, setRows] = useState<(LoadOption & { id: number })[]>(() =>
     parseLoadOptions(value, flagTable).map((o) => ({ ...o, id: nextId.current++ })),
@@ -80,7 +81,8 @@ export function LoadOptionsEditor({
   function addCurated(key: string) {
     const ref = flagTable[key];
     if (!ref) return;
-    const initial = ref.presets?.[0] ?? ref.placeholder ?? (ref.arg === "number" ? "1" : "");
+    // Radiance has no defaults: every value is a per-model choice, so a new row starts empty rather than pre-filled.
+    const initial = isRadiance ? "" : (ref.presets?.[0] ?? ref.placeholder ?? (ref.arg === "number" ? "1" : ""));
     setRows([...rows, { id: nextId.current++, flag: key, value: initial, ref }]);
   }
 
@@ -130,8 +132,22 @@ export function LoadOptionsEditor({
     );
   }
 
+  const missingRequired = requiredFlags.filter(
+    (f) => !rows.some((r) => canonicalFlag(r.flag) === f && (r.value ?? "").trim() !== ""),
+  );
+
   return (
     <div className="load-opt-editor">
+      {isRadiance && (
+        <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 8 }}>
+          {t("catalog_form.load_options.radiance_note")}
+        </div>
+      )}
+      {missingRequired.map((f) => (
+        <div key={f} role="alert" style={{ fontSize: 11.5, color: "var(--warn, #b45309)", marginBottom: 8 }}>
+          {t("catalog_form.load_options.required_flag_missing", { flag: f })}
+        </div>
+      ))}
       {booleanFlags.length > 0 && (
         <div className="flag-chips">
           {booleanFlags.map(([key, ref]) => {
@@ -143,8 +159,8 @@ export function LoadOptionsEditor({
                 className={`flag-chip ${present ? "on" : ""}`}
                 onClick={() => toggleBoolean(key, ref)}
               >
-                {translatedFlagLabel(t, isVllm, key, ref.label)}
-                <InfoTip text={translatedFlagWhy(t, isVllm, key, ref.why)} />
+                {translatedFlagLabel(t, kind, key, ref.label)}
+                <InfoTip text={translatedFlagWhy(t, kind, key, ref.why)} />
               </button>
             );
           })}
@@ -178,7 +194,7 @@ export function LoadOptionsEditor({
                   ))}
                 </div>
               )}
-              {r.ref && <InfoTip text={translatedFlagWhy(t, isVllm, canonicalFlag(r.flag), r.ref.why)} />}
+              {r.ref && <InfoTip text={translatedFlagWhy(t, kind, canonicalFlag(r.flag), r.ref.why)} />}
               {hazard && <InfoTip text={hazard} className="hazard-tip" />}
               <button type="button" className="row-remove" onClick={() => removeRow(r.id)} aria-label={t("catalog_form.load_options.remove_flag_aria", { flag: r.flag })}>
                 ×
@@ -199,7 +215,7 @@ export function LoadOptionsEditor({
           <option value="">{t("catalog_form.load_options.add_option_ellipsis")}</option>
           {addableCurated.map(([key, ref]) => (
             <option key={key} value={key}>
-              {translatedFlagLabel(t, isVllm, key, ref.label)} ({key})
+              {translatedFlagLabel(t, kind, key, ref.label)} ({key})
             </option>
           ))}
         </select>

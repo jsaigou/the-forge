@@ -1,11 +1,10 @@
 import { useTranslation } from "react-i18next";
 import { formatCurrency, formatWatts } from "../../lib/format";
 import { useCostSettings, useCostSummary, useMetrics } from "../../lib/queries";
-import { CompressorSavingsChips } from "../CompressionSavingsChips";
 
-// Widget "right-now" (see lib/widgetRegistry.ts). Power consumption estimate,
-// electricity cost, and Compressor savings — the operator's most-checked
-// figures, hence Overview rather than buried in the Cost tab.
+// Widget "right-now" (see lib/widgetRegistry.ts). Power consumption estimate
+// and electricity cost — the operator's most-checked figures, hence Overview
+// rather than buried in the Cost tab.
 //
 // ADR-0012: window_ is now a prop (default "24h") instead of hardcoded —
 // previously the whole row was fixed at 24h because Overview had no range
@@ -39,7 +38,6 @@ export function RightNowWidget({ window_ = "24h" }: { window_?: string }) {
           <div className="k">{t("right_now.electricity_k")}</div>
           <div className="v cost">{energy ? formatCurrency(energy.cost_display, displayCurrency) : ""}</div>
         </div>
-        <CompressorSavingsChips window_={window_} />
       </div>
     </>
   );

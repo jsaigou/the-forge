@@ -104,8 +104,17 @@ func (p *overviewPage) View() string {
 	// GTT meter
 	if p.metrics != nil && p.metrics.GTTUsedBytes != nil && p.metrics.GTTTotalBytes != nil {
 		used, total := *p.metrics.GTTUsedBytes, *p.metrics.GTTTotalBytes
+		if total <= 0 {
+			total = 1 // unknown/zero pool: show an empty meter rather than dividing by zero
+		}
 		pct := float64(used) / float64(total)
+		if pct > 1 {
+			pct = 1
+		}
 		barW := min64(int64(p.width-40), 40)
+		if barW < 0 {
+			barW = 0
+		}
 		filled := int(pct * float64(barW))
 		bar := strings.Repeat("█", filled) + strings.Repeat("░", int(barW)-filled)
 		color := okStyle

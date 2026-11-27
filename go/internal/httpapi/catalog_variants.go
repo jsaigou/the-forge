@@ -101,7 +101,7 @@ func (s *Server) handleCatalogVariantCreate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var b variantBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
@@ -138,7 +138,7 @@ func (s *Server) handleCatalogVariantUpdate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var b variantBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
@@ -200,11 +200,11 @@ func (s *Server) handleCatalogVariantValidate(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var b variantBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
-	if fields, codes := s.validateVariant(r.Context(), b, 0); len(fields) > 0 {
+	if fields, codes := s.validateVariant(r.Context(), b, validateExcludeID(r)); len(fields) > 0 {
 		writeValidationErrorCodes(w, fields, codes)
 		return
 	}

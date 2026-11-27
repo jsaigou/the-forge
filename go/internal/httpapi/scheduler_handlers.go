@@ -101,7 +101,7 @@ func (s *Server) handleReservationCreate(w http.ResponseWriter, r *http.Request)
 		// V4 distinguishes 409 (conflict) from 422 (validation); the
 		// scheduler returns a wrapped error for conflicts.
 		if isConflict(err) {
-			writeError(w, http.StatusConflict, err.Error())
+			writeErrorCode(w, http.StatusConflict, "request_conflict", map[string]any{"detail": err.Error()}, err.Error())
 			return
 		}
 		writeInternalError(w, err)
@@ -150,7 +150,7 @@ func (s *Server) handleReservationUpdate(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	if err := s.deps.Sched.UpdateReservation(ctx, label, rsv); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, err.Error())
+			writeErrorCode(w, http.StatusNotFound, "not_found_detail", map[string]any{"detail": err.Error()}, err.Error())
 			return
 		}
 		if isPermissionDenied(err) {
@@ -184,7 +184,7 @@ func (s *Server) handleReservationCancel(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	if err := s.deps.Sched.CancelReservation(ctx, label, "human"); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, err.Error())
+			writeErrorCode(w, http.StatusNotFound, "not_found_detail", map[string]any{"detail": err.Error()}, err.Error())
 			return
 		}
 		if isPermissionDenied(err) {
@@ -234,7 +234,7 @@ func (s *Server) handleSchedulerCouldLoad(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if s.deps.Sched == nil {
-		writeError(w, http.StatusServiceUnavailable, "scheduler not configured")
+		writeErrorCode(w, http.StatusServiceUnavailable, "scheduler_not_configured", nil, "scheduler not configured")
 		return
 	}
 	horizon := time.Duration(routerDefaultEnsureLoadedTimeoutS * float64(time.Second))
@@ -334,12 +334,7 @@ func (s *Server) handleSwitch(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Config != nil {
 		cfg := s.deps.Config()
 		if _, ok := cfg.Modes[mode]; !ok {
-			writeJSON(w, http.StatusBadRequest, map[string]any{
-				"success": false,
-				"message": fmt.Sprintf("Unknown mode: %s", mode),
-				"code":    "unknown_mode",
-				"params":  map[string]any{"mode": mode},
-			})
+			writeOpError(w, http.StatusBadRequest, "unknown_mode", map[string]any{"mode": mode}, fmt.Sprintf("Unknown mode: %s", mode))
 			return
 		}
 	}
@@ -348,11 +343,7 @@ func (s *Server) handleSwitch(w http.ResponseWriter, r *http.Request) {
 	if s.switchState.inProgress {
 		target := s.switchState.target
 		s.mu.Unlock()
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"success": false,
-			"message": fmt.Sprintf("Switch already in progress to %s", target),
-			"code":    "already_in_progress",
-		})
+		writeOpError(w, http.StatusConflict, "already_in_progress", nil, fmt.Sprintf("Switch already in progress to %s", target))
 		return
 	}
 	s.switchState.inProgress = true
@@ -416,6 +407,23 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, fields)
 		return
 	}
+	// The CLI documents the slot as optional (server default). Resolve an empty
+	// slot to the first empty bay in load order (a just-freed one last) before validation, so availability decides
+	// placement instead of rejecting the request. A caller that needs a
+	// specific slot still sends it; the scheduler/a0 remains the richer path.
+	if b.Slot == "" {
+		st := s.buildStatusResponse()
+		order := []string{"a1", "a2", "a3", "a4"}
+		if o, ok := s.deps.Engine.(engine.SlotOrderer); ok {
+			order = o.LoadOrder()
+		}
+		for _, name := range order {
+			if m, ok := st.Slots[name]; !ok || m == nil || *m == "" {
+				b.Slot = name
+				break
+			}
+		}
+	}
 	if _, fields := b.validate(); len(fields) > 0 {
 		writeValidationError(w, fields)
 		return
@@ -424,13 +432,18 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "engine"}, "engine not wired")
 		return
 	}
+	// One owner per catalog model: a config the specialist pool hosts is not an LLM-slot model while it is a specialist. Say so up front
+	// rather than accepting the request and failing a moment later.
+	if s.deps.Specialists != nil && s.deps.Specialists.PooledConfig(r.Context(), b.Mode) {
+		writeErrorCode(w, http.StatusConflict, "specialist_owned_config", map[string]any{"mode": b.Mode},
+			fmt.Sprintf("%s is a specialist; set its Behavior to Disabled before loading it into a model slot", b.Mode))
+		return
+	}
+
 	if s.deps.Config != nil {
 		cfg := s.deps.Config()
 		if _, ok := cfg.Modes[b.Mode]; !ok {
-			writeJSON(w, http.StatusBadRequest, map[string]any{
-				"success": false,
-				"message": fmt.Sprintf("Unknown mode: %s", b.Mode),
-			})
+			writeOpError(w, http.StatusBadRequest, "unknown_mode", map[string]any{"mode": b.Mode}, fmt.Sprintf("Unknown mode: %s", b.Mode))
 			return
 		}
 	}
@@ -446,12 +459,14 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 	// context — no silent retry loop; the caller gets one clear answer.
 	evict := dedupeEvict(b.Evict, b.Slot)
 	if fits, reason, requiredBytes, freeBytes, err := s.fitsForSlotLoad(b.Mode, b.Slot, evict); err != nil {
-		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("fit check failed: %v", err))
+		writeErrorCode(w, http.StatusServiceUnavailable, "fit_check_failed", map[string]any{"detail": fmt.Sprintf("fit check failed: %v", err)}, fmt.Sprintf("fit check failed: %v", err))
 		return
 	} else if !fits {
 		resp := map[string]any{
 			"success":        false,
 			"error":          "wont_fit",
+			"code":           "wont_fit",
+			"params":         map[string]any{"reason": reason},
 			"message":        reason,
 			"required_bytes": requiredBytes,
 			"free_bytes":     freeBytes,
@@ -489,17 +504,17 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	if cur, ok := s.slotLoading[b.Slot]; ok && cur.inProgress {
 		s.mu.Unlock()
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"success": false,
-			"message": fmt.Sprintf("Slot %s already loading", b.Slot),
-		})
+		writeOpError(w, http.StatusConflict, "slot_loading", map[string]any{"slot": b.Slot}, fmt.Sprintf("Slot %s already loading", b.Slot))
 		return
 	}
+	now := time.Now()
 	s.slotLoading[b.Slot] = slotTransition{
 		inProgress: true,
 		mode:       b.Mode,
-		startedAt:  time.Now(),
+		startedAt:  now,
 	}
+	delete(s.slotLastLoad, b.Slot) // a new attempt supersedes the previous result
+	op := s.ops.start("load", b.Slot, b.Mode, now)
 	s.mu.Unlock()
 
 	s.audit(r, "human", "load_slot", b.Slot+":"+b.Mode, "")
@@ -510,12 +525,15 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 			"status": s.buildStatusResponse(),
 		})
 	}
-	go s.runLoadBackground(s.bgCtx, b.Mode, b.Slot, evict)
+	go s.runLoadBackground(s.bgCtx, b.Mode, b.Slot, evict, op)
 
+	// 200 with in_progress:true stays the contract (clients already treat it as "accepted"); operation is
+	// additive: poll GET /api/v1/operations/{id}?wait=N to learn how it ended.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":     true,
 		"message":     fmt.Sprintf("Loading %s into %s", b.Mode, b.Slot),
 		"in_progress": true,
+		"operation":   s.ops.view(op),
 	})
 }
 
@@ -671,7 +689,7 @@ func (s *Server) unloadThenLoad(ctx context.Context, mode, slot string, evict []
 }
 
 // runLoadBackground performs the engine load call.
-func (s *Server) runLoadBackground(parent context.Context, mode, slot string, evict []string) {
+func (s *Server) runLoadBackground(parent context.Context, mode, slot string, evict []string, op *operation) {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	result := s.unloadThenLoad(ctx, mode, slot, evict)
@@ -679,10 +697,19 @@ func (s *Server) runLoadBackground(parent context.Context, mode, slot string, ev
 		Success: result.Success,
 		Message: s.annotateCtxReduction(mode, result),
 		NCtx:    result.NCtx,
+		Detail:  result.Detail,
+	}
+	now := time.Now()
+	rec := loadRecord{mode: mode, state: "ready", message: out.Message, detail: out.Detail, nCtx: out.NCtx, at: now, opID: opID(op)}
+	if !result.Success {
+		rec.state = "failed"
 	}
 	s.mu.Lock()
 	s.slotLoading[slot] = slotTransition{}
+	s.slotLastLoad[slot] = rec
 	s.mu.Unlock()
+	// After the slot state is updated, so whoever the finish wakes reads a /status that already agrees.
+	s.ops.finish(op, result.Success, out.Message, out.Detail, out.NCtx, now)
 	if s.deps.Publish == nil {
 		return
 	}
@@ -691,9 +718,10 @@ func (s *Server) runLoadBackground(parent context.Context, mode, slot string, ev
 		name = "load_failed"
 	}
 	s.deps.Publish.Publish(name, map[string]any{
-		"result": out,
-		"status": s.buildStatusResponse(),
-		"slot":   slot,
+		"result":       out,
+		"status":       s.buildStatusResponse(),
+		"slot":         slot,
+		"operation_id": opID(op),
 	})
 }
 
@@ -793,10 +821,7 @@ func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		if s.switchState.inProgress {
 			s.mu.Unlock()
-			writeJSON(w, http.StatusConflict, map[string]any{
-				"success": false,
-				"message": "Switch already in progress",
-			})
+			writeOpError(w, http.StatusConflict, "already_in_progress", nil, "Switch already in progress")
 			return
 		}
 		s.switchState.inProgress = true
@@ -804,6 +829,9 @@ func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
 		s.switchState.startedAt = time.Now()
 		s.switchState.lastResult = nil
 		startedAt := s.switchState.startedAt
+		for slot := range s.slotLastLoad {
+			delete(s.slotLastLoad, slot) // an explicit unload-all supersedes any remembered failure
+		}
 		s.mu.Unlock()
 		s.audit(r, "human", "unload_all", "", "")
 		if s.deps.Publish != nil {
@@ -825,18 +853,12 @@ func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	if cur, ok := s.slotLoading[b.Slot]; ok && cur.inProgress {
 		s.mu.Unlock()
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"success": false,
-			"message": fmt.Sprintf("Slot %s is currently loading", b.Slot),
-		})
+		writeOpError(w, http.StatusConflict, "slot_loading", map[string]any{"slot": b.Slot}, fmt.Sprintf("Slot %s is currently loading", b.Slot))
 		return
 	}
 	if cur, ok := s.slotUnloading[b.Slot]; ok && cur.inProgress {
 		s.mu.Unlock()
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"success": false,
-			"message": fmt.Sprintf("Slot %s is already unloading", b.Slot),
-		})
+		writeOpError(w, http.StatusConflict, "slot_unloading", map[string]any{"slot": b.Slot}, fmt.Sprintf("Slot %s is already unloading", b.Slot))
 		return
 	}
 	outgoingMode := ""
@@ -845,25 +867,29 @@ func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
 			outgoingMode = slotState.Mode
 		}
 	}
+	now := time.Now()
 	s.slotUnloading[b.Slot] = slotTransition{
 		inProgress: true,
 		mode:       outgoingMode,
-		startedAt:  time.Now(),
+		startedAt:  now,
 	}
+	delete(s.slotLastLoad, b.Slot) // unloading is the operator acknowledging a failed load
+	op := s.ops.start("unload", b.Slot, outgoingMode, now)
 	s.mu.Unlock()
 
 	s.audit(r, "human", "unload_slot", b.Slot, "")
-	go s.runUnloadBackground(s.bgCtx, b.Slot)
+	go s.runUnloadBackground(s.bgCtx, b.Slot, op)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":     true,
 		"message":     fmt.Sprintf("Unloading %s slot", b.Slot),
 		"in_progress": true,
+		"operation":   s.ops.view(op),
 	})
 }
 
 // runUnloadBackground performs a single-slot unload.
-func (s *Server) runUnloadBackground(parent context.Context, slot string) {
+func (s *Server) runUnloadBackground(parent context.Context, slot string, op *operation) {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	result := s.deps.Engine.Unload(ctx, slot)
@@ -871,17 +897,20 @@ func (s *Server) runUnloadBackground(parent context.Context, slot string) {
 		Success: result.Success,
 		Message: result.Message,
 		NCtx:    result.NCtx,
+		Detail:  result.Detail,
 	}
 	s.mu.Lock()
 	s.slotUnloading[slot] = slotTransition{}
 	s.mu.Unlock()
+	s.ops.finish(op, result.Success, out.Message, out.Detail, 0, time.Now())
 	if s.deps.Publish == nil {
 		return
 	}
 	s.deps.Publish.Publish("unload_complete", map[string]any{
-		"result": out,
-		"status": s.buildStatusResponse(),
-		"slot":   slot,
+		"result":       out,
+		"status":       s.buildStatusResponse(),
+		"slot":         slot,
+		"operation_id": opID(op),
 	})
 }
 
@@ -1045,11 +1074,11 @@ func (s *Server) handleServiceMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if mode.Type != "service" {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("mode %q is not a service mode", name))
+		writeErrorCode(w, http.StatusBadRequest, "not_a_service_mode", map[string]any{"detail": fmt.Sprintf("mode %q is not a service mode", name)}, fmt.Sprintf("mode %q is not a service mode", name))
 		return
 	}
 	if mode.Unit == "" {
-		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("service mode %q has no unit configured", name))
+		writeErrorCode(w, http.StatusUnprocessableEntity, "service_unit_missing", map[string]any{"detail": fmt.Sprintf("service mode %q has no unit configured", name)}, fmt.Sprintf("service mode %q has no unit configured", name))
 		return
 	}
 	s.runUnitOp(w, r, mode.Unit, "service_mode", name)
@@ -1082,7 +1111,11 @@ func (s *Server) handleFixedInfraService(name, unit string) http.HandlerFunc {
 			return
 		}
 		if _, ok := s.deps.Config().Ports[name]; !ok {
-			writeError(w, http.StatusNotFound, name+" is not configured on this deployment")
+			writeErrorCode(w, http.StatusNotFound, "service_not_configured", map[string]any{"detail": name+" is not configured on this deployment"}, name+" is not configured on this deployment")
+			return
+		}
+		// A service whose function the specialist pool answers is started and stopped through the pool, not as its old unit (ADR-0022).
+		if s.poolFixedInfraOp(w, r, name, strings.HasSuffix(r.URL.Path, "/start")) {
 			return
 		}
 		s.runUnitOp(w, r, unit, name, name)

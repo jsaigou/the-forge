@@ -3,10 +3,12 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
 	"io/fs"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,6 +62,13 @@ func Open(path string, opts ...Option) (*DB, error) {
 	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, err
+	}
+	// The retired four-row Voice & Speech setting becomes the default engine per kind (see speech_defaults_migration.go). A failure leaves the old
+	// key untouched (the work is one transaction) and is reported, but does not stop the daemon from starting.
+	if res, err := migrateTTSEnginesToDefaults(context.Background(), db); err != nil {
+		log.Printf("store: WARNING: the retired tts.engines setting was NOT moved to tts.defaults: %v", err)
+	} else {
+		logSpeechDefaultsMigration(res)
 	}
 	d := &DB{sql: db}
 	for _, opt := range opts {

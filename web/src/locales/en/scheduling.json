@@ -60,10 +60,10 @@
     "role_required": "Operator role required to view scheduler settings.",
     "loading": "Loading scheduler settings…",
     "heading": "Scheduler tunables",
-    "field_idle_unload": "Idle unload (s)",
-    "field_small_job_threshold": "Small-job token threshold",
-    "field_priority_jump_cap": "Priority jump cap",
-    "field_reservation_soon": "Reservation-soon window (min)",
+    "field_idle_unload": "Unload idle models after (seconds)",
+    "field_small_job_threshold": "Small-job size (tokens)",
+    "field_priority_jump_cap": "How often a job may jump the queue",
+    "field_reservation_soon": "Treat a reservation as imminent within (minutes)",
     "reset": "Reset"
   }
 }

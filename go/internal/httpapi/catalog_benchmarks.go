@@ -8,10 +8,13 @@ package httpapi
 // route table.
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/enginekind"
+	"github.com/jsaigou/the-forge/internal/launch"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -25,13 +28,15 @@ type benchmarkJSON struct {
 	SubjectType string `json:"subject_type"`
 	SubjectID   int64  `json:"subject_id"`
 	Notes       string `json:"notes"`
+	// Tuple is the launch tuple a tuple-bound figure was measured at (launch.MemoryTuple JSON); omitted for every other benchmark.
+	Tuple string `json:"tuple,omitempty"`
 }
 
 func benchmarkToJSON(b store.Benchmark) benchmarkJSON {
 	return benchmarkJSON{
 		ID: b.ID, Metric: b.Metric, Value: b.Value, Source: b.Source,
 		SourceURL: b.SourceURL, SourceDate: b.SourceDate, SubjectType: b.SubjectType,
-		SubjectID: b.SubjectID, Notes: b.Notes,
+		SubjectID: b.SubjectID, Notes: b.Notes, Tuple: b.Tuple,
 	}
 }
 
@@ -102,20 +107,25 @@ func (s *Server) handleCatalogBenchmarkCreate(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var b benchmarkBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
-		return
-	}
-	if fields, codes := validateBenchmark(b); len(fields) > 0 {
-		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
+	fields, codes := validateBenchmark(b)
+	if err := s.validateBenchmarkTuple(ctx, b, fields, codes); err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	if len(fields) > 0 {
+		writeValidationErrorCodes(w, fields, codes)
+		return
+	}
 	id, err := cat.CreateBenchmark(ctx, store.Benchmark{
 		Metric: b.Metric, Value: b.Value, Source: b.Source,
 		SourceURL: b.SourceURL, SourceDate: b.SourceDate,
-		SubjectType: b.SubjectType, SubjectID: b.SubjectID, Notes: b.Notes,
+		SubjectType: b.SubjectType, SubjectID: b.SubjectID, Notes: b.Notes, Tuple: b.Tuple,
 	})
 	if err != nil {
 		writeInternalError(w, err)
@@ -138,7 +148,7 @@ func (s *Server) handleCatalogBenchmarkUpdate(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var b benchmarkBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
@@ -156,14 +166,19 @@ func (s *Server) handleCatalogBenchmarkUpdate(w http.ResponseWriter, r *http.Req
 		writeInternalError(w, err)
 		return
 	}
-	if fields, codes := validateBenchmarkUpdate(b, existing); len(fields) > 0 {
+	fields, codes := validateBenchmarkUpdate(b, existing)
+	if err := s.validateBenchmarkTuple(ctx, b, fields, codes); err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	if len(fields) > 0 {
 		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	err = cat.UpdateBenchmark(ctx, store.Benchmark{
 		ID: id, Metric: b.Metric, Value: b.Value, Source: b.Source,
 		SourceURL: b.SourceURL, SourceDate: b.SourceDate,
-		SubjectType: b.SubjectType, SubjectID: b.SubjectID, Notes: b.Notes,
+		SubjectType: b.SubjectType, SubjectID: b.SubjectID, Notes: b.Notes, Tuple: b.Tuple,
 	})
 	if err != nil {
 		if isNotFound(err) {
@@ -205,11 +220,34 @@ func (s *Server) handleCatalogBenchmarkDelete(w http.ResponseWriter, r *http.Req
 
 func (s *Server) handleCatalogBenchmarkValidate(w http.ResponseWriter, r *http.Request) {
 	var b benchmarkBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
-	if fields, codes := validateBenchmark(b); len(fields) > 0 {
+	fields, codes := validateBenchmark(b)
+	if id := validateExcludeID(r); id != 0 && s.deps.Catalog != nil {
+		ctx, cancel := catalogCtx(r)
+		defer cancel()
+		existing, err := s.deps.Catalog.GetBenchmark(ctx, id)
+		if err != nil {
+			if isNotFound(err) {
+				writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "benchmark"}, "benchmark not found")
+				return
+			}
+			writeInternalError(w, err)
+			return
+		}
+		fields, codes = validateBenchmarkUpdate(b, existing)
+	}
+	{
+		ctx, cancel := catalogCtx(r)
+		defer cancel()
+		if err := s.validateBenchmarkTuple(ctx, b, fields, codes); err != nil {
+			writeInternalError(w, err)
+			return
+		}
+	}
+	if len(fields) > 0 {
 		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
@@ -225,6 +263,7 @@ type benchmarkBody struct {
 	SubjectType string `json:"subject_type"`
 	SubjectID   int64  `json:"subject_id"`
 	Notes       string `json:"notes"`
+	Tuple       string `json:"tuple"`
 }
 
 // validateBenchmark enforces the F7 fabrication-prevention gate (published
@@ -307,4 +346,62 @@ func validateBenchmarkFields(b benchmarkBody, allowExistingOffering bool) (map[s
 		}
 	}
 	return fields, codes
+}
+
+// maxBenchmarkTupleBytes bounds a stored tuple (a handful of ids and flags).
+const maxBenchmarkTupleBytes = 4096
+
+// validateBenchmarkTuple adds tuple errors to fields/codes. A tuple, when present, must parse as a launch.MemoryTuple (unknown fields refused) and
+// belongs only to a config-scoped safe_memory_bytes figure. A safe_memory_bytes figure for a config whose engine kind has Spec.NeedsCuratedMemory
+// MUST carry one: without it the fit gate could never match the figure to a launch, and a figure that looks registered but is ignored is a trap. The
+// returned error is a catalog read failure (the check could not be made), never a validation result.
+func (s *Server) validateBenchmarkTuple(ctx context.Context, b benchmarkBody, fields, codes map[string]string) error {
+	if b.Tuple != "" {
+		switch {
+		case len(b.Tuple) > maxBenchmarkTupleBytes:
+			fields["tuple"] = "is too large"
+		case b.Metric != "safe_memory_bytes" || b.SubjectType != "config":
+			fields["tuple"] = "applies only to a config-scoped safe_memory_bytes benchmark"
+		default:
+			if _, err := launch.ParseMemoryTuple(b.Tuple); err != nil {
+				fields["tuple"] = err.Error()
+			}
+		}
+	}
+	if b.Metric != "safe_memory_bytes" || b.Tuple != "" || s.deps.Catalog == nil {
+		return nil
+	}
+	kind, err := s.benchmarkSubjectKind(ctx, b)
+	if err != nil || kind == "" {
+		return err
+	}
+	if spec, serr := enginekind.Lookup(kind); serr == nil && spec.NeedsCuratedMemory {
+		fields["tuple"], codes["tuple"] = "is required: this engine's memory depends on its launch tuple, so the figure must record the tuple it was measured at", "required"
+	}
+	return nil
+}
+
+// benchmarkSubjectKind is the engine kind of the config a config-scoped benchmark describes ("" for any other subject). A subject that does not
+// exist is left to the existing rules (no error here).
+func (s *Server) benchmarkSubjectKind(ctx context.Context, b benchmarkBody) (string, error) {
+	if b.SubjectType != "config" || b.SubjectID == 0 {
+		return "", nil
+	}
+	cfg, err := s.deps.Catalog.GetConfig(ctx, b.SubjectID)
+	if err != nil {
+		if isNotFound(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	engines, err := s.deps.Catalog.ListEngines(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range engines {
+		if e.ID == cfg.EngineID {
+			return e.Kind, nil
+		}
+	}
+	return "", nil
 }

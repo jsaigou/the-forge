@@ -44,7 +44,7 @@ function nextScopeAfter(scope: HeatmapScopeKey): HeatmapScopeKey {
 export function ActivityHeatmapWidget() {
   const { t } = useTranslation("dashboard");
   const heatmapScopes = HEATMAP_SCOPE_KEYS.map((key) => ({ key, label: t(`activity_heatmap.scope_${key}`) }));
-  const heatmap = useUsageHeatmap("365d");
+  const heatmap = useUsageHeatmap("180d") // 6 months (design/QA 2026-11-26);
   const [cycle, setCycle] = useState<CycleState>({ active: 0, scopes: ["all", "all"] });
 
   useEffect(() => {

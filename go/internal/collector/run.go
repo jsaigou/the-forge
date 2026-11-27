@@ -5,6 +5,8 @@ package collector
 import (
 	"context"
 	"fmt"
+	"github.com/jsaigou/the-forge/internal/memledger"
+	"log"
 	"math"
 	"net"
 	"sort"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jsaigou/the-forge/internal/config"
+	"github.com/jsaigou/the-forge/internal/enginekind"
 )
 
 // BookmarkProbe is one dashboard bookmark with a server-side health check
@@ -51,17 +54,6 @@ type Options struct {
 	// config schema; Phase 9 wires them).
 	ExtraUnits []string
 
-	// TTSEngineUnits returns every currently-configured tts.engines unit
-	// (Tier 1 Sprint 2, Voice & Speech settings) — a closure, not a static
-	// list like ExtraUnits, so an operator wiring up a new resident engine
-	// unit via Settings is watched on the very next collector cycle, not
-	// only after a daemon restart (same live-discovery shape as
-	// CompressorUnits just below, for the same reason: this is exactly the
-	// mechanism meant to close the blind spot where forge-tts-custom/-base
-	// crash-looped for 5 days undetected because nothing probed them). Nil
-	// = no TTS engine units watched.
-	TTSEngineUnits func() []string
-
 	// Bookmarks supplies server-side-health bookmarks (store-backed).
 	Bookmarks func() []BookmarkProbe
 
@@ -84,6 +76,10 @@ type Options struct {
 	// missing/empty entry for a service falls back to the old convention (see
 	// unitNames) rather than watching nothing.
 	CompressorUnits func() map[string]string
+
+	// SpecialistDeclaredBytes sums the declared peak footprint of the enabled, always-on specialist-pool members (running or not). It is the
+	// specialist share of the memory partition. Nil: nothing is declared.
+	SpecialistDeclaredBytes func() int64
 
 	// OnTokenSample receives per-slot token deltas (usage recording).
 	OnTokenSample func(slot, mode string, promptDelta, predictedDelta int64)
@@ -390,16 +386,16 @@ func (c *Collector) unitNames(cfg *config.Config) []string {
 	for _, slot := range cfg.Slots {
 		add(slot.Unit)
 	}
+	// Specialist-pool units (ADR-0022) hold real GTT and RSS; without them the meter could not attribute it and the memory ledger could not tell
+	// specialist GPU use from model GPU use.
+	for _, slot := range cfg.SpecialistSlots {
+		add(slot.Unit)
+	}
 	for _, mode := range cfg.Modes {
 		add(mode.Unit)
 	}
 	for _, u := range c.o.ExtraUnits {
 		add(u)
-	}
-	if c.o.TTSEngineUnits != nil {
-		for _, u := range c.o.TTSEngineUnits() {
-			add(u)
-		}
 	}
 	// Compressor proxy units are dynamic (created/removed at runtime via
 	// POST/teardown, Phase 9b) rather than config-derived, so they're
@@ -523,7 +519,8 @@ func (c *Collector) scrapeInference(
 	scraped := map[int]*LlamaMetrics{}
 
 	for slot, port := range active {
-		m := c.llama.Metrics(ctx, port)
+		spec := c.slotSpec(cfg, slots[slot].Mode, slot)
+		m := c.scrapeMetrics(ctx, spec, port)
 		scraped[port] = m
 		if m == nil {
 			// Still starting up (or wedged): no activity seed, no NCtx. Not
@@ -564,7 +561,7 @@ func (c *Collector) scrapeInference(
 		nctx, ok := c.nctxCache[slot]
 		identity := c.identityCache[slot]
 		if !ok {
-			if p, err := c.llama.PropsInfo(ctx, port); err == nil {
+			if p, err := c.slotIdentity(ctx, spec, port, m); err == nil {
 				nctx = p.NCtx
 				c.nctxCache[slot] = p.NCtx
 				identity = p
@@ -617,6 +614,61 @@ func (c *Collector) scrapeInference(
 		}
 	}
 	return inference, scraped
+}
+
+// slotSpec is the engine Spec of the service that runs in slot under mode: the one whose port role is the slot, else the first (what a load
+// uses). A slot whose mode is unknown (not yet reconciled) or whose kind does not resolve is read as llama.cpp, the default kind, and the
+// failure is logged, not hidden.
+func (c *Collector) slotSpec(cfg *config.Config, mode, slot string) enginekind.Spec {
+	def, _ := enginekind.Lookup("")
+	m, ok := cfg.Modes[mode]
+	if !ok || len(m.Services) == 0 {
+		return def
+	}
+	svc := m.Services[0]
+	for _, s := range m.Services {
+		if s.PortRole == slot {
+			svc = s
+			break
+		}
+	}
+	spec, err := svc.Engine()
+	if err != nil {
+		log.Printf("collector: slot %s mode %s: %v; reading it as %s", slot, mode, err, def.Name)
+		return def
+	}
+	return spec
+}
+
+// scrapeMetrics is the one dispatch from a kind's Spec.Metrics to its reader. An unnamed or unknown reader is logged and reads as unreachable
+// rather than silently borrowing another engine's series.
+func (c *Collector) scrapeMetrics(ctx context.Context, spec enginekind.Spec, port int) *LlamaMetrics {
+	switch spec.Metrics {
+	case enginekind.MetricsRadiancePrometheus:
+		return c.llama.RadianceMetrics(ctx, port)
+	case enginekind.MetricsLlamaCppPrometheus:
+		return c.llama.Metrics(ctx, port)
+	default:
+		log.Printf("collector: kind %q names unknown metrics reader %q", spec.Name, spec.Metrics)
+		return nil
+	}
+}
+
+// slotIdentity is the once-per-session self-report of a slot: /props where the kind serves it, else /v1/models (id, max_model_len, never the
+// requested value alone: where the kind exposes a capacity gauge the smaller of the two is reported, as the load-time check does).
+func (c *Collector) slotIdentity(ctx context.Context, spec enginekind.Spec, port int, m *LlamaMetrics) (Props, error) {
+	if !spec.ContextFromModels || spec.ContextFromProps {
+		return c.llama.PropsInfo(ctx, port)
+	}
+	info, err := c.llama.ModelsInfo(ctx, port)
+	if err != nil {
+		return Props{}, err
+	}
+	n := info.MaxModelLen
+	if m != nil && m.ContextCapacity != nil && int(*m.ContextCapacity) > 0 && (n == 0 || int(*m.ContextCapacity) < n) {
+		n = int(*m.ContextCapacity)
+	}
+	return Props{NCtx: n, ModelAlias: info.ID}, nil
 }
 
 // slotErrorCount reads the a0 router's per-slot 5xx/transport window for
@@ -751,6 +803,9 @@ func (c *Collector) buildMetrics(
 			UsedBytes:  int64(math.Round(usedBytes)),
 			AvailBytes: int64(math.Round(stats.MemAvailBytes)),
 			Pct:        memPct,
+
+			SwapTotalBytes: int64(math.Round(stats.SwapTotalBytes)),
+			SwapUsedBytes:  int64(math.Round(stats.SwapTotalBytes - stats.SwapFreeBytes)),
 		},
 		CPU:              CPU{Load1: stats.Load1, Pct: cpuPct},
 		Disk:             sampleDisk(cfg.Paths.ModelsDir),
@@ -780,7 +835,10 @@ func (c *Collector) buildMetrics(
 			activeSlotNames = append(activeSlotNames, name)
 		}
 	}
-	weightsBytes := ActiveWeightsBytes(cfg.Paths.SysconfigDir, cfg.Paths.ModelsDir, activeSlotNames)
+	var weightsBytes int64
+	if ws, ok := c.o.Slots.(SlotWeightSource); ok {
+		weightsBytes = ActiveWeightsBytes(ws.SlotWeightPaths, activeSlotNames)
+	}
 
 	var gttUsed float64
 	if gpu.GTTUsedBytes != nil {
@@ -793,6 +851,31 @@ func (c *Collector) buildMetrics(
 		v := int64(math.Round(inferenceBytes))
 		m.InferenceRSSBytes = &v
 	}
+	var declared int64
+	if c.o.SpecialistDeclaredBytes != nil {
+		declared = c.o.SpecialistDeclaredBytes()
+	}
+	var specialistGPU float64
+	for _, slot := range cfg.SpecialistSlots {
+		if u, ok := units[slot.Unit]; ok {
+			specialistGPU += float64(u.GPUBytes)
+		}
+	}
+	in := memledger.Inputs{
+		HostTotal: stats.MemTotalBytes, HostAvail: stats.MemAvailBytes,
+		SwapTotal: stats.SwapTotalBytes, SwapUsed: stats.SwapTotalBytes - stats.SwapFreeBytes,
+		SlotRSS: c.slotRSSBytes(slots), SpecialistGPU: specialistGPU, SpecialistDeclared: declared,
+	}
+	if gpu.GTTTotalBytes != nil {
+		in.GTTTotal = *gpu.GTTTotalBytes
+	}
+	if gpu.GTTUsedBytes != nil {
+		in.GTTUsed = *gpu.GTTUsedBytes
+	}
+	m.Ledger = memledger.Compute(memledger.Policy{
+		OSFloorBytes: cfg.Memory.OSFloorBytes, GrowthMarginBytes: cfg.Memory.GrowthMarginBytes, HostFloorBytes: cfg.Memory.HostFloorBytes,
+	}, in)
+
 	if weightsBytes > 0 {
 		v := int64(weightsBytes)
 		m.ModelWeightsBytes = &v
@@ -902,8 +985,33 @@ func (c *Collector) unifiedMemoryRSSBytes(cfg *config.Config, slots map[string]S
 		return 0
 	}
 	var total float64
-	for _, pid := range c.o.Proc.ByComm("llama-server") {
+	for _, pid := range c.inferencePIDs() {
 		if port, ok := c.o.Proc.PortArg(pid); ok && rocmPorts[port] {
+			total += c.o.Proc.RSSBytes(pid)
+		}
+	}
+	return total
+}
+
+// slotRSSBytes sums the resident set of every loaded inference slot's process, whatever its backend. The engine's fit gate counts the same set
+// (engine.slotRSSBytes): the 2026-08-22 crash came from counting only ROCm slots.
+func (c *Collector) slotRSSBytes(slots map[string]SlotAssignment) float64 {
+	cfg := c.o.Cfg()
+	ports := map[int]bool{}
+	for slotName, a := range slots {
+		if a.Mode == "" {
+			continue
+		}
+		if slot, ok := cfg.Slots[slotName]; ok {
+			ports[slot.Port] = true
+		}
+	}
+	if len(ports) == 0 {
+		return 0
+	}
+	var total float64
+	for _, pid := range c.inferencePIDs() {
+		if port, ok := c.o.Proc.PortArg(pid); ok && ports[port] {
 			total += c.o.Proc.RSSBytes(pid)
 		}
 	}
@@ -944,12 +1052,22 @@ func (c *Collector) buildSlots(
 	return out
 }
 
+// inferencePIDs lists the processes of every known engine kind (enginekind.ProcessNames), so the per-process readouts cover Radiance and vLLM as well
+// as llama-server. Which slot a process belongs to is decided by its --port argument, never by its name.
+func (c *Collector) inferencePIDs() []int {
+	var pids []int
+	for _, name := range enginekind.ProcessNames() {
+		pids = append(pids, c.o.Proc.ByComm(name)...)
+	}
+	return pids
+}
+
 // llamaServerPIDsByPort maps each running llama-server process to the port
 // it was launched with (one pass over /proc, reused for every slot this
 // cycle rather than re-scanning per slot).
 func (c *Collector) llamaServerPIDsByPort() map[int]int {
 	out := map[int]int{}
-	for _, pid := range c.o.Proc.ByComm("llama-server") {
+	for _, pid := range c.inferencePIDs() {
 		if port, ok := c.o.Proc.PortArg(pid); ok {
 			out[port] = pid
 		}

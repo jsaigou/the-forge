@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package engine ports forge/engine.py: mode switching, slot load/unload,
-// env/args sysconfig writing, n_ctx verification, memory budgeting. Owned by
+// slot launch row writing, n_ctx verification, memory budgeting. Owned by
 // track A (Phase 2). The Engine interface below is Contract 2 — frozen;
 // additive changes go through the Phase 9 integration owner.
 //
@@ -14,6 +14,8 @@ package engine
 import (
 	"context"
 	"sync"
+
+	"github.com/jsaigou/the-forge/internal/memledger"
 )
 
 // Engine is the mode/slot lifecycle surface consumed by httpapi (track C)
@@ -28,7 +30,7 @@ type Engine interface {
 	Slots() []string
 
 	// SwitchMode performs a full mode switch: stop managed units → write
-	// sysconfig env/args → start target units → verify /health and /props
+	// the slot launch row → start target units → verify /health and /props
 	// (n_ctx). Blocking; callers run it in a goroutine and stream progress
 	// via the event bus.
 	SwitchMode(ctx context.Context, mode string) Result
@@ -69,6 +71,11 @@ type Result struct {
 	Success bool
 	Message string
 
+	// Detail is optional diagnostic text for a failed operation: the unit's own last log lines (redacted,
+	// size-capped) when the engine was given a LogTail. It exists so a failed load can be diagnosed from the
+	// API response instead of from the host's journal.
+	Detail string
+
 	// NCtx carries the verified actual context after a successful
 	// load/switch (0 when not applicable).
 	NCtx int
@@ -92,6 +99,12 @@ type Budget struct {
 	TotalBytes int64
 	UsedBytes  int64
 	FreeBytes  int64
+	// ReservedBytes is memory already subtracted from FreeBytes because always-on specialists that should be running are not yet (starting,
+	// recovering): an LLM load must not take what a restarting specialist needs (ADR-0022).
+	ReservedBytes int64
+
+	// Ledger is the host-memory partition this budget was computed from (internal/memledger). FreeBytes is Ledger.Free.
+	Ledger memledger.Ledger
 }
 
 // Stub is a compile-time placeholder Engine for tracks B/C/D. Every

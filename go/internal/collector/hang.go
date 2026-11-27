@@ -40,6 +40,8 @@ type hangDetector struct {
 	// n_tokens_max) so consecutive scrapes can prove live GPU progress.
 	lastDecode map[int]float64
 	lastMax    map[int]float64
+	// lastProgress holds each port's previous LlamaMetrics.ProgressTotal (Radiance engine steps).
+	lastProgress map[int]float64
 }
 
 func newHangDetector(minTPS float64, sustain, cooldown time.Duration) *hangDetector {
@@ -50,6 +52,7 @@ func newHangDetector(minTPS float64, sustain, cooldown time.Duration) *hangDetec
 		stalledSince: map[int]time.Time{},
 		lastDecode:   map[int]float64{},
 		lastMax:      map[int]float64{},
+		lastProgress: map[int]float64{},
 	}
 }
 
@@ -60,6 +63,7 @@ func (d *hangDetector) NotifySwitchComplete(now time.Time) {
 	d.stalledSince = map[int]time.Time{}
 	d.lastDecode = map[int]float64{}
 	d.lastMax = map[int]float64{}
+	d.lastProgress = map[int]float64{}
 }
 
 // Forget drops state for a port no longer being scraped (unit stopped, or
@@ -68,6 +72,7 @@ func (d *hangDetector) Forget(port int) {
 	delete(d.stalledSince, port)
 	delete(d.lastDecode, port)
 	delete(d.lastMax, port)
+	delete(d.lastProgress, port)
 }
 
 // decodeAdvanced reports whether the port's live decode counters advanced
@@ -93,6 +98,14 @@ func (d *hangDetector) decodeAdvanced(port int, m *LlamaMetrics) bool {
 	return advanced
 }
 
+// progressAdvanced reports whether the engine's cumulative step counter changed since the previous scrape of the port. Any change counts, a
+// decrease included: a counter that went backwards means the engine restarted, which is not a stall. The first scrape only records a baseline.
+func (d *hangDetector) progressAdvanced(port int, m *LlamaMetrics) bool {
+	prev, seen := d.lastProgress[port]
+	d.lastProgress[port] = *m.ProgressTotal
+	return seen && *m.ProgressTotal != prev
+}
+
 // Observe feeds one port's scrape into the detector and returns an Alert
 // while the port is in sustained stall.
 func (d *hangDetector) Observe(now time.Time, port int, m *LlamaMetrics) *Alert {
@@ -105,10 +118,28 @@ func (d *hangDetector) Observe(now time.Time, port int, m *LlamaMetrics) *Alert 
 		return nil
 	}
 
-	active := m.RequestsProcessing > 0
-	flowing := m.PromptTPS >= d.minTPS || m.PredictedTPS >= d.minTPS
-	if !flowing {
-		flowing = d.decodeAdvanced(port, m)
+	// The engine's own wedge report needs no sustain window: Radiance only answers 503 "stuck" after the device advanced nothing for 60 s.
+	if m.Stuck {
+		return &Alert{
+			Code: "INFERENCE_HANG",
+			Port: port,
+			Msg: fmt.Sprintf(
+				"Port %d: the engine reports itself stuck (/health 503 \"stuck\", device advanced nothing for %ds) — "+
+					"a restart clears it; check dmesg for amdgpu/KFD errors first", port, m.StuckSeconds),
+		}
+	}
+
+	active := m.RequestsProcessing > 0 || m.RequestsQueued > 0
+	var flowing bool
+	if m.ProgressTotal != nil {
+		// Progress-keyed (Radiance): only the engine's step counter proves life. The TPS gauges are deliberately not consulted: they hold
+		// their last value at idle, so a stalled engine could look as if it were flowing.
+		flowing = d.progressAdvanced(port, m)
+	} else {
+		flowing = m.PromptTPS >= d.minTPS || m.PredictedTPS >= d.minTPS
+		if !flowing {
+			flowing = d.decodeAdvanced(port, m)
+		}
 	}
 	if !active || flowing {
 		delete(d.stalledSince, port)

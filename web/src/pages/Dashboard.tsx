@@ -3,11 +3,9 @@ import { useTranslation } from "react-i18next";
 import { DashboardCustomPage } from "../components/DashboardCustomPage";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { ContextCreationPanel } from "../components/ContextCreationPanel";
-import { CompressorSavingsChips } from "../components/CompressionSavingsChips";
 import { Icon } from "../components/Icon";
 import { RangeToggle } from "../components/RangeToggle";
 import { RoutingTree } from "../components/RoutingTree";
-import { ServicesBar } from "../components/ServicesBar";
 import { ActivityHeatmapWidget } from "../components/widgets/ActivityHeatmapWidget";
 import { ElectricityBreakdownWidget } from "../components/widgets/ElectricityBreakdownWidget";
 import { MemoryMeterWidget } from "../components/widgets/MemoryMeterWidget";
@@ -15,7 +13,7 @@ import { PerModelSpendTableWidget } from "../components/widgets/PerModelSpendTab
 import { ResourceGaugesWidget } from "../components/widgets/ResourceGaugesWidget";
 import { ResourceTrendWidget } from "../components/widgets/ResourceTrendWidget";
 import { appLocale, formatCurrency, formatCurrencyPrecise, formatPct, formatTokens } from "../lib/format";
-import { useCostSummary, useDashboardLayout, useCompressorSummary, useInfraServices, useUpdateDashboardLayout, useUsage } from "../lib/queries";
+import { useCostSummary, useDashboardLayout, useCompressorSummary, useUpdateDashboardLayout, useUsage } from "../lib/queries";
 import { useSession } from "../lib/session";
 import type { DashboardPage, CompressorSummaryProxy } from "../lib/types";
 
@@ -204,21 +202,27 @@ function PageNameInput({ name, onRename }: { name: string; onRename: (name: stri
 
 function OverviewTab() {
   const { t } = useTranslation("dashboard");
-  // Operator feedback 2026-08-14: the infra service chips moved here from
-  // the Console's Resources & services section — fleet health at a glance
-  // belongs on the landing tab.
-  const infraServices = useInfraServices();
+  // 2026-11-26 design/QA round: the service-status strip left this tab (the
+  // Console shows it now), the concurrency card was dropped, context creation
+  // moved up under token activity, and token activity + routing share one
+  // half-width row (stacked on narrow screens).
   return (
     <>
-      <ServicesBar services={infraServices.data?.services} />
-      <ActivityHeatmapWidget />
-      {/* Sprint 10 (docs/v5-headroom-replacement.md): the routing diagram,
-          duplicated from Settings → Routing as a read-only copy whose links
-          show each route's REAL compressor state × health — the detail the
-          aggregated Compressor chip above can't carry. */}
-      <div className="eyebrow">{t("overview.routing_title")}</div>
-      <div className="card">
-        <RoutingTree readOnly />
+      <div className="ov-row">
+        <div className="ov-cell">
+          <ActivityHeatmapWidget />
+          {/* Fills the space under the half-width heatmap: the same live gauges as the Resources tab. */}
+          <div className="ov-gauges"><ResourceGaugesWidget /></div>
+        </div>
+        <div className="ov-cell">
+          {/* Sprint 10 (docs/v5-headroom-replacement.md): the routing diagram,
+              duplicated from Settings → Routing as a read-only copy whose links
+              show each route's REAL compressor state × health. */}
+          <div className="eyebrow">{t("overview.routing_title")}</div>
+          <div className="card">
+            <RoutingTree readOnly />
+          </div>
+        </div>
       </div>
       <ContextCreationPanel />
     </>
@@ -315,7 +319,6 @@ function CostTab() {
           <div className="v">{totalCost != null ? formatCurrency(totalCost, displayCurrency) : "…"}</div>
           <div className="d">{t("cost.stat_total_d")}</div>
         </div>
-        <CompressorSavingsChips window_={range.window} />
       </div>
 
       <div className="eyebrow">{t("cost.compressor_savings_title", { range: range.label })}</div>
@@ -463,14 +466,18 @@ function ResourcesTab() {
 
   return (
     <>
-      <MemoryMeterWidget />
-      <ResourceGaugesWidget />
       <div className="eyebrow" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span>{t("resources.history_range")}</span>
+        <span>{t("resource_gauges.title")}</span>
+        {/* The eyebrow's rule takes the free space, so the second label is set apart by its own margin. */}
+        <span style={{ marginLeft: 28, opacity: 0.75 }}>{t("resources.history_range")}</span>
         <RangeToggle options={resourceRangeOptions} value={rangeKey} onChange={setRangeKey} />
       </div>
-      <ResourceTrendWidget window_={range.window} />
-      <ElectricityBreakdownWidget window_={range.window} />
+      <ResourceGaugesWidget compact />
+      <MemoryMeterWidget />
+      <div className="res-row">
+        <div className="res-trend"><ResourceTrendWidget window_={range.window} /></div>
+        <div className="res-power"><ElectricityBreakdownWidget window_={range.window} compact /></div>
+      </div>
     </>
   );
 }

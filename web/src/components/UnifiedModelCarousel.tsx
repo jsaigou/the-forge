@@ -7,6 +7,7 @@ import type { ConfigCard, ModelCard, Status } from "../lib/types";
 import { ConfigCardView } from "./ConfigCardView";
 import { ModelCardView } from "./ModelCardView";
 import { PlayingCard } from "./PlayingCard";
+import { useRemoteOnly } from "../lib/useRemoteOnly";
 
 // Operator feedback 2026-08-14 (config carousel): the Console's config
 // gallery rides this same deck, so the carousel is card-agnostic — models
@@ -147,6 +148,7 @@ export function UnifiedModelCarousel({
   variant?: "model" | "config";
 }) {
   const { t } = useTranslation("common");
+  const remoteOnly = useRemoteOnly();
   const noun = variant === "model" ? t("carousel.noun.model") : t("carousel.noun.config");
   const nounPlural = variant === "model" ? t("carousel.noun.model_plural") : t("carousel.noun.config_plural");
   const displayFamily = (family: string) => (family === UNGROUPED ? t("carousel.ungrouped") : family);
@@ -655,8 +657,10 @@ export function UnifiedModelCarousel({
         logo={first.logo}
         logoDark={first.logo_dark}
         watermarkName={first.creator}
-        className="umc-card"
+        // A family's cover takes the offer colour only when nothing in the family is hosted here.
+        className={`umc-card${variant === "model" && entry.cards.every((c) => remoteOnly((c as ModelCard).name)) ? " offer" : ""}`}
       >
+        {variant === "model" && entry.cards.every((c) => remoteOnly((c as ModelCard).name)) && <span className="chip offer">{t("offer.remote_only")}</span>}
         {entry.genealogy && !redundant && <div className="umc-genealogy">{entry.genealogy}</div>}
         <div className="umc-count">{t("carousel.count", { count: entry.cards.length, noun })}</div>
         {entry.cards.length > 1 && (

@@ -100,7 +100,7 @@ func (s *Server) handleCatalogNoteCreate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var b noteBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
@@ -135,7 +135,7 @@ func (s *Server) handleCatalogNoteUpdate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var b noteBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}

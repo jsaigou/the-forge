@@ -3,9 +3,14 @@ import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../lib/api";
 import { useCreateReservation } from "../lib/queries";
 import type { Status } from "../lib/types";
+import { Modal } from "./Modal";
 
 const SLOT_OPTIONS = ["a1", "a2", "a3", "a4"];
 
+// ReservationModal — the create-reservation dialog (Scheduling page), on the
+// shared Modal shell (ADR-0023 contract b): dialog role, labelled by its
+// heading, Tab trapped, Escape and backdrop dismiss, focus restored to the
+// "new reservation" trigger.
 export function ReservationModal({ status, onClose }: { status: Status; onClose: () => void }) {
   const { t } = useTranslation("scheduling");
   const create = useCreateReservation();
@@ -42,67 +47,55 @@ export function ReservationModal({ status, onClose }: { status: Status; onClose:
   }
 
   return (
-    <div
-      className="modal-backdrop"
-      onClick={(e) => {
-        // Sprint I fix — see DetailModal.tsx's identical comment. Not
-        // nested in a clickable ancestor today, but the guard is free and
-        // prevents a future regression if this modal's trigger ever moves.
-        e.stopPropagation();
-        onClose();
-      }}
-    >
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{t("reservation_modal.heading")}</h3>
-        <div className="form-grid">
+    <Modal title={t("reservation_modal.heading")} onClose={onClose}>
+      <div className="form-grid">
+        <label className="form-row">
+          {t("reservation_modal.label")}
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("reservation_modal.label_placeholder")} />
+        </label>
+        <label className="form-row">
+          {t("reservation_modal.model")}
+          <select value={model} onChange={(e) => setModel(e.target.value)}>
+            <option value="">{t("reservation_modal.select_ellipsis")}</option>
+            {modeOptions.map(([key, m]) => (
+              <option key={key} value={key}>{m.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="form-row">
+          {t("reservation_modal.start")}
+          <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
+        </label>
+        <label className="form-row">
+          {t("reservation_modal.end")}
+          <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} />
+        </label>
+        <label className="form-row">
+          {t("reservation_modal.scope")}
+          <select value={scope} onChange={(e) => setScope(e.target.value as typeof scope)}>
+            <option value="bay">{t("reservation_modal.scope_bay")}</option>
+            <option value="whole_box">{t("reservation_modal.scope_whole_box")}</option>
+            <option value="comfyui">{t("reservation_modal.scope_comfyui")}</option>
+          </select>
+        </label>
+        {scope === "bay" && (
           <label className="form-row">
-            {t("reservation_modal.label")}
-            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("reservation_modal.label_placeholder")} />
-          </label>
-          <label className="form-row">
-            {t("reservation_modal.model")}
-            <select value={model} onChange={(e) => setModel(e.target.value)}>
-              <option value="">{t("reservation_modal.select_ellipsis")}</option>
-              {modeOptions.map(([key, m]) => (
-                <option key={key} value={key}>{m.label}</option>
+            {t("reservation_modal.bay")}
+            <select value={bay} onChange={(e) => setBay(e.target.value)}>
+              {SLOT_OPTIONS.map((s) => (
+                <option key={s} value={s}>{status.slot_labels[s] ?? s}</option>
               ))}
             </select>
           </label>
-          <label className="form-row">
-            {t("reservation_modal.start")}
-            <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
-          </label>
-          <label className="form-row">
-            {t("reservation_modal.end")}
-            <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} />
-          </label>
-          <label className="form-row">
-            {t("reservation_modal.scope")}
-            <select value={scope} onChange={(e) => setScope(e.target.value as typeof scope)}>
-              <option value="bay">{t("reservation_modal.scope_bay")}</option>
-              <option value="whole_box">{t("reservation_modal.scope_whole_box")}</option>
-              <option value="comfyui">{t("reservation_modal.scope_comfyui")}</option>
-            </select>
-          </label>
-          {scope === "bay" && (
-            <label className="form-row">
-              {t("reservation_modal.bay")}
-              <select value={bay} onChange={(e) => setBay(e.target.value)}>
-                {SLOT_OPTIONS.map((s) => (
-                  <option key={s} value={s}>{status.slot_labels[s] ?? s}</option>
-                ))}
-              </select>
-            </label>
-          )}
-        </div>
-        {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
-        <div className="form-actions">
-          <button className="btn" onClick={onClose}>{t("reservation_modal.cancel")}</button>
-          <button className="btn primary" disabled={create.isPending} onClick={submit}>
-            {create.isPending ? t("reservation_modal.creating") : t("reservation_modal.create")}
-          </button>
-        </div>
+        )}
       </div>
-    </div>
+      {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+      <div className="form-actions">
+        <button className="btn" onClick={onClose}>{t("reservation_modal.cancel")}</button>
+        <button className="btn primary" disabled={create.isPending} onClick={submit}>
+          {create.isPending ? t("reservation_modal.creating") : t("reservation_modal.create")}
+        </button>
+      </div>
+    </Modal>
   );
 }

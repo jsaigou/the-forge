@@ -10,9 +10,15 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
+
+	"github.com/jsaigou/the-forge/internal/netguard"
 )
 
 // httpClient is the minimal *http.Client surface the fetchers use. Defined
@@ -30,6 +36,17 @@ type httpClient interface {
 func newDefaultHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout: timeout,
+		// Go keeps Authorization on a redirect to the same host, including https -> http, which would put the provider key on the wire in
+		// clear. Refuse any hop that downgrades the scheme, and cap the chain.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return errors.New("providers: stopped after 5 redirects")
+			}
+			if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
+				return errors.New("providers: refusing a redirect from https to " + req.URL.Scheme)
+			}
+			return nil
+		},
 		// Default transport is fine — these are short-lived fetches to
 		// external provider APIs, not high-throughput routing.
 	}
@@ -59,6 +76,10 @@ func fetchJSONWithHeaders(ctx context.Context, c httpClient, url, bearer string,
 		return nil, 0, err
 	}
 	if bearer != "" {
+		// The provider key is a secret: send it over TLS, or to a loopback test server, never over clear text to a remote host.
+		if !bearerTransportOK(req.URL) {
+			return nil, 0, errors.New("providers: refusing to send a bearer token over a non-TLS, non-loopback URL")
+		}
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
 	for k, v := range extraHeaders {
@@ -81,4 +102,22 @@ func fetchJSONWithHeaders(ctx context.Context, c httpClient, url, bearer string,
 // here (keeps imports tidy; the test file can substitute a no-op reader).
 func ioReadAll(r interface{ Read([]byte) (int, error) }) ([]byte, error) {
 	return io.ReadAll(r)
+}
+
+// bearerTransportOK reports whether a bearer token may be attached to a request for u: https anywhere, or plain http only to a destination that
+// is not on the public internet: loopback, private/CGNAT/link-local literals (the tailnet lives in the CGNAT block), "localhost" and *.ts.net names.
+// Those paths are local or WireGuard-encrypted, so cleartext http there does not expose the key; plain http to a public host does.
+func bearerTransportOK(u *url.URL) bool {
+	if u.Scheme == "https" {
+		return true
+	}
+	if u.Scheme != "http" {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") || strings.HasSuffix(h, ".ts.net") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && !netguard.IsPublic(ip)
 }

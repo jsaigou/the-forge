@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../../lib/api";
-import type { ConfigWritePayload } from "../../lib/configPayload";
+import { toConfigWritePayload, type ConfigWritePayload } from "../../lib/configPayload";
 import { formatGB } from "../../lib/format";
 import { modelInheritedIcon } from "../../lib/iconInheritance";
 import {
   useCatalogArtifacts,
   useCatalogBuilds,
   useCatalogConfigs,
+  useCatalogConfigDetail,
   useCatalogEngines,
   useCatalogFamilies,
   useCatalogGenealogies,
@@ -21,8 +22,10 @@ import {
 import type { CatalogArtifact, CatalogBuild, CatalogConfig, CatalogEngine, CatalogFamily, CatalogGenealogy, CatalogModel, CatalogModelFile, CatalogCapabilityTier, CatalogVariant } from "../../lib/types";
 import type { CapsOverride } from "../ChatTemplateCapsOverrideEditor";
 import { ChatTemplateCapsOverrideEditor } from "../ChatTemplateCapsOverrideEditor";
+import { resolveRuntimeKind, runtimeLabel } from "../../lib/runtime";
 import { IconPicker } from "../IconPicker";
 import { LoadOptionsEditor } from "../LoadOptionsEditor";
+import { RemovalDialog } from "../RemovalDialog";
 import { SaveButton } from "../SaveButton";
 
 // ConfigEditView (Sprint C) — the premium in-place config editor, pushed
@@ -41,7 +44,8 @@ import { SaveButton } from "../SaveButton";
 // picker below like any other real flag. The column's current value is
 // still round-tripped unchanged on every save (never zeroed out) so a
 // direct DB inspection doesn't see it silently reset.
-export function ConfigEditView({ configId, onDone, onCancel }: { configId: number; onDone: () => void; onCancel: () => void }) {
+export function ConfigEditView({ configId, onDone, onCancel, onDeleted }: { configId: number; onDone: () => void; onCancel: () => void; onDeleted: () => void }) {
+  const [removing, setRemoving] = useState(false);
   const configs = useCatalogConfigs();
   const variants = useCatalogVariants();
   const artifacts = useCatalogArtifacts();
@@ -58,7 +62,11 @@ export function ConfigEditView({ configId, onDone, onCancel }: { configId: numbe
   const [error, setError] = useState<string | null>(null);
 
   const { t } = useTranslation("models");
-  const existing = configs.data?.find((c) => c.id === configId);
+  // Load from the detail endpoint so the ETag is the version of the data on screen (ADR-0020 F3). The list is only
+  // a fallback if that request fails, and without an ETag no If-Match is sent (the previous behaviour).
+  const detail = useCatalogConfigDetail(configId);
+  const existing = detail.data?.config ?? (detail.isError ? configs.data?.find((c) => c.id === configId) : undefined);
+  const etag = detail.data?.etag ?? null;
 
   if (!existing) {
     return <div className="empty-note">{t("config_edit.loading")}</div>;
@@ -72,38 +80,42 @@ export function ConfigEditView({ configId, onDone, onCancel }: { configId: numbe
   // lib/configPayload.ts's doc comment for why ConfigWritePayload's type
   // alone can't catch this at a spread site like this one — Routing.tsx's
   // submitPatch documents the same id trap for offerings).
-  const { id: _id, chat_template_caps: _caps, chat_template_caps_probed_at: _probedAt, ...existingBody } = existing;
+  const existingBody = toConfigWritePayload(existing);
 
   return (
-    <ConfigEditForm
-      existing={existing}
-      variants={variants.data ?? []}
-      artifacts={artifacts.data ?? []}
-      engines={engines.data ?? []}
-      builds={builds.data ?? []}
-      models={models.data ?? []}
-      families={families.data ?? []}
-      genealogies={genealogies.data ?? []}
-      capabilityTiers={capabilityTiers.data ?? []}
-      modelFiles={modelFiles.data ?? []}
-      showFiles={showFiles}
-      onToggleFiles={() => setShowFiles(!showFiles)}
-      pending={update.isPending}
-      error={error}
-      onCancel={onCancel}
-      onUploadIcon={(file, dark) => uploadIcon.mutate({ id: configId, file, dark }, { onError: (e) => setError(apiErrorMessage(e)) })}
-      onSelectIcon={(slug, dark) => update.mutate({ id: configId, c: dark ? { ...existingBody, logo_dark: slug } : { ...existingBody, logo: slug } }, { onError: (e) => setError(apiErrorMessage(e)) })}
-      onClearIcon={(dark) => update.mutate({ id: configId, c: dark ? { ...existingBody, logo_dark: "" } : { ...existingBody, logo: "" } }, { onError: (e) => setError(apiErrorMessage(e)) })}
-      onSubmit={(draft, reason) => {
-        setError(null);
-        update.mutate(
-          { id: configId, c: draft, reason },
-          // Sprint K: delayed onDone so SaveButton's flash has time to
-          // paint before this view pops off DetailModal's stack.
-          { onSuccess: () => setTimeout(onDone, 700), onError: (e) => setError(apiErrorMessage(e)) },
-        );
-      }}
-    />
+    <>
+    {removing && <RemovalDialog kind="config" id={configId} onClose={() => setRemoving(false)} onRemoved={onDeleted} />}
+      <ConfigEditForm
+        onDelete={() => setRemoving(true)}
+        existing={existing}
+        variants={variants.data ?? []}
+        artifacts={artifacts.data ?? []}
+        engines={engines.data ?? []}
+        builds={builds.data ?? []}
+        models={models.data ?? []}
+        families={families.data ?? []}
+        genealogies={genealogies.data ?? []}
+        capabilityTiers={capabilityTiers.data ?? []}
+        modelFiles={modelFiles.data ?? []}
+        showFiles={showFiles}
+        onToggleFiles={() => setShowFiles(!showFiles)}
+        pending={update.isPending}
+        error={error}
+        onCancel={onCancel}
+        onUploadIcon={(file, dark) => uploadIcon.mutate({ id: configId, file, dark }, { onError: (e) => setError(apiErrorMessage(e)) })}
+        onSelectIcon={(slug, dark) => update.mutate({ id: configId, etag, c: dark ? { ...existingBody, logo_dark: slug } : { ...existingBody, logo: slug } }, { onError: (e) => setError(apiErrorMessage(e)) })}
+        onClearIcon={(dark) => update.mutate({ id: configId, etag, c: dark ? { ...existingBody, logo_dark: "" } : { ...existingBody, logo: "" } }, { onError: (e) => setError(apiErrorMessage(e)) })}
+        onSubmit={(draft, reason) => {
+          setError(null);
+          update.mutate(
+            { id: configId, c: draft, reason, etag },
+            // Sprint K: delayed onDone so SaveButton's flash has time to
+            // paint before this view pops off DetailModal's stack.
+            { onSuccess: () => setTimeout(onDone, 700), onError: (e) => setError(apiErrorMessage(e)) },
+          );
+        }}
+      />
+    </>
   );
 }
 
@@ -126,6 +138,7 @@ function ConfigEditForm({
   onToggleFiles,
   onSubmit,
   onCancel,
+  onDelete,
   onUploadIcon,
   onSelectIcon,
   onClearIcon,
@@ -146,6 +159,7 @@ function ConfigEditForm({
   onToggleFiles: () => void;
   onSubmit: (draft: ConfigWritePayload, reason: string) => void;
   onCancel: () => void;
+  onDelete: () => void;
   onUploadIcon: (file: File, dark?: boolean) => void;
   onSelectIcon: (slug: string, dark?: boolean) => void;
   onClearIcon: (dark?: boolean) => void;
@@ -175,14 +189,17 @@ function ConfigEditForm({
   const mmprojArtifacts = artifacts.filter((a) => a.artifact_type === "mmproj");
   const engineBuilds = builds.filter((b) => b.engine_id === engineId);
 
-  // Vulkan vs ROCm both speak llama.cpp's flag set; only a vLLM build's
-  // config needs VLLM_FLAGS (ConfigDetailView.backend, derived server-side
-  // from the linked Build, is the source of truth for a loaded card — here,
-  // before any save, the config's own name is still the only reliable
-  // signal, since Build has no backend field in the frontend catalog types
-  // yet). Good enough for a curated-flag lookup; a wrong guess only means a
-  // flag renders without its tooltip, never a wrong value.
-  const backend = existing.name === "carbon-8b" || existing.name === "hy-mt2" ? "vllm" : "llama.cpp";
+  // The runtime (llama.cpp / vLLM / Radiance) follows the selected engine row's kind, with the legacy backend "vllm" on the
+  // selected build still reading as vLLM (lib/runtime.ts mirrors enginekind.Resolve). Vulkan vs ROCm only say which GPU path
+  // the build needs and both speak llama.cpp's flag set.
+  const selectedBuild = builds.find((b) => b.id === buildId);
+  const runtimeKind = resolveRuntimeKind(engines.find((e) => e.id === engineId)?.kind, selectedBuild?.backend);
+
+  // Engine rows are named freely; show the runtime beside the name only when it adds something.
+  function engineOptionLabel(e: CatalogEngine): string {
+    const rt = runtimeLabel(resolveRuntimeKind(e.kind));
+    return rt.toLowerCase() === e.name.toLowerCase() ? e.name : `${e.name} (${rt})`;
+  }
 
   function submit() {
     const payload: ConfigWritePayload = {
@@ -193,9 +210,6 @@ function ConfigEditForm({
       build_id: buildId,
       mmproj_artifact_id: mmprojArtifactId,
       n_ctx: nCtx,
-      // Carried through unchanged, not user-editable here — see this
-      // file's doc comment on why Parallel has no input.
-      parallel: existing.parallel,
       extra_args: extraArgs,
       status,
       visibility,
@@ -214,6 +228,9 @@ function ConfigEditForm({
       // found while fixing the same class of bug for capability_tier_id/
       // chat_template_caps_override below).
       modalities: existing.modalities,
+      // Same reasoning for the OUTPUT override (ADR-0021): omitting it on this
+      // full-replace PUT would silently put an overridden config back in derive mode.
+      output_modalities: existing.output_modalities,
       capability_tier_id: capabilityTierId,
       capability_rank: capabilityRank,
       chat_template_caps_override: capsOverride,
@@ -295,7 +312,7 @@ function ConfigEditForm({
         <label className="form-row">{t("config_edit.engine_select")}
           <select value={engineId} onChange={(e) => { const v = Number(e.target.value); setEngineId(v); setBuildId(0); }}>
             <option value={0}>{t("config_edit.variant_select")}</option>
-            {engines.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            {engines.map((e) => <option key={e.id} value={e.id}>{engineOptionLabel(e)}</option>)}
           </select>
         </label>
         <label className="form-row">{t("config_edit.build")}
@@ -346,7 +363,7 @@ function ConfigEditForm({
           onChange={setCapsOverride}
         />
       </div>
-      <LoadOptionsEditor value={extraArgs} onChange={setExtraArgs} backend={backend} nCtx={nCtx} />
+      <LoadOptionsEditor value={extraArgs} onChange={setExtraArgs} kind={runtimeKind} nCtx={nCtx} />
 
       <div className="eyebrow">{t("config_edit.publishing")}</div>
       <div className="form-grid">
@@ -383,6 +400,7 @@ function ConfigEditForm({
       </label>
 
       <div className="form-actions" style={{ marginTop: 20 }}>
+        <button type="button" className="btn danger" style={{ marginRight: "auto" }} onClick={onDelete}>{t("common:removal.open_config")}</button>
         <button type="button" className="btn" onClick={onCancel}>{t("config_edit.cancel")}</button>
         <SaveButton className="go" pending={pending} isError={!!error} disabled={pending || !name} onClick={submit} />
       </div>

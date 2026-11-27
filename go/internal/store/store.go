@@ -18,6 +18,10 @@ import (
 // ErrNotFound is returned by lookups that match no row.
 var ErrNotFound = errors.New("store: not found")
 
+// ErrConflict is returned when a write would silently take over an existing row that belongs to someone else (e.g. an identity link already
+// bound to a different user). The caller must delete the old row first if replacing it is really intended.
+var ErrConflict = errors.New("store: conflict")
+
 // Store groups the per-domain surfaces. Phase 3 implements it on *DB;
 // tracks test against fakes of the sub-interfaces they consume.
 //
@@ -147,6 +151,9 @@ type APIKey struct {
 	RevokedAt  time.Time // zero = active
 	// ExpiresAt is zero for "never expires" (security sprint 3, #36).
 	ExpiresAt time.Time
+	// Scope narrows a forge key to part of the API: "" = unscoped (the role alone decides), "catalog" = only
+	// /api/v1/catalog/* (ADR-0020 F11). Enforced by the HTTP auth middleware.
+	Scope string
 }
 
 type Keys interface {
@@ -207,6 +214,49 @@ type Usage interface {
 	RecordHistory(ctx context.Context, h ModeHistoryEntry) error
 	History(ctx context.Context, mode string, limit int) ([]ModeHistoryEntry, error)
 	TokenActivity(ctx context.Context, since time.Time) ([]TokenActivityRow, error)
+	// Intervals returns the stored request intervals matching q (migration 0105) and how many per-request rows in the
+	// same window had to be left out for having no timing.
+	Intervals(ctx context.Context, q IntervalQuery) (IntervalSet, error)
+}
+
+// Outcomes of a timed request (UsageEvent.Timing.Outcome).
+const (
+	OutcomeOK      = "ok"
+	OutcomeError   = "error"
+	OutcomeAborted = "aborted"
+)
+
+// RequestTiming is the timing of one a0-proxied request (migration 0105). A nil Timing leaves the columns NULL, which is
+// what every row written before the migration, and every non-request kind, has.
+type RequestTiming struct {
+	Start    time.Time     // arrival at a0, stored with millisecond resolution
+	Duration time.Duration // arrival to the last byte relayed or the stream closing, also on abort and error
+	// Wait is arrival to upstream dispatch (gating, on-demand load). Negative means never dispatched (stored NULL).
+	Wait     time.Duration
+	Outcome  string // OutcomeOK | OutcomeError | OutcomeAborted
+	Consumer string // display label of the caller; never a key or any secret
+}
+
+// IntervalQuery selects timed requests by their start. Empty Model/Consumer match any.
+type IntervalQuery struct {
+	Model, Consumer string
+	Since, Until    time.Time // Until zero = no upper bound
+}
+
+// Interval is one stored request: [StartMS, EndMS] in unix milliseconds. Tokens are nil when the response carried no usage.
+type Interval struct {
+	StartMS, EndMS   int64
+	PromptTokens     *int64
+	CompletionTokens *int64
+	Outcome          string
+}
+
+// IntervalSet is the answer to an IntervalQuery.
+type IntervalSet struct {
+	Intervals []Interval
+	// ExcludedUntimed counts per-request rows (kind external_request or a0_request) in the window, for the same model,
+	// that carry no start/duration and so cannot be placed on a timeline.
+	ExcludedUntimed int
 }
 
 // TokenActivityRow is one token-bearing usage_events row (Sprint L activity
@@ -269,6 +319,9 @@ type UsageEvent struct {
 	// "" when CostNative is nil (pricing wasn't resolvable) or for any row
 	// written before this migration.
 	PriceTier string
+
+	// Timing is set for rows written by the a0 proxy (migration 0105); nil otherwise.
+	Timing *RequestTiming
 }
 
 type ModeHistoryEntry struct {

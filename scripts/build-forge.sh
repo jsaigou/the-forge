@@ -1,13 +1,14 @@
 #!/bin/bash
 # build-forge.sh — cross-compiles forge for ForgeHost (linux/amd64) with a real
-# v0.6.x version baked in via -ldflags, so the deploy tag stops being
+# v0.8.x version baked in via -ldflags, so the deploy tag stops being
 # hand-typed each session (and drifting back to the old v5.x scheme, as it
 # did on every deploy from the 2026-08-24 rebrand through v5.0.157).
 # Bumped from the v0.5.x line 2026-09-16 (counter reset to 0) — a lot of
 # real functionality landed since the Foundry->Forge cutover (HF model
 # acquisition, capability-tier substitution + virtual models, per-request
 # reasoning control) and it warranted a new line rather than a 300th patch
-# number on the old one.
+# number on the old one. Bumped to the v0.8.x line 2026-11-27 (operator call
+# after the design-feedback round; counter reset to 0 again, no v0.7 line).
 #
 # Usage:
 #   ./scripts/build-forge.sh <slug>
@@ -35,7 +36,7 @@ N=$(<"$COUNTER_FILE")
 HASH=$(git -C "$ROOT" rev-parse --short HEAD)
 DIRTY=""
 git -C "$ROOT" diff --quiet || DIRTY="-dirty"
-VERSION="v0.6.${N}-${SLUG}-${HASH}${DIRTY}"
+VERSION="v0.8.${N}-${SLUG}-${HASH}${DIRTY}"
 
 mkdir -p "$OUT_DIR"
 echo "[1/2] building ${VERSION}"
@@ -43,5 +44,5 @@ echo "[1/2] building ${VERSION}"
 
 echo "$((N + 1))" > "$COUNTER_FILE"
 echo "[2/2] built dist/forge as ${VERSION}"
-echo "next build will be v0.6.$((N + 1))-..."
+echo "next build will be v0.8.$((N + 1))-..."
 echo "deploy with: ./scripts/deploy-forge.sh dist/forge"

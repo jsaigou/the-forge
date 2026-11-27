@@ -41,17 +41,17 @@ export interface FlagRef {
 export const LLAMA_FLAGS: Record<string, FlagRef> = {
   "--parallel": {
     label: "Parallel slots",
-    why: "Splits the configured context N ways rather than multiplying it — n_ctx 131072 with --parallel 2 gives each request only 65536 usable tokens. Must be 1 for any mode meant to serve one long conversation at its full context; qwen25coder's --parallel 4 is the one deliberate exception (a short fast-worker mode for concurrent short requests). Found live 2026-07-23 on gemma4-e2b/nemotron-nano.",
+    why: "Splits the configured context N ways rather than multiplying it — n_ctx 131072 with --parallel 2 gives each request only 65536 usable tokens. Use 1 for a config meant to serve one long conversation at its full context; more only for short requests served concurrently.",
     arg: "number",
   },
   "--ctx-checkpoints": {
     label: "Context checkpoints",
-    why: "Lets the engine restore a saved KV-cache checkpoint instead of reprocessing a whole conversation from scratch. Upstream llama.cpp has open, unresolved hang bugs in this exact code path as of 2026-07 (docs/investigations.md item 9) — most configs on this box use 16, swallow-32b/swallow-8b explicitly use 0 to avoid it.",
+    why: "Lets the engine restore a saved KV-cache checkpoint instead of reprocessing a whole conversation from scratch. Upstream llama.cpp has had hang bugs in this code path, so test a model before relying on it; 0 turns it off.",
     arg: "number",
   },
   "--cache-type-k": {
     label: "KV cache quant (K)",
-    why: "Quantizes the attention key cache to shrink its memory footprint at some quality cost. Several configs already run this asymmetric with --cache-type-v (e.g. q4_0/q8_0) — a real, already-shipped tradeoff, not a hazard.",
+    why: "Quantizes the attention key cache to shrink its memory footprint at some quality cost. It can differ from --cache-type-v (e.g. q4_0/q8_0).",
     arg: "text",
     presets: ["q4_0", "q8_0", "f16"],
   },
@@ -63,7 +63,7 @@ export const LLAMA_FLAGS: Record<string, FlagRef> = {
   },
   "--flash-attn": {
     label: "Flash attention",
-    why: "Enables the fused flash-attention kernel — faster and lower-memory attention on supported backends. Safe to leave on; it's on for nearly every config on this box.",
+    why: "Enables the fused flash-attention kernel — faster and lower-memory attention on supported backends. Normally safe to leave on.",
     arg: "text",
     presets: ["on", "off", "auto"],
   },
@@ -91,12 +91,12 @@ export const LLAMA_FLAGS: Record<string, FlagRef> = {
   },
   "--threads": {
     label: "CPU threads",
-    why: "CPU thread count for the parts of inference that aren't offloaded to the GPU (tokenization, sampling, any CPU-resident layers). Rarely the bottleneck on this box's GPU-bound modes.",
+    why: "CPU thread count for the parts of inference that aren't offloaded to the GPU (tokenization, sampling, any CPU-resident layers). Rarely the bottleneck when the whole model is on the GPU.",
     arg: "number",
   },
   "--swa-full": {
     label: "Full sliding-window attention cache",
-    why: "Keeps the full sliding-window attention cache resident rather than the reduced form — needed by some hybrid/recurrent architectures to reuse cache across turns. Interacts with --ctx-checkpoints; read docs/investigations.md item 9 before changing either on a model that sets this.",
+    why: "Keeps the full sliding-window attention cache resident rather than the reduced form — needed by some hybrid/recurrent architectures to reuse the cache across turns. It interacts with --ctx-checkpoints, so test the model before changing either.",
     arg: "none",
   },
   "--spec-type": {
@@ -113,7 +113,7 @@ export const LLAMA_FLAGS: Record<string, FlagRef> = {
     // anywhere in the schema. It's only ever a hand-typed path in
     // extra_args today, same as its short-flag sibling --model-draft. A
     // prior version of this comment claimed otherwise — corrected here.
-    why: "Path to the smaller draft model used for speculative decoding, hand-typed (there is no catalog-linked draft-model artifact, unlike --mmproj). qwen36-mtp's config sets --spec-type draft-mtp with no draft-model path at all — worth checking if that's intentional before copying it as a template.",
+    why: "Path to the smaller draft model used for speculative decoding, typed by hand (unlike --mmproj there is no catalog-linked draft-model artifact). Some drafting methods need no separate file.",
     arg: "text",
     placeholder: "/opt/forge/models/…",
   },
@@ -124,23 +124,23 @@ export const LLAMA_FLAGS: Record<string, FlagRef> = {
   },
   "--model-draft": {
     label: "Draft model",
-    why: "Short-flag form of the draft-model path (-md), used by this box's draft-dflash configs (laguna-s-21) where --spec-draft-model is used by draft-mtp configs instead — same role, different flag name depending on which speculative-decoding path the config uses. Hand-typed, not catalog-linked — see --spec-draft-model.",
+    why: "Short-flag form of the draft-model path (-md): the same role as --spec-draft-model, used by some speculative-decoding methods. Typed by hand, not catalog-linked.",
     arg: "text",
     placeholder: "/opt/forge/models/…",
   },
   "--n-gpu-layers": {
     label: "GPU-offloaded layers",
-    why: "Number of transformer layers placed on the GPU rather than the CPU. 999 (nemotron-puzzle's value) means \"all of them\" — llama.cpp clamps to the model's real layer count. Lowering this trades inference speed for less GPU memory pressure.",
+    why: "Number of transformer layers placed on the GPU rather than the CPU. 999 means all of them — llama.cpp clamps to the model's real layer count. Lowering it trades inference speed for less GPU memory pressure.",
     arg: "number",
   },
   "--batch-size": {
     label: "Prompt batch size",
-    why: "Logical batch size for prompt (prefill) processing. Larger values process a prompt faster at the cost of a bigger compute buffer; several configs on this box pair it with --ubatch-size.",
+    why: "Logical batch size for prompt (prefill) processing. Larger values process a prompt faster at the cost of a bigger compute buffer; usually tuned together with --ubatch-size.",
     arg: "number",
   },
   "--ubatch-size": {
     label: "Physical batch size",
-    why: "The physical (GPU-kernel) batch size within each logical batch (--batch-size). Must be ≤ --batch-size; tuned alongside it for this hardware's memory/throughput tradeoff.",
+    why: "The physical (GPU-kernel) batch size within each logical batch (--batch-size). Must be ≤ --batch-size; tune the two together for the hardware.",
     arg: "number",
   },
   "--reasoning-budget": {
@@ -150,29 +150,29 @@ export const LLAMA_FLAGS: Record<string, FlagRef> = {
   },
   "--chat-template-kwargs": {
     label: "Chat template kwargs",
-    why: "Extra JSON kwargs passed into the Jinja chat template — on this box, almost always {\"preserve_thinking\":true|false} (gemma4-mtp-nothink instead uses {\"enable_thinking\":false} — the kwarg name itself is template-dependent). The two lineages disagree: Qwen 3.6 (qwen36/qwen36-mtp) must preserve prior turns' reasoning, but Ornith (Qwen 3.5 lineage) must NOT — froggeric v21.3's default true made Ornith burn its whole budget inside <think> with empty content (see docs/pitfalls.md). Get this backwards and the symptom looks like a reasoning-budget or template bug, not a one-line kwarg.",
+    why: "Extra JSON arguments passed into the Jinja chat template, for example {\"preserve_thinking\":true}. The names and the right value depend on the model's template; a wrong value can look like a reasoning-budget or template bug (for example all thinking and an empty answer).",
     arg: "text",
     placeholder: '{"preserve_thinking":true}',
   },
   "--chat-template-file": {
     label: "Chat template override",
-    why: "Replaces the GGUF's embedded chat template with an external file. Ornith needs this because its original embedded template unconditionally re-injects every prior turn's <think> block (a real broken-template bug, not the reprocessing issue tracked in docs/investigations.md item 9) — see docs/pitfalls.md.",
+    why: "Replaces the GGUF's embedded chat template with an external file, for a model whose embedded template is broken or missing something it needs.",
     arg: "text",
     placeholder: "/opt/forge/models/chat-templates/…",
   },
   "--repeat-penalty": {
     label: "Repeat penalty",
-    why: "Penalizes tokens the model has already generated recently. llama-server's default (1.0) is effectively off, which lets reasoning-heavy MoE models degenerate into text-repetition loops — a sampling issue, not a template one. Ornith sets 1.08 to fix a real incident (docs/pitfalls.md).",
+    why: "Penalizes tokens the model has generated recently. llama-server's default (1.0) is effectively off, which lets some reasoning-heavy models fall into repetition loops — a sampling issue, not a template one.",
     arg: "number",
   },
   "--dry-multiplier": {
     label: "DRY sampler strength",
-    why: "Strength of the DRY (Don't Repeat Yourself) repetition-breaking sampler, off by default (0.0). Paired with --repeat-penalty on Ornith to fix a real live text-repetition-loop incident (docs/pitfalls.md) — removing it on a model that needs it brings the loop back.",
+    why: "Strength of the DRY (Don't Repeat Yourself) repetition-breaking sampler, off by default (0.0). Often used with --repeat-penalty; removing it from a model that needs it can bring repetition loops back.",
     arg: "number",
   },
   "--temp": {
     label: "Sampling temperature",
-    why: "Standard sampling temperature. Called out here only because it's part of the same curated sampler fix as --repeat-penalty/--dry-multiplier on Ornith (0.7) — changing it in isolation can reintroduce the repetition-loop symptom that fix addressed.",
+    why: "Standard sampling temperature. If a config pairs it with repetition controls, change them together: altering the temperature alone can bring repetition loops back.",
     arg: "number",
   },
 };
@@ -207,19 +207,56 @@ export const VLLM_FLAGS: Record<string, FlagRef> = {
   },
   "--dtype": {
     label: "Weight dtype",
-    why: "The compute/storage dtype vLLM loads weights as (e.g. bfloat16). Distinct from a GGUF quantization scheme — vLLM configs on this box run unquantized bf16 weights.",
+    why: "The compute/storage dtype vLLM loads weights as (e.g. bfloat16). Distinct from a GGUF quantization scheme.",
     arg: "text",
     presets: ["bfloat16", "float16", "auto"],
   },
   "--tensor-parallel-size": {
     label: "Tensor-parallel size",
-    why: "Number of GPUs to shard each layer's weights across. 1 on this box (single-GPU Strix Halo) — only meaningful if this host ever gains a second GPU.",
+    why: "Number of GPUs to shard each layer's weights across. 1 on a single-GPU machine.",
     arg: "number",
   },
   "--gpu-memory-utilization": {
     label: "GPU memory utilization",
-    why: "Fraction of GPU memory vLLM is allowed to reserve for weights + KV cache (0.98 = nearly all of it). Lowering this leaves compressor for other processes but shrinks the usable KV cache.",
+    why: "Fraction of GPU memory vLLM is allowed to reserve for weights + KV cache (0.98 = nearly all of it). Lowering this leaves memory for other processes but shrinks the usable KV cache.",
     arg: "number",
+  },
+};
+
+// Radiance launch-flag reference (the `radiance` runtime kind). Semantics are taken from Radiance's own --help table
+// (core/config.cpp) and docs/GUIDE.md, not inferred. Deliberately no `presets` and no default value on any flag: context length,
+// sequence count, KV dtype, speculation depth and any card-memory budget (--gpu-memory-mib / --gpu-headroom-mib) are per-model
+// choices recorded on the config, and --max-num-seqs is required (Forge refuses a Radiance launch without it).
+export const RADIANCE_FLAGS: Record<string, FlagRef> = {
+  "--tp": {
+    label: "Tensor-parallel ranks",
+    why: "How many GPU ranks Radiance shards the model across (--tp N). No default is stated, so set it per model to the number of cards the weights need.",
+    arg: "number",
+  },
+  "--max-num-seqs": {
+    label: "Max sequences per step",
+    why: "The largest number of sequences one step may carry. Required for Radiance: Forge refuses to launch without it. It bounds the KV cache together with the context length, so it is a per-model choice with no default.",
+    arg: "number",
+  },
+  "--max-model-len": {
+    label: "Max context length",
+    why: "Context bound in tokens. 0 means the model's training context, which is rarely what you want, so always set it explicitly per model. It reserves nothing per request; with the sequence count it sizes the KV pool.",
+    arg: "number",
+  },
+  "--kv-cache-dtype": {
+    label: "KV cache dtype",
+    why: "Storage type of the KV cache. Radiance 2.x takes bf16, i8 or fp8 and refuses the packed types; Radiance 1.x takes bf16, fp8, fp8_v4 or k6_v4, not i8. The smaller types cost fewer bytes per token of context at some loss of precision; choose per model.",
+    arg: "text",
+  },
+  "--num-speculative-tokens": {
+    label: "Speculation depth",
+    why: "Speculative window: how many draft tokens each step tries. 0 disables speculation. The default is auto (the drafter's own operating point), so set it explicitly per model. A model with no draft head is unaffected.",
+    arg: "number",
+  },
+  "--kernels": {
+    label: "Kernel libraries",
+    why: "The kernel libraries Radiance loads, separated by ',' or ':'; the first that matches wins and unnamed ones are not loaded. Without it every library on the search path is used (the host may set RADIANCE_KERNELS in the build's launch environment).",
+    arg: "text",
   },
 };
 
@@ -236,9 +273,9 @@ export interface LoadOption {
 
 // parseLoadOptions turns a config's flat extra_args argv token array into
 // display rows. extra_args is meant to be one argv element per array entry
-// (go/internal/engine/sysconfig.go's writeServiceFiles writes it one per
-// line, and /usr/local/lib/forge/start-a1.sh reads it back with
-// `mapfile -t` — no shell word-splitting). CatalogPanel's ConfigForm used
+// (the slot launch row carries it as an argv array, one element per
+// entry — the old env/args file writer wrote it one per line and the
+// launcher read it back with `mapfile -t`; no shell word-splitting). CatalogPanel's ConfigForm used
 // to teach the wrong format via its placeholder ("--ctx-checkpoints 16" on
 // one line, which the line-based extraArgsFromText turns into ONE array
 // element instead of two) — a config edited that way silently fails to
@@ -343,7 +380,7 @@ export function hazardsFor(card: Pick<ConfigCard, "extra_args" | "n_ctx">): Haza
   if (ctxCheckpoints && ctxCheckpoints.value != null && ctxCheckpoints.value !== "0") {
     hazards.push({
       flag: ctxCheckpoints.flag,
-      message: "Open upstream llama.cpp hang bugs exist in this exact code path (docs/investigations.md item 9). Verify this is intentional before relying on it for a long-running conversation.",
+      message: "Upstream llama.cpp has had hang bugs in this code path. Check that this is intentional before relying on it for a long-running conversation.",
     });
   }
 

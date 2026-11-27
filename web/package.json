@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "node scripts/gen-attributions.mjs && node scripts/check-locales.mjs && tsc -b && vite build",
     "lint": "oxlint",
+    "test": "node --test scripts/*.test.mjs",
     "preview": "vite preview",
     "icons": "node scripts/vendor-icons.mjs",
     "attributions": "node scripts/gen-attributions.mjs",
@@ -30,6 +31,7 @@
     "vite": "^8.1.1"
   },
   "overrides": {
-    "fast-uri": "^3.1.7"
+    "fast-uri": "^3.1.7",
+    "glob": "^14.0.2"
   }
 }

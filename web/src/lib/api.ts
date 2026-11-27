@@ -16,6 +16,8 @@ import type {
   CompressorSummaryResponse,
   CatalogArtifact,
   CatalogBenchmark,
+  ArtifactWritePayload,
+  BuildWritePayload,
   CatalogBuild,
   CatalogConfig,
   CatalogEngine,
@@ -28,6 +30,14 @@ import type {
   CatalogOffering,
   CatalogCapabilityTier,
   CatalogVirtualModel,
+  SpecialistFunction,
+  SpecialistOccupant,
+  SpecialistBehavior,
+  SpecialistPolicy,
+  SpecialistsResponse,
+  SpeechReadiness,
+  SpeechRecipesResponse,
+  SpeechRegisterResult,
   CatalogService,
   CatalogVariant,
   ConfigCard,
@@ -55,6 +65,10 @@ import type {
   NotificationsResponse,
   ModesListResponse,
   PreflightResult,
+  ProfileNight,
+  RemovalKind,
+  RemovalPlan,
+  RemovalResult,
   ProfileResult,
   ProfileRunRequest,
   ProfilesListResponse,
@@ -65,6 +79,7 @@ import type {
   ProviderUpdateRequest,
   ProvidersResponse,
   RecoveryCodesGenerateResponse,
+  ConcurrencyResponse,
   RecoveryCodesStatusResponse,
   Reservation,
   RouterConfig,
@@ -116,12 +131,13 @@ import type {
   UISettings,
   UISettingsUpdate,
   ServiceLinks,
+  ExternalTools,
   UsageEvent,
   UsageHeatmapResponse,
   UsageResponse,
   VoiceListResponse,
-  VoiceSettings,
-  VoiceSettingsUpdate,
+  SpeechDefaultsDraft,
+  SpeechDefaultsResponse,
   WebAuthnCredentialsResponse,
   WebAuthnFinishAssertRequest,
   WebAuthnFinishAssertResponse,
@@ -189,10 +205,14 @@ export function apiErrorMessage(e: unknown): string {
     if (body.message) return body.message;
     if (body.error) return body.error;
   }
+  // A fetch that never reached the server (offline, daemon restarting) surfaces as a bare TypeError ("Failed to fetch"): say what happened.
+  if (e instanceof TypeError && i18next.exists("errors:network_error")) return i18next.t("errors:network_error");
   return e instanceof Error ? e.message : "Request failed";
 }
 
-async function request<T>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<T> {
+// requestWithHeaders is request() that also hands back the response headers, for the few callers that need one
+// (the catalog's ETag, ADR-0020 F3).
+async function requestWithHeaders<T>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<{ data: T; headers: Headers }> {
   const headers: Record<string, string> = { ...(init?.headers as Record<string, string>) };
   const method = (init?.method || "GET").toUpperCase();
   if (method !== "GET" && csrfToken) {
@@ -215,7 +235,11 @@ async function request<T>(path: string, init?: RequestInit, signal?: AbortSignal
   if (!resp.ok) {
     throw new ApiError(resp.status, data);
   }
-  return data as T;
+  return { data: data as T, headers: resp.headers };
+}
+
+async function request<T>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<T> {
+  return (await requestWithHeaders<T>(path, init, signal)).data;
 }
 
 const get = <T,>(path: string, signal?: AbortSignal) => request<T>(path, undefined, signal);
@@ -223,12 +247,16 @@ const post = <T,>(path: string, body?: unknown, signal?: AbortSignal) =>
   request<T>(path, { method: "POST", body: body !== undefined ? JSON.stringify(body) : undefined }, signal);
 const put = <T,>(path: string, body?: unknown, signal?: AbortSignal) =>
   request<T>(path, { method: "PUT", body: body !== undefined ? JSON.stringify(body) : undefined }, signal);
+const patch = <T,>(path: string, body?: unknown, signal?: AbortSignal) =>
+  request<T>(path, { method: "PATCH", body: body !== undefined ? JSON.stringify(body) : undefined }, signal);
 const del = <T,>(path: string, body?: unknown, signal?: AbortSignal) =>
   request<T>(path, { method: "DELETE", body: body !== undefined ? JSON.stringify(body) : undefined }, signal);
 
 export const api = {
   session: () => get<SessionInfo>("/api/v1/session"),
   status: () => get<Status>("/api/v1/status"),
+  usageConcurrency: (model: string, since: number, until: number) =>
+    get<ConcurrencyResponse>(`/api/v1/usage/concurrency?model=${encodeURIComponent(model)}&since=${since}&until=${until}`),
   metrics: () => get<Metrics>("/api/v1/metrics"),
   schedulerStatus: () => get<SchedulerStatus>("/api/v1/scheduler/status"),
   // product/QA sprint, 2026-07-29 — Dashboard notifications panel.
@@ -251,6 +279,20 @@ export const api = {
   switchMode: (mode: string) => post<{ ok?: boolean; success?: boolean; message?: string }>(`/api/v1/switch/${encodeURIComponent(mode)}`),
   loadModel: (mode: string, slot: string, evict?: string[]) =>
     post<{ success: boolean; message?: string }>("/api/v1/load", evict?.length ? { mode, slot, evict } : { mode, slot }),
+  specialists: () => get<SpecialistsResponse>("/api/v1/specialists"),
+  specialistLoad: (occupant: string, slot?: string) =>
+    post<{ slot: string; occupant: string; state: string }>("/api/v1/specialists/load", { occupant, slot: slot ?? "" }),
+  specialistUnload: (slot: string) => post<{ slot: string; state: string }>("/api/v1/specialists/unload", { slot }),
+  specialistPolicy: (name: string, policy: SpecialistPolicy, homeSlot: string) =>
+    post<SpecialistOccupant>(`/api/v1/specialists/occupants/${encodeURIComponent(name)}/policy`, { policy, home_slot: homeSlot }),
+  specialistCreate: (o: Partial<SpecialistOccupant> & { name: string; kind: string }) =>
+    post<SpecialistOccupant>("/api/v1/specialists/occupants", o),
+  specialistBehavior: (name: string, behavior: SpecialistBehavior) =>
+    post<SpecialistOccupant & { state?: string }>(`/api/v1/specialists/occupants/${encodeURIComponent(name)}/behavior`, { behavior }),
+  specialistAddSlot: () => post<{ slot: string; port: number; label: string }>("/api/v1/specialists/slots", {}),
+  specialistSlotLog: (slot: string) => get<{ slot: string; lines: string }>(`/api/v1/specialists/slots/${encodeURIComponent(slot)}/log?lines=40`),
+  specialistDefault: (fn: SpecialistFunction, occupant: string) =>
+    put<{ defaults: Record<string, string> }>(`/api/v1/specialists/defaults/${encodeURIComponent(fn)}`, { occupant }),
   unloadSlot: (slot: string) => post<{ success: boolean; message?: string }>("/api/v1/unload", { slot }),
 
   reservations: () => get<{ reservations: Reservation[]; total: number }>("/api/v1/reservations"),
@@ -308,8 +350,15 @@ export const api = {
   updateUiSettings: (patch: UISettingsUpdate) => put<UISettings>("/api/v1/ui/settings", patch),
   serviceLinks: () => get<ServiceLinks>("/api/v1/service-links"),
   updateServiceLinks: (links: Record<string, string>) => put<ServiceLinks>("/api/v1/service-links", { links }),
-  voiceSettings: () => get<VoiceSettings>("/api/v1/voice/settings"),
-  updateVoiceSettings: (patch: VoiceSettingsUpdate) => put<VoiceSettings>("/api/v1/voice/settings", patch),
+  externalTools: () => get<ExternalTools>("/api/v1/external-tools"),
+  updateExternalTools: (tools: ExternalTools["tools"]) => put<ExternalTools>("/api/v1/external-tools", { tools }),
+  speechDefaults: () => get<SpeechDefaultsResponse>("/api/v1/speech/defaults"),
+  speechReadiness: () => get<SpeechReadiness>("/api/v1/speech/readiness"),
+  speechRecipes: () => get<SpeechRecipesResponse>("/api/v1/speech/recipes"),
+  // Registers an engine whose files are already on the server (admin + step-up).
+  registerSpeechRecipe: (id: string) => post<SpeechRegisterResult>(`/api/v1/speech/recipes/${encodeURIComponent(id)}/register`, {}),
+  // Replaces every default (admin + step-up). The answer holds only the kinds that now have one.
+  updateSpeechDefaults: (d: SpeechDefaultsDraft) => put<{ defaults: Partial<SpeechDefaultsDraft> }>("/api/v1/speech/defaults", d),
   voiceList: () => get<VoiceListResponse>("/api/v1/voice/list"),
   startInfraService: (name: "stt" | "embedding" | "aligner" | "tts") => post<void>(`/api/v1/${name}/start`, {}),
   stopInfraService: (name: "stt" | "embedding" | "aligner" | "tts") => post<void>(`/api/v1/${name}/stop`, {}),
@@ -418,6 +467,12 @@ export const api = {
   profileRun: (req: ProfileRunRequest) => post<{ success: boolean; message?: string }>("/api/v1/profile/run", req),
   profile: (mode: string) => get<ProfileResult>(`/api/v1/profile/${encodeURIComponent(mode)}`),
   profiles: () => get<ProfilesListResponse>("/api/v1/profile"),
+  profileNight: () => get<ProfileNight>("/api/v1/profile-night"),
+  profileNightArm: () => post<ProfileNight>("/api/v1/profile-night", {}),
+  profileNightCancel: () => del<ProfileNight>("/api/v1/profile-night"),
+  catalogRemovalPlan: (kind: RemovalKind, id: number) => get<RemovalPlan>(`/api/v1/catalog/${kind}s/${id}/removal`),
+  catalogRemove: (kind: RemovalKind, id: number, body: { delete_files: boolean; token: string }) =>
+    post<RemovalResult>(`/api/v1/catalog/${kind}s/${id}/remove`, body),
   stepUp: (req: StepUpRequest) => post<StepUpResponse>("/api/v1/auth/step-up", req),
 
   // Smith self-diagnosis (Wave 2 — docs/v5-smith.md §4.1). GET /smith/status
@@ -617,6 +672,10 @@ export const api = {
   catalogFormats: () => get<{ id: number; name: string }[]>("/api/v1/catalog/formats"),
   catalogEngines: () => get<CatalogEngine[]>("/api/v1/catalog/engines"),
   catalogBuilds: () => get<CatalogBuild[]>("/api/v1/catalog/builds"),
+  createCatalogBuild: (b: BuildWritePayload) => post<CatalogBuild>("/api/v1/catalog/builds", b),
+  retireCatalogBuild: (id: number) => patch<CatalogBuild>(`/api/v1/catalog/builds/${id}`, { retired: true }),
+  createCatalogArtifact: (a: ArtifactWritePayload) => post<CatalogArtifact>("/api/v1/catalog/artifacts", a),
+  deleteCatalogArtifact: (id: number) => del<{ ok: boolean }>(`/api/v1/catalog/artifacts/${id}`),
 
   // CapabilityTier CRUD (capability-tier substitution, Sprint P1, 2026-09-13 — see
   // CatalogCapabilityTier's doc comment).
@@ -669,8 +728,18 @@ export const api = {
   catalogConfigs: (variantId?: number) =>
     get<CatalogConfig[]>(`/api/v1/catalog/configs${variantId ? `?variant_id=${variantId}` : ""}`),
   createCatalogConfig: (c: ConfigWritePayload) => post<CatalogConfig>("/api/v1/catalog/configs", c),
-  updateCatalogConfig: (id: number, c: ConfigWritePayload, reason?: string) =>
-    put<CatalogConfig>(`/api/v1/catalog/configs/${id}`, { ...c, reason }),
+  // The record plus its ETag, so an edit form can send If-Match and learn when the record changed under it
+  // (a 412 with code precondition_failed) instead of silently overwriting the other change.
+  catalogConfigDetail: async (id: number) => {
+    const { data, headers } = await requestWithHeaders<CatalogConfig>(`/api/v1/catalog/configs/${id}`);
+    return { config: data, etag: headers.get("ETag") };
+  },
+  updateCatalogConfig: (id: number, c: ConfigWritePayload, reason?: string, etag?: string | null) =>
+    request<CatalogConfig>(`/api/v1/catalog/configs/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ ...c, reason }),
+      headers: etag ? { "If-Match": etag } : undefined,
+    }),
   uploadConfigIcon: (id: number, file: File, dark = false) => {
     const form = new FormData();
     form.append("file", file);
