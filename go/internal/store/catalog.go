@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -75,6 +76,10 @@ type Model struct {
 	// actually deliver it -- see Config.Modalities and
 	// registry.resolveModalities (Sprint J1).
 	Modalities []string
+	// OutputModalities is what the architecture can produce: text, audio (speech) and/or decisions
+	// (native decision models served on /v1/systemone). Defaults to ["text"]; unlike Modalities it
+	// never has "text" forced in, because a decision model produces no text. See ResolveOutputModalities.
+	OutputModalities []string
 	// Visibility is visible (Models gallery) or hidden (Settings only) —
 	// model-level decommission flag mirroring Config.Visibility
 	// (0062_models_visibility.sql). Card endpoints filter hidden models;
@@ -148,13 +153,17 @@ type Compatibility struct {
 type Engine struct {
 	ID   int64
 	Name string
+	// Kind selects the engine's behaviour in Go (internal/enginekind, ADR-0025): "llamacpp" | "vllm". Distinct from Build.Backend,
+	// which is the GPU path.
+	Kind string
 }
 
 // Build is a specific compiled version of an Engine (vulkan-build,
 // rocm-build, puzzle-port-branch). One Engine has many Builds.
 //
 // Backend is the GPU runtime this Build's binary requires: "vulkan" | "rocm"
-// | "vllm". Required, explicit — never derived from Name. Found live
+// (the legacy value "vllm" is still read, as the vLLM engine; the engine itself
+// is Engine.Kind, ADR-0025). Required, explicit — never derived from Name. Found live
 // (2026-07-28): deriving it from a Name substring match ("contains ROCM")
 // silently defaulted to "vulkan" for any Build with no matching name (or no
 // Build at all), which launched the wrong binary for nemotron (backend
@@ -169,6 +178,14 @@ type Build struct {
 	BinaryPath string
 	Backend    string
 	Reason     string
+	// Retired marks a build no new config may use. Retiring also empties BinaryPath. Rows retired before migration
+	// 0095 still carry a "(retired) " name prefix; nothing writes it any more (ADR-0020 phase 5).
+	Retired bool
+	// LaunchEnv is the host launch environment the engine build needs (migration 0106): environment variables ADDED to the engine's
+	// process when a slot launches it, e.g. a home directory, a kernel-library selection and the library path for Radiance. nil/empty:
+	// the build adds nothing. Written only through BuildWrites, which validates it (names, values, paths, secrets, size); the launch
+	// builder of an engine kind that takes it copies it into the slot_launches row. Stored as a JSON object, NULL when empty.
+	LaunchEnv map[string]string
 }
 
 // Config is a named, loadable recipe for running one weight Artifact with
@@ -185,7 +202,6 @@ type Config struct {
 	BuildID          int64 // 0 → NULL
 	MMProjArtifactID int64 // 0 → NULL
 	NCtx             int
-	Parallel         int
 	ExtraArgs        []string
 	Status           string // unverified | verified
 	Visibility       string // visible | hidden
@@ -201,6 +217,9 @@ type Config struct {
 	// = use verbatim, even if that means "text only" despite a capable
 	// model (Sprint J1).
 	Modalities *[]string
+	// OutputModalities overrides the model-level output set; nil = derive from Model.OutputModalities
+	// (ResolveOutputModalities). Same nil-vs-empty semantics as Modalities.
+	OutputModalities *[]string
 	// CapabilityTierID groups this config with others that may substitute for
 	// each other under capability-tier substitution (0 → NULL — no class, never
 	// substitutes or is substituted). See CapabilityTier's doc comment.
@@ -275,11 +294,29 @@ type CapabilityTier struct {
 // (which systemd unit, which port) is itself editable without a file edit.
 type Slot struct {
 	ID        int64
-	Name      string // a1, a2, a3, a4
+	Name      string // a1, a2, a3, a4 (llm pool); s1..s6 (specialist pool, ADR-0022)
 	Unit      string // systemd unit, e.g. forge-a1
 	Port      int
 	Label     string // A1, A2, A3, A4
 	SortOrder int
+	Pool      string // PoolLLM (default) or PoolSpecialist; empty reads and writes as PoolLLM
+}
+
+// Slot pools (ADR-0022). The pool decides which scheduler and which screen own a slot.
+const (
+	PoolLLM        = "llm"
+	PoolSpecialist = "specialist"
+)
+
+// NormalizePool maps the empty pool to PoolLLM and rejects an unknown one.
+func NormalizePool(p string) (string, error) {
+	switch p {
+	case "", PoolLLM:
+		return PoolLLM, nil
+	case PoolSpecialist:
+		return PoolSpecialist, nil
+	}
+	return "", fmt.Errorf("store: unknown slot pool %q (want %q or %q)", p, PoolLLM, PoolSpecialist)
 }
 
 // Service is a standalone process the dashboard manages via Start/Stop
@@ -366,6 +403,9 @@ type Benchmark struct {
 	SubjectType string // model | variant | config | offering
 	SubjectID   int64
 	Notes       string
+	// Tuple (migration 0107) is the JSON object naming the launch tuple a tuple-bound figure (safe_memory_bytes for an engine whose
+	// footprint depends on its flags) was measured at; empty for every other benchmark. See launch.MemoryTuple.
+	Tuple string
 }
 
 // Note is an operator annotation attached to a Model, Config, or Offering.
@@ -387,6 +427,10 @@ type Note struct {
 // side (for DoD verification + Phase 2 read-site migration). Phase 3 adds
 // Get/Update/Delete + lookup methods for the CRUD APIs.
 type Catalog interface {
+	// ── Removal (catalog_removal.go) ──
+	RemovalReferences(ctx context.Context) (RemovalReferences, error)
+	RemoveCatalogRows(ctx context.Context, rows RemovalRows) error
+
 	// ── Identity & Derivation ──
 	// Genealogy CRUD (product/QA sprint, 2026-07-29 — the level above
 	// Family; see Genealogy's doc comment).
@@ -439,6 +483,8 @@ type Catalog interface {
 	CreateBuild(ctx context.Context, b Build) (int64, error)
 	UpdateBuild(ctx context.Context, b Build) error
 	ListBuilds(ctx context.Context) ([]Build, error)
+	GetBuild(ctx context.Context, id int64) (Build, error)
+	DeleteBuild(ctx context.Context, id int64) error
 	CreateConfig(ctx context.Context, c Config) (int64, error)
 	GetConfig(ctx context.Context, id int64) (Config, error)
 	UpdateConfig(ctx context.Context, c Config) error
@@ -865,11 +911,11 @@ func (v catalogView) CreateModel(ctx context.Context, m Model) (int64, error) {
 	res, err := v.d.sql.ExecContext(ctx,
 		`INSERT INTO models (family_id, name, architecture, parameter_count,
 		description, creator, license_name, license_url, hf_repo, logo, logo_dark,
-		key_features, modalities, visibility)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		key_features, modalities, output_modalities, visibility)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nullInt64(m.FamilyID), m.Name, m.Architecture, m.ParameterCount,
 		m.Description, m.Creator, m.LicenseName, m.LicenseURL, m.HFRepo, m.Logo, m.LogoDark,
-		jsonList(m.KeyFeatures), jsonList(m.Modalities), m.Visibility)
+		jsonList(m.KeyFeatures), jsonList(m.Modalities), jsonList(normalizeOutputModalities(m.OutputModalities)), m.Visibility)
 	if err != nil {
 		return 0, fmt.Errorf("store: catalog.create_model: %w", err)
 	}
@@ -880,7 +926,7 @@ func (v catalogView) CreateModel(ctx context.Context, m Model) (int64, error) {
 func (v catalogView) ListModels(ctx context.Context) ([]Model, error) {
 	rows, err := v.d.sql.QueryContext(ctx,
 		`SELECT id, family_id, name, architecture, parameter_count, description,
-		creator, license_name, license_url, hf_repo, logo, logo_dark, key_features, modalities, visibility
+		creator, license_name, license_url, hf_repo, logo, logo_dark, key_features, modalities, output_modalities, visibility
 		FROM models ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("store: catalog.list_models: %w", err)
@@ -890,15 +936,16 @@ func (v catalogView) ListModels(ctx context.Context) ([]Model, error) {
 	for rows.Next() {
 		var m Model
 		var familyID sql.NullInt64
-		var kf, mod string
+		var kf, mod, omod string
 		if err := rows.Scan(&m.ID, &familyID, &m.Name, &m.Architecture,
 			&m.ParameterCount, &m.Description, &m.Creator, &m.LicenseName,
-			&m.LicenseURL, &m.HFRepo, &m.Logo, &m.LogoDark, &kf, &mod, &m.Visibility); err != nil {
+			&m.LicenseURL, &m.HFRepo, &m.Logo, &m.LogoDark, &kf, &mod, &omod, &m.Visibility); err != nil {
 			return nil, fmt.Errorf("store: catalog.list_models: %w", err)
 		}
 		m.FamilyID = intOf(familyID)
 		m.KeyFeatures = parseJSONList(kf)
 		m.Modalities = parseJSONList(mod)
+		m.OutputModalities = parseJSONList(omod)
 		out = append(out, m)
 	}
 	return out, rows.Err()
@@ -1035,10 +1082,14 @@ func (v catalogView) FormatByName(ctx context.Context, name string) (Format, err
 // ── Launch & Inference: implementation ────────────────────────────────────────
 
 func (v catalogView) CreateSlot(ctx context.Context, s Slot) (int64, error) {
+	pool, err := NormalizePool(s.Pool)
+	if err != nil {
+		return 0, err
+	}
 	res, err := v.d.sql.ExecContext(ctx,
-		`INSERT OR IGNORE INTO slots (name, unit, port, label, sort_order)
-		 VALUES (?, ?, ?, ?, ?)`,
-		s.Name, s.Unit, s.Port, s.Label, s.SortOrder)
+		`INSERT OR IGNORE INTO slots (name, unit, port, label, sort_order, pool)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		s.Name, s.Unit, s.Port, s.Label, s.SortOrder, pool)
 	if err != nil {
 		return 0, fmt.Errorf("store: catalog.create_slot: %w", err)
 	}
@@ -1058,7 +1109,7 @@ func (v catalogView) CreateSlot(ctx context.Context, s Slot) (int64, error) {
 
 func (v catalogView) ListSlots(ctx context.Context) ([]Slot, error) {
 	rows, err := v.d.sql.QueryContext(ctx,
-		`SELECT id, name, unit, port, label, sort_order
+		`SELECT id, name, unit, port, label, sort_order, pool
 		 FROM slots ORDER BY sort_order, name`)
 	if err != nil {
 		return nil, fmt.Errorf("store: catalog.list_slots: %w", err)
@@ -1067,7 +1118,7 @@ func (v catalogView) ListSlots(ctx context.Context) ([]Slot, error) {
 	out := []Slot{}
 	for rows.Next() {
 		var s Slot
-		if err := rows.Scan(&s.ID, &s.Name, &s.Unit, &s.Port, &s.Label, &s.SortOrder); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Unit, &s.Port, &s.Label, &s.SortOrder, &s.Pool); err != nil {
 			return nil, fmt.Errorf("store: catalog.list_slots: %w", err)
 		}
 		out = append(out, s)
@@ -1078,8 +1129,8 @@ func (v catalogView) ListSlots(ctx context.Context) ([]Slot, error) {
 func (v catalogView) EngineByName(ctx context.Context, name string) (Engine, error) {
 	var e Engine
 	err := v.d.sql.QueryRowContext(ctx,
-		`SELECT id, name FROM engines WHERE name = ?`, name).
-		Scan(&e.ID, &e.Name)
+		`SELECT id, name, kind FROM engines WHERE name = ?`, name).
+		Scan(&e.ID, &e.Name, &e.Kind)
 	if err == sql.ErrNoRows {
 		return Engine{}, fmt.Errorf("%w: engine %q", ErrNotFound, name)
 	}
@@ -1091,7 +1142,7 @@ func (v catalogView) EngineByName(ctx context.Context, name string) (Engine, err
 
 func (v catalogView) ListEngines(ctx context.Context) ([]Engine, error) {
 	rows, err := v.d.sql.QueryContext(ctx,
-		`SELECT id, name FROM engines ORDER BY name`)
+		`SELECT id, name, kind FROM engines ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("store: catalog.list_engines: %w", err)
 	}
@@ -1099,7 +1150,7 @@ func (v catalogView) ListEngines(ctx context.Context) ([]Engine, error) {
 	out := []Engine{}
 	for rows.Next() {
 		var e Engine
-		if err := rows.Scan(&e.ID, &e.Name); err != nil {
+		if err := rows.Scan(&e.ID, &e.Name, &e.Kind); err != nil {
 			return nil, fmt.Errorf("store: catalog.list_engines: %w", err)
 		}
 		out = append(out, e)
@@ -1109,9 +1160,9 @@ func (v catalogView) ListEngines(ctx context.Context) ([]Engine, error) {
 
 func (v catalogView) CreateBuild(ctx context.Context, b Build) (int64, error) {
 	res, err := v.d.sql.ExecContext(ctx,
-		`INSERT INTO builds (engine_id, name, binary_path, backend, reason)
-		 VALUES (?, ?, ?, ?, ?)`,
-		b.EngineID, b.Name, b.BinaryPath, b.Backend, b.Reason)
+		`INSERT INTO builds (engine_id, name, binary_path, backend, reason, retired, launch_env)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		b.EngineID, b.Name, b.BinaryPath, b.Backend, b.Reason, b.Retired, launchEnvJSON(b.LaunchEnv))
 	if err != nil {
 		return 0, fmt.Errorf("store: catalog.create_build: %w", err)
 	}
@@ -1121,9 +1172,9 @@ func (v catalogView) CreateBuild(ctx context.Context, b Build) (int64, error) {
 
 func (v catalogView) UpdateBuild(ctx context.Context, b Build) error {
 	res, err := v.d.sql.ExecContext(ctx,
-		`UPDATE builds SET engine_id=?, name=?, binary_path=?, backend=?, reason=?
+		`UPDATE builds SET engine_id=?, name=?, binary_path=?, backend=?, reason=?, retired=?, launch_env=?
 		 WHERE id=?`,
-		b.EngineID, b.Name, b.BinaryPath, b.Backend, b.Reason, b.ID)
+		b.EngineID, b.Name, b.BinaryPath, b.Backend, b.Reason, b.Retired, launchEnvJSON(b.LaunchEnv), b.ID)
 	if err != nil {
 		return fmt.Errorf("store: catalog.update_build: %w", err)
 	}
@@ -1133,9 +1184,38 @@ func (v catalogView) UpdateBuild(ctx context.Context, b Build) error {
 	return nil
 }
 
+func (v catalogView) GetBuild(ctx context.Context, id int64) (Build, error) {
+	var b Build
+	var env sql.NullString
+	err := v.d.sql.QueryRowContext(ctx,
+		`SELECT id, engine_id, name, binary_path, backend, reason, retired, launch_env FROM builds WHERE id = ?`, id).
+		Scan(&b.ID, &b.EngineID, &b.Name, &b.BinaryPath, &b.Backend, &b.Reason, &b.Retired, &env)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Build{}, fmt.Errorf("%w: build %d", ErrNotFound, id)
+	}
+	if err != nil {
+		return Build{}, fmt.Errorf("store: catalog.get_build: %w", err)
+	}
+	if b.LaunchEnv, err = parseLaunchEnv(env); err != nil {
+		return Build{}, fmt.Errorf("store: catalog.get_build %d: %w", id, err)
+	}
+	return b, nil
+}
+
+func (v catalogView) DeleteBuild(ctx context.Context, id int64) error {
+	res, err := v.d.sql.ExecContext(ctx, `DELETE FROM builds WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("store: catalog.delete_build: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: build %d", ErrNotFound, id)
+	}
+	return nil
+}
+
 func (v catalogView) ListBuilds(ctx context.Context) ([]Build, error) {
 	rows, err := v.d.sql.QueryContext(ctx,
-		`SELECT id, engine_id, name, binary_path, backend, reason
+		`SELECT id, engine_id, name, binary_path, backend, reason, retired, launch_env
 		 FROM builds ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: catalog.list_builds: %w", err)
@@ -1144,8 +1224,13 @@ func (v catalogView) ListBuilds(ctx context.Context) ([]Build, error) {
 	out := []Build{}
 	for rows.Next() {
 		var b Build
-		if err := rows.Scan(&b.ID, &b.EngineID, &b.Name, &b.BinaryPath, &b.Backend, &b.Reason); err != nil {
+		var env sql.NullString
+		if err := rows.Scan(&b.ID, &b.EngineID, &b.Name, &b.BinaryPath, &b.Backend, &b.Reason, &b.Retired, &env); err != nil {
 			return nil, fmt.Errorf("store: catalog.list_builds: %w", err)
+		}
+		var perr error
+		if b.LaunchEnv, perr = parseLaunchEnv(env); perr != nil {
+			return nil, fmt.Errorf("store: catalog.list_builds: build %d: %w", b.ID, perr)
 		}
 		out = append(out, b)
 	}
@@ -1163,15 +1248,15 @@ func (v catalogView) CreateConfig(ctx context.Context, c Config) (int64, error) 
 	}
 	res, err := v.d.sql.ExecContext(ctx,
 		`INSERT INTO configs (name, variant_id, weight_artifact_id, engine_id,
-		   build_id, mmproj_artifact_id, n_ctx, parallel, extra_args, status,
-		   visibility, is_default, fingerprint, created_at, logo, logo_dark, modalities,
+		   build_id, mmproj_artifact_id, n_ctx, extra_args, status,
+		   visibility, is_default, fingerprint, created_at, logo, logo_dark, modalities, output_modalities,
 		   capability_tier_id, capability_rank, chat_template_caps_override, reasoning_effort_default)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.Name, c.VariantID, c.WeightArtifactID, c.EngineID,
 		nullInt64(c.BuildID), nullInt64(c.MMProjArtifactID),
-		c.NCtx, c.Parallel, jsonList(c.ExtraArgs), c.Status, c.Visibility,
+		c.NCtx, jsonList(c.ExtraArgs), c.Status, c.Visibility,
 		boolInt(c.IsDefault), c.Fingerprint, unixOf(orNow(c.CreatedAt)), c.Logo, c.LogoDark,
-		nullJSONList(c.Modalities), nullInt64(c.CapabilityTierID), c.CapabilityRank,
+		nullJSONList(c.Modalities), nullJSONList(c.OutputModalities), nullInt64(c.CapabilityTierID), c.CapabilityRank,
 		nullJSONBoolMap(c.ChatTemplateCapsOverride), c.ReasoningEffortDefault)
 	if err != nil {
 		return 0, fmt.Errorf("store: catalog.create_config: %w", err)
@@ -1183,8 +1268,8 @@ func (v catalogView) CreateConfig(ctx context.Context, c Config) (int64, error) 
 func (v catalogView) ListConfigs(ctx context.Context) ([]Config, error) {
 	rows, err := v.d.sql.QueryContext(ctx,
 		`SELECT id, name, variant_id, weight_artifact_id, engine_id, build_id,
-		   mmproj_artifact_id, n_ctx, parallel, extra_args, status, visibility,
-		   is_default, fingerprint, created_at, logo, logo_dark, modalities,
+		   mmproj_artifact_id, n_ctx, extra_args, status, visibility,
+		   is_default, fingerprint, created_at, logo, logo_dark, modalities, output_modalities,
 		   capability_tier_id, capability_rank,
 		   chat_template_caps, chat_template_caps_probed_at, chat_template_caps_override,
 		   reasoning_effort_default
@@ -1200,10 +1285,10 @@ func (v catalogView) ListConfigs(ctx context.Context) ([]Config, error) {
 		var isDefault int64
 		var ea string
 		var createdAt int64
-		var mod, caps, capsOverride sql.NullString
+		var mod, omod, caps, capsOverride sql.NullString
 		if err := rows.Scan(&c.ID, &c.Name, &c.VariantID, &c.WeightArtifactID,
-			&c.EngineID, &buildID, &mmprojID, &c.NCtx, &c.Parallel, &ea,
-			&c.Status, &c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod,
+			&c.EngineID, &buildID, &mmprojID, &c.NCtx, &ea,
+			&c.Status, &c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod, &omod,
 			&capabilityTierID, &c.CapabilityRank, &caps, &capsProbedAt, &capsOverride,
 			&c.ReasoningEffortDefault); err != nil {
 			return nil, fmt.Errorf("store: catalog.list_configs: %w", err)
@@ -1214,6 +1299,7 @@ func (v catalogView) ListConfigs(ctx context.Context) ([]Config, error) {
 		c.IsDefault = isDefault != 0
 		c.CreatedAt = time.Unix(createdAt, 0).UTC()
 		c.Modalities = parseNullJSONList(mod)
+		c.OutputModalities = parseNullJSONList(omod)
 		c.CapabilityTierID = intOf(capabilityTierID)
 		c.ChatTemplateCaps = parseBoolMap(caps.String)
 		c.ChatTemplateCapsProbedAt = timeOf(capsProbedAt)
@@ -1341,10 +1427,10 @@ func (v catalogView) ListOfferings(ctx context.Context) ([]Offering, error) {
 func (v catalogView) CreateBenchmark(ctx context.Context, b Benchmark) (int64, error) {
 	res, err := v.d.sql.ExecContext(ctx,
 		`INSERT INTO benchmarks (metric, value, source, source_url, source_date,
-		   subject_type, subject_id, notes)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		   subject_type, subject_id, notes, tuple_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.Metric, b.Value, b.Source, b.SourceURL, b.SourceDate,
-		b.SubjectType, b.SubjectID, b.Notes)
+		b.SubjectType, b.SubjectID, b.Notes, nullIfEmpty(b.Tuple))
 	if err != nil {
 		return 0, fmt.Errorf("store: catalog.create_benchmark: %w", err)
 	}
@@ -1355,7 +1441,7 @@ func (v catalogView) CreateBenchmark(ctx context.Context, b Benchmark) (int64, e
 func (v catalogView) ListBenchmarks(ctx context.Context) ([]Benchmark, error) {
 	rows, err := v.d.sql.QueryContext(ctx,
 		`SELECT id, metric, value, source, source_url, source_date, subject_type,
-		   subject_id, notes
+		   subject_id, notes, tuple_json
 		 FROM benchmarks ORDER BY subject_type, subject_id, metric`)
 	if err != nil {
 		return nil, fmt.Errorf("store: catalog.list_benchmarks: %w", err)
@@ -1364,10 +1450,12 @@ func (v catalogView) ListBenchmarks(ctx context.Context) ([]Benchmark, error) {
 	out := []Benchmark{}
 	for rows.Next() {
 		var b Benchmark
+		var tup sql.NullString
 		if err := rows.Scan(&b.ID, &b.Metric, &b.Value, &b.Source, &b.SourceURL,
-			&b.SourceDate, &b.SubjectType, &b.SubjectID, &b.Notes); err != nil {
+			&b.SourceDate, &b.SubjectType, &b.SubjectID, &b.Notes, &tup); err != nil {
 			return nil, fmt.Errorf("store: catalog.list_benchmarks: %w", err)
 		}
+		b.Tuple = tup.String
 		out = append(out, b)
 	}
 	return out, rows.Err()
@@ -1416,14 +1504,14 @@ func (v catalogView) ListNotes(ctx context.Context) ([]Note, error) {
 func (v catalogView) GetModel(ctx context.Context, id int64) (Model, error) {
 	var m Model
 	var familyID sql.NullInt64
-	var kf, mod string
+	var kf, mod, omod string
 	err := v.d.sql.QueryRowContext(ctx,
 		`SELECT id, family_id, name, architecture, parameter_count, description,
-		creator, license_name, license_url, hf_repo, logo, logo_dark, key_features, modalities, visibility
+		creator, license_name, license_url, hf_repo, logo, logo_dark, key_features, modalities, output_modalities, visibility
 		FROM models WHERE id = ?`, id).
 		Scan(&m.ID, &familyID, &m.Name, &m.Architecture, &m.ParameterCount,
 			&m.Description, &m.Creator, &m.LicenseName, &m.LicenseURL, &m.HFRepo,
-			&m.Logo, &m.LogoDark, &kf, &mod, &m.Visibility)
+			&m.Logo, &m.LogoDark, &kf, &mod, &omod, &m.Visibility)
 	if err == sql.ErrNoRows {
 		return Model{}, fmt.Errorf("%w: model %d", ErrNotFound, id)
 	}
@@ -1433,6 +1521,7 @@ func (v catalogView) GetModel(ctx context.Context, id int64) (Model, error) {
 	m.FamilyID = intOf(familyID)
 	m.KeyFeatures = parseJSONList(kf)
 	m.Modalities = parseJSONList(mod)
+	m.OutputModalities = parseJSONList(omod)
 	return m, nil
 }
 
@@ -1443,11 +1532,11 @@ func (v catalogView) UpdateModel(ctx context.Context, m Model) error {
 	res, err := v.d.sql.ExecContext(ctx,
 		`UPDATE models SET family_id=?, name=?, architecture=?, parameter_count=?,
 		description=?, creator=?, license_name=?, license_url=?, hf_repo=?,
-		logo=?, logo_dark=?, key_features=?, modalities=?, visibility=?
+		logo=?, logo_dark=?, key_features=?, modalities=?, output_modalities=?, visibility=?
 		WHERE id=?`,
 		nullInt64(m.FamilyID), m.Name, m.Architecture, m.ParameterCount,
 		m.Description, m.Creator, m.LicenseName, m.LicenseURL, m.HFRepo, m.Logo, m.LogoDark,
-		jsonList(m.KeyFeatures), jsonList(m.Modalities), m.Visibility, m.ID)
+		jsonList(m.KeyFeatures), jsonList(m.Modalities), jsonList(normalizeOutputModalities(m.OutputModalities)), m.Visibility, m.ID)
 	if err != nil {
 		return fmt.Errorf("store: catalog.update_model: %w", err)
 	}
@@ -1699,18 +1788,18 @@ func (v catalogView) GetConfig(ctx context.Context, id int64) (Config, error) {
 	var isDefault int64
 	var ea string
 	var createdAt int64
-	var mod, caps, capsOverride sql.NullString
+	var mod, omod, caps, capsOverride sql.NullString
 	err := v.d.sql.QueryRowContext(ctx,
 		`SELECT id, name, variant_id, weight_artifact_id, engine_id, build_id,
-		   mmproj_artifact_id, n_ctx, parallel, extra_args, status, visibility,
-		   is_default, fingerprint, created_at, logo, logo_dark, modalities,
+		   mmproj_artifact_id, n_ctx, extra_args, status, visibility,
+		   is_default, fingerprint, created_at, logo, logo_dark, modalities, output_modalities,
 		   capability_tier_id, capability_rank,
 		   chat_template_caps, chat_template_caps_probed_at, chat_template_caps_override,
 		   reasoning_effort_default
 		 FROM configs WHERE id = ?`, id).
 		Scan(&c.ID, &c.Name, &c.VariantID, &c.WeightArtifactID, &c.EngineID,
-			&buildID, &mmprojID, &c.NCtx, &c.Parallel, &ea, &c.Status,
-			&c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod,
+			&buildID, &mmprojID, &c.NCtx, &ea, &c.Status,
+			&c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod, &omod,
 			&capabilityTierID, &c.CapabilityRank, &caps, &capsProbedAt, &capsOverride,
 			&c.ReasoningEffortDefault)
 	if err == sql.ErrNoRows {
@@ -1725,6 +1814,7 @@ func (v catalogView) GetConfig(ctx context.Context, id int64) (Config, error) {
 	c.IsDefault = isDefault != 0
 	c.CreatedAt = time.Unix(createdAt, 0).UTC()
 	c.Modalities = parseNullJSONList(mod)
+	c.OutputModalities = parseNullJSONList(omod)
 	c.CapabilityTierID = intOf(capabilityTierID)
 	c.ChatTemplateCaps = parseBoolMap(caps.String)
 	c.ChatTemplateCapsProbedAt = timeOf(capsProbedAt)
@@ -1745,14 +1835,14 @@ func (v catalogView) UpdateConfig(ctx context.Context, c Config) error {
 	// never clobber the last live probe result.
 	res, err := v.d.sql.ExecContext(ctx,
 		`UPDATE configs SET name=?, variant_id=?, weight_artifact_id=?, engine_id=?,
-		   build_id=?, mmproj_artifact_id=?, n_ctx=?, parallel=?, extra_args=?,
-		   status=?, visibility=?, is_default=?, fingerprint=?, logo=?, logo_dark=?, modalities=?,
+		   build_id=?, mmproj_artifact_id=?, n_ctx=?, extra_args=?,
+		   status=?, visibility=?, is_default=?, fingerprint=?, logo=?, logo_dark=?, modalities=?, output_modalities=?,
 		   capability_tier_id=?, capability_rank=?, chat_template_caps_override=?, reasoning_effort_default=?
 		 WHERE id=?`,
 		c.Name, c.VariantID, c.WeightArtifactID, c.EngineID,
 		nullInt64(c.BuildID), nullInt64(c.MMProjArtifactID),
-		c.NCtx, c.Parallel, jsonList(c.ExtraArgs), c.Status, c.Visibility,
-		boolInt(c.IsDefault), c.Fingerprint, c.Logo, c.LogoDark, nullJSONList(c.Modalities),
+		c.NCtx, jsonList(c.ExtraArgs), c.Status, c.Visibility,
+		boolInt(c.IsDefault), c.Fingerprint, c.Logo, c.LogoDark, nullJSONList(c.Modalities), nullJSONList(c.OutputModalities),
 		nullInt64(c.CapabilityTierID), c.CapabilityRank, nullJSONBoolMap(c.ChatTemplateCapsOverride),
 		c.ReasoningEffortDefault, c.ID)
 	if err != nil {
@@ -1781,18 +1871,18 @@ func (v catalogView) ConfigByName(ctx context.Context, name string) (Config, err
 	var isDefault int64
 	var ea string
 	var createdAt int64
-	var mod, caps, capsOverride sql.NullString
+	var mod, omod, caps, capsOverride sql.NullString
 	err := v.d.sql.QueryRowContext(ctx,
 		`SELECT id, name, variant_id, weight_artifact_id, engine_id, build_id,
-		   mmproj_artifact_id, n_ctx, parallel, extra_args, status, visibility,
-		   is_default, fingerprint, created_at, logo, logo_dark, modalities,
+		   mmproj_artifact_id, n_ctx, extra_args, status, visibility,
+		   is_default, fingerprint, created_at, logo, logo_dark, modalities, output_modalities,
 		   capability_tier_id, capability_rank,
 		   chat_template_caps, chat_template_caps_probed_at, chat_template_caps_override,
 		   reasoning_effort_default
 		 FROM configs WHERE name = ?`, name).
 		Scan(&c.ID, &c.Name, &c.VariantID, &c.WeightArtifactID, &c.EngineID,
-			&buildID, &mmprojID, &c.NCtx, &c.Parallel, &ea, &c.Status,
-			&c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod,
+			&buildID, &mmprojID, &c.NCtx, &ea, &c.Status,
+			&c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod, &omod,
 			&capabilityTierID, &c.CapabilityRank, &caps, &capsProbedAt, &capsOverride,
 			&c.ReasoningEffortDefault)
 	if err == sql.ErrNoRows {
@@ -1807,6 +1897,7 @@ func (v catalogView) ConfigByName(ctx context.Context, name string) (Config, err
 	c.IsDefault = isDefault != 0
 	c.CreatedAt = time.Unix(createdAt, 0).UTC()
 	c.Modalities = parseNullJSONList(mod)
+	c.OutputModalities = parseNullJSONList(omod)
 	c.CapabilityTierID = intOf(capabilityTierID)
 	c.ChatTemplateCaps = parseBoolMap(caps.String)
 	c.ChatTemplateCapsProbedAt = timeOf(capsProbedAt)
@@ -1817,8 +1908,8 @@ func (v catalogView) ConfigByName(ctx context.Context, name string) (Config, err
 func (v catalogView) ListConfigsForVariant(ctx context.Context, variantID int64) ([]Config, error) {
 	rows, err := v.d.sql.QueryContext(ctx,
 		`SELECT id, name, variant_id, weight_artifact_id, engine_id, build_id,
-		   mmproj_artifact_id, n_ctx, parallel, extra_args, status, visibility,
-		   is_default, fingerprint, created_at, logo, logo_dark, modalities,
+		   mmproj_artifact_id, n_ctx, extra_args, status, visibility,
+		   is_default, fingerprint, created_at, logo, logo_dark, modalities, output_modalities,
 		   capability_tier_id, capability_rank,
 		   chat_template_caps, chat_template_caps_probed_at, chat_template_caps_override,
 		   reasoning_effort_default
@@ -1834,10 +1925,10 @@ func (v catalogView) ListConfigsForVariant(ctx context.Context, variantID int64)
 		var isDefault int64
 		var ea string
 		var createdAt int64
-		var mod, caps, capsOverride sql.NullString
+		var mod, omod, caps, capsOverride sql.NullString
 		if err := rows.Scan(&c.ID, &c.Name, &c.VariantID, &c.WeightArtifactID,
-			&c.EngineID, &buildID, &mmprojID, &c.NCtx, &c.Parallel, &ea,
-			&c.Status, &c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod,
+			&c.EngineID, &buildID, &mmprojID, &c.NCtx, &ea,
+			&c.Status, &c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod, &omod,
 			&capabilityTierID, &c.CapabilityRank, &caps, &capsProbedAt, &capsOverride,
 			&c.ReasoningEffortDefault); err != nil {
 			return nil, fmt.Errorf("store: catalog.list_configs_for_variant: %w", err)
@@ -1848,6 +1939,7 @@ func (v catalogView) ListConfigsForVariant(ctx context.Context, variantID int64)
 		c.IsDefault = isDefault != 0
 		c.CreatedAt = time.Unix(createdAt, 0).UTC()
 		c.Modalities = parseNullJSONList(mod)
+		c.OutputModalities = parseNullJSONList(omod)
 		c.CapabilityTierID = intOf(capabilityTierID)
 		c.ChatTemplateCaps = parseBoolMap(caps.String)
 		c.ChatTemplateCapsProbedAt = timeOf(capsProbedAt)
@@ -1863,8 +1955,8 @@ func (v catalogView) ListConfigsForVariant(ctx context.Context, variantID int64)
 func (v catalogView) ListConfigsForCapabilityTier(ctx context.Context, capabilityTierID int64) ([]Config, error) {
 	rows, err := v.d.sql.QueryContext(ctx,
 		`SELECT id, name, variant_id, weight_artifact_id, engine_id, build_id,
-		   mmproj_artifact_id, n_ctx, parallel, extra_args, status, visibility,
-		   is_default, fingerprint, created_at, logo, logo_dark, modalities,
+		   mmproj_artifact_id, n_ctx, extra_args, status, visibility,
+		   is_default, fingerprint, created_at, logo, logo_dark, modalities, output_modalities,
 		   capability_tier_id, capability_rank,
 		   chat_template_caps, chat_template_caps_probed_at, chat_template_caps_override,
 		   reasoning_effort_default
@@ -1880,10 +1972,10 @@ func (v catalogView) ListConfigsForCapabilityTier(ctx context.Context, capabilit
 		var isDefault int64
 		var ea string
 		var createdAt int64
-		var mod, caps, capsOverride sql.NullString
+		var mod, omod, caps, capsOverride sql.NullString
 		if err := rows.Scan(&c.ID, &c.Name, &c.VariantID, &c.WeightArtifactID,
-			&c.EngineID, &buildID, &mmprojID, &c.NCtx, &c.Parallel, &ea,
-			&c.Status, &c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod,
+			&c.EngineID, &buildID, &mmprojID, &c.NCtx, &ea,
+			&c.Status, &c.Visibility, &isDefault, &c.Fingerprint, &createdAt, &c.Logo, &c.LogoDark, &mod, &omod,
 			&capabilityTierIDCol, &c.CapabilityRank, &caps, &capsProbedAt, &capsOverride,
 			&c.ReasoningEffortDefault); err != nil {
 			return nil, fmt.Errorf("store: catalog.list_configs_for_capability_tier: %w", err)
@@ -1894,6 +1986,7 @@ func (v catalogView) ListConfigsForCapabilityTier(ctx context.Context, capabilit
 		c.IsDefault = isDefault != 0
 		c.CreatedAt = time.Unix(createdAt, 0).UTC()
 		c.Modalities = parseNullJSONList(mod)
+		c.OutputModalities = parseNullJSONList(omod)
 		c.CapabilityTierID = intOf(capabilityTierIDCol)
 		c.ChatTemplateCaps = parseBoolMap(caps.String)
 		c.ChatTemplateCapsProbedAt = timeOf(capsProbedAt)
@@ -2276,8 +2369,8 @@ func (v catalogView) ListVirtualModels(ctx context.Context) ([]VirtualModel, err
 func (v catalogView) GetSlot(ctx context.Context, id int64) (Slot, error) {
 	var s Slot
 	err := v.d.sql.QueryRowContext(ctx,
-		`SELECT id, name, unit, port, label, sort_order FROM slots WHERE id = ?`, id).
-		Scan(&s.ID, &s.Name, &s.Unit, &s.Port, &s.Label, &s.SortOrder)
+		`SELECT id, name, unit, port, label, sort_order, pool FROM slots WHERE id = ?`, id).
+		Scan(&s.ID, &s.Name, &s.Unit, &s.Port, &s.Label, &s.SortOrder, &s.Pool)
 	if err == sql.ErrNoRows {
 		return Slot{}, fmt.Errorf("%w: slot %d", ErrNotFound, id)
 	}
@@ -2288,9 +2381,13 @@ func (v catalogView) GetSlot(ctx context.Context, id int64) (Slot, error) {
 }
 
 func (v catalogView) UpdateSlot(ctx context.Context, s Slot) error {
+	pool, err := NormalizePool(s.Pool)
+	if err != nil {
+		return err
+	}
 	res, err := v.d.sql.ExecContext(ctx,
-		`UPDATE slots SET name=?, unit=?, port=?, label=?, sort_order=? WHERE id=?`,
-		s.Name, s.Unit, s.Port, s.Label, s.SortOrder, s.ID)
+		`UPDATE slots SET name=?, unit=?, port=?, label=?, sort_order=?, pool=? WHERE id=?`,
+		s.Name, s.Unit, s.Port, s.Label, s.SortOrder, pool, s.ID)
 	if err != nil {
 		return fmt.Errorf("store: catalog.update_slot: %w", err)
 	}
@@ -2314,8 +2411,8 @@ func (v catalogView) DeleteSlot(ctx context.Context, id int64) error {
 func (v catalogView) SlotByName(ctx context.Context, name string) (Slot, error) {
 	var s Slot
 	err := v.d.sql.QueryRowContext(ctx,
-		`SELECT id, name, unit, port, label, sort_order FROM slots WHERE name = ?`, name).
-		Scan(&s.ID, &s.Name, &s.Unit, &s.Port, &s.Label, &s.SortOrder)
+		`SELECT id, name, unit, port, label, sort_order, pool FROM slots WHERE name = ?`, name).
+		Scan(&s.ID, &s.Name, &s.Unit, &s.Port, &s.Label, &s.SortOrder, &s.Pool)
 	if err == sql.ErrNoRows {
 		return Slot{}, fmt.Errorf("%w: slot %q", ErrNotFound, name)
 	}
@@ -2465,28 +2562,30 @@ func (v catalogView) ProviderExists(ctx context.Context, name string) (bool, err
 
 func (v catalogView) GetBenchmark(ctx context.Context, id int64) (Benchmark, error) {
 	var b Benchmark
+	var tup sql.NullString
 	err := v.d.sql.QueryRowContext(ctx,
 		`SELECT id, metric, value, source, source_url, source_date, subject_type,
-		   subject_id, notes
+		   subject_id, notes, tuple_json
 		 FROM benchmarks WHERE id = ?`, id).
 		Scan(&b.ID, &b.Metric, &b.Value, &b.Source, &b.SourceURL, &b.SourceDate,
-			&b.SubjectType, &b.SubjectID, &b.Notes)
+			&b.SubjectType, &b.SubjectID, &b.Notes, &tup)
 	if err == sql.ErrNoRows {
 		return Benchmark{}, fmt.Errorf("%w: benchmark %d", ErrNotFound, id)
 	}
 	if err != nil {
 		return Benchmark{}, fmt.Errorf("store: catalog.get_benchmark: %w", err)
 	}
+	b.Tuple = tup.String
 	return b, nil
 }
 
 func (v catalogView) UpdateBenchmark(ctx context.Context, b Benchmark) error {
 	res, err := v.d.sql.ExecContext(ctx,
 		`UPDATE benchmarks SET metric=?, value=?, source=?, source_url=?,
-		   source_date=?, subject_type=?, subject_id=?, notes=?
+		   source_date=?, subject_type=?, subject_id=?, notes=?, tuple_json=?
 		 WHERE id=?`,
 		b.Metric, b.Value, b.Source, b.SourceURL, b.SourceDate,
-		b.SubjectType, b.SubjectID, b.Notes, b.ID)
+		b.SubjectType, b.SubjectID, b.Notes, nullIfEmpty(b.Tuple), b.ID)
 	if err != nil {
 		return fmt.Errorf("store: catalog.update_benchmark: %w", err)
 	}
@@ -2510,7 +2609,7 @@ func (v catalogView) DeleteBenchmark(ctx context.Context, id int64) error {
 func (v catalogView) ListBenchmarksForSubject(ctx context.Context, subjectType string, subjectID int64) ([]Benchmark, error) {
 	rows, err := v.d.sql.QueryContext(ctx,
 		`SELECT id, metric, value, source, source_url, source_date, subject_type,
-		   subject_id, notes
+		   subject_id, notes, tuple_json
 		 FROM benchmarks WHERE subject_type = ? AND subject_id = ?
 		 ORDER BY metric`, subjectType, subjectID)
 	if err != nil {
@@ -2520,10 +2619,12 @@ func (v catalogView) ListBenchmarksForSubject(ctx context.Context, subjectType s
 	out := []Benchmark{}
 	for rows.Next() {
 		var b Benchmark
+		var tup sql.NullString
 		if err := rows.Scan(&b.ID, &b.Metric, &b.Value, &b.Source, &b.SourceURL,
-			&b.SourceDate, &b.SubjectType, &b.SubjectID, &b.Notes); err != nil {
+			&b.SourceDate, &b.SubjectType, &b.SubjectID, &b.Notes, &tup); err != nil {
 			return nil, fmt.Errorf("store: catalog.list_benchmarks_for_subject: %w", err)
 		}
+		b.Tuple = tup.String
 		out = append(out, b)
 	}
 	return out, rows.Err()
@@ -2725,11 +2826,11 @@ func (v catalogView) RegisterDownloadedModel(ctx context.Context, b ModelBundle)
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO models (family_id, name, architecture, parameter_count,
 		description, creator, license_name, license_url, hf_repo, logo, logo_dark,
-		key_features, modalities, visibility)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		key_features, modalities, output_modalities, visibility)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nullInt64(m.FamilyID), m.Name, m.Architecture, m.ParameterCount,
 		m.Description, m.Creator, m.LicenseName, m.LicenseURL, m.HFRepo, m.Logo, m.LogoDark,
-		jsonList(m.KeyFeatures), jsonList(m.Modalities), m.Visibility)
+		jsonList(m.KeyFeatures), jsonList(m.Modalities), jsonList(normalizeOutputModalities(m.OutputModalities)), m.Visibility)
 	if err != nil {
 		return ModelBundleResult{}, fmt.Errorf("store: catalog.register_downloaded_model: create_model: %w", err)
 	}
@@ -2829,14 +2930,14 @@ func (v catalogView) RegisterDownloadedModel(ctx context.Context, b ModelBundle)
 	}
 	res, err = tx.ExecContext(ctx,
 		`INSERT INTO configs (name, variant_id, weight_artifact_id, engine_id,
-		   build_id, mmproj_artifact_id, n_ctx, parallel, extra_args, status,
-		   visibility, is_default, fingerprint, created_at, logo, logo_dark, modalities)
+		   build_id, mmproj_artifact_id, n_ctx, extra_args, status,
+		   visibility, is_default, fingerprint, created_at, logo, logo_dark, modalities, output_modalities)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.Name, c.VariantID, c.WeightArtifactID, c.EngineID,
 		nullInt64(c.BuildID), nullInt64(c.MMProjArtifactID),
-		c.NCtx, c.Parallel, jsonList(c.ExtraArgs), c.Status, c.Visibility,
+		c.NCtx, jsonList(c.ExtraArgs), c.Status, c.Visibility,
 		boolInt(c.IsDefault), c.Fingerprint, unixOf(orNow(c.CreatedAt)), c.Logo, c.LogoDark,
-		nullJSONList(c.Modalities))
+		nullJSONList(c.Modalities), nullJSONList(c.OutputModalities))
 	if err != nil {
 		return ModelBundleResult{}, fmt.Errorf("store: catalog.register_downloaded_model: create_config: %w", err)
 	}

@@ -111,7 +111,7 @@ func seedTestConfig(t *testing.T, db *store.DB, pq catalogPrereqs, name string) 
 	t.Helper()
 	if _, err := db.Catalog().CreateConfig(context.Background(), store.Config{
 		Name: name, VariantID: pq.variantID, WeightArtifactID: pq.artifactID, EngineID: pq.engineID,
-		NCtx: 32768, Parallel: 1,
+		NCtx: 32768,
 	}); err != nil {
 		t.Fatalf("seedTestConfig(%s): %v", name, err)
 	}
@@ -228,7 +228,7 @@ func TestCompressorSummaryTimeSavedViaCatalogTPS(t *testing.T) {
 	pq := seedCatalogPrereqs(t, db)
 	if _, err := db.Catalog().CreateConfig(context.Background(), store.Config{
 		Name: "test-mode", VariantID: pq.variantID, WeightArtifactID: pq.artifactID, EngineID: pq.engineID,
-		NCtx: 32768, Parallel: 1,
+		NCtx: 32768,
 	}); err != nil {
 		t.Fatalf("CreateConfig: %v", err)
 	}

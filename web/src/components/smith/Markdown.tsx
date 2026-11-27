@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { CopyButton } from "../CopyButton";
+import { safeLink } from "../../lib/safeHref";
 
 // Markdown — a hand-rolled, safe-subset renderer for smith chat content
 // (docs/v5-smith.md §10 risk #4): headings, **bold**, *italic*/_italic_,
@@ -27,9 +28,17 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
     const key = `${keyPrefix}-${i++}`;
     if (m[1] !== undefined && m[2] !== undefined) {
       out.push(
-        <a key={key} href={m[2]} target="_blank" rel="noopener noreferrer">
-          {m[1]}
-        </a>
+        // Model-written markdown: http(s), mailto:, same-site paths and #anchors become links; javascript:, data: and friends render as text.
+        (() => {
+          const href = safeLink(m[2]);
+          return href ? (
+            <a key={key} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer">
+              {m[1]}
+            </a>
+          ) : (
+            <span key={key}>{m[1]}</span>
+          );
+        })()
       );
     } else if (m[3] !== undefined) {
       out.push(<code key={key}>{m[3]}</code>);

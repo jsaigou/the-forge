@@ -350,6 +350,9 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, ev := range events {
+		if ev.Kind == "a0_request" {
+			continue // one row per proxied request: the concurrency endpoint's input, not a timeline event
+		}
 		out = append(out, usageEventResponse{
 			TS:     unixSeconds(ev.TS),
 			Kind:   ev.Kind,

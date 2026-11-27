@@ -4,6 +4,7 @@ package sched
 
 import (
 	"context"
+	"github.com/jsaigou/the-forge/internal/memledger"
 	"strings"
 	"sync"
 	"testing"
@@ -382,6 +383,25 @@ func TestStatusShapes(t *testing.T) {
 	}
 }
 
+// The status budget reads the host-memory ledger when the collector produced one: free is the smallest bound, not total minus used.
+func TestStatusBudgetPrefersTheHostLedger(t *testing.T) {
+	eng := newFakeEngine()
+	now := time.Now()
+	src := staticSource(now, eng.Slots(), nil)
+	snap := src.Current()
+	gtt, used := int64(120<<30), int64(96<<30)
+	snap.Metrics.GTTTotalBytes, snap.Metrics.InferenceRSSBytes = &gtt, &used
+	snap.Metrics.Ledger = memledger.Ledger{HostTotal: 123 << 30, ModelBudget: 104 << 30, ModelUsed: 93 << 30, Free: 11 << 30, Binding: memledger.BindPartition}
+	c := newTestCore(t, eng, src, func(d *Deps) { d.Now = func() time.Time { return now } })
+	b := c.Status().MemoryBudget
+	if b.FreeBytes != 11<<30 || b.Ledger.Binding != memledger.BindPartition {
+		t.Fatalf("budget = %+v, want the ledger's 11 GiB free (the GTT-ceiling figure would say 24)", b)
+	}
+	if b.TotalBytes != 120<<30 || b.UsedBytes != 96<<30 {
+		t.Fatalf("legacy total/used must stay as before: %+v", b)
+	}
+}
+
 // TestStatusIdleUsesSnapshotTimeNotLiveClock covers the pre-release
 // feedback round's "impossible idle times" fix: idle must be measured
 // against the snapshot's own TakenAt, not the live clock. Before the fix,
@@ -475,5 +495,28 @@ func TestNewRequiresEngineAndSource(t *testing.T) {
 	}
 	if _, err := New(Deps{Engine: newFakeEngine()}); err == nil {
 		t.Fatal("New without Source must fail")
+	}
+}
+
+// One owner (ADR-0022): a catalog config hosted by the specialist pool is never loaded into an LLM slot, and the refusal comes before anything is
+// evicted or loaded for it.
+func TestEnsureLoadedRefusesAPooledConfigBeforeTouchingTheEngine(t *testing.T) {
+	eng := newFakeEngine()
+	c := newTestCore(t, eng, staticSource(time.Now(), eng.Slots(), nil), func(d *Deps) {
+		d.PooledConfig = func(_ context.Context, config string) bool { return config == "llama" }
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	tk, err := c.EnsureLoaded(ctx, EnsureRequest{Model: "llama", RequestedBy: "test"})
+	if err == nil || !strings.Contains(err.Error(), "specialist") || tk.Status != StatusFailed {
+		t.Fatalf("pooled config: ticket=%+v err=%v", tk, err)
+	}
+	if eng.loadCount() != 0 || time.Since(start) >= 100*time.Millisecond {
+		t.Errorf("loads=%d after %v: it must fail at once and never touch the engine", eng.loadCount(), time.Since(start))
+	}
+	// A config that is not pooled loads as ever.
+	if tk, err := c.EnsureLoaded(ctx, EnsureRequest{Model: "qwen", RequestedBy: "test"}); err != nil || tk.Status != StatusLoaded {
+		t.Errorf("an unpooled config must be unaffected: %+v %v", tk, err)
 	}
 }

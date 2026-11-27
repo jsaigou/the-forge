@@ -10,7 +10,6 @@ package httpapi
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -64,21 +63,4 @@ func withReason(detail, reason string) string {
 		return "reason: " + reason
 	}
 	return detail + " — reason: " + reason
-}
-
-// validModalities is the Sprint J1 modality enum. Rejecting anything outside
-// it at the API boundary is the whole point of typing this column instead of
-// leaving it a free-text key_features string.
-var validModalities = map[string]bool{"text": true, "vision": true, "audio": true}
-
-// validateModalityList checks every entry against validModalities, reporting
-// the first offender by name (matches this file's one-message-per-field
-// validation style rather than aggregating every bad entry).
-func validateModalityList(mods []string) string {
-	for _, m := range mods {
-		if !validModalities[m] {
-			return fmt.Sprintf("unknown modality %q (must be text, vision, or audio)", m)
-		}
-	}
-	return ""
 }

@@ -19,8 +19,10 @@ package httpapi
 
 import (
 	"encoding/json"
+	"github.com/jsaigou/the-forge/internal/memledger"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/inflight"
 	"github.com/jsaigou/the-forge/internal/registry"
 )
 
@@ -40,12 +42,14 @@ type sessionInfoResponse struct {
 
 // statusResponse mirrors web/src/lib/types.ts Status.
 type statusResponse struct {
-	Mode          string                   `json:"mode"`
-	Description   string                   `json:"description"`
-	Services      map[string]string        `json:"services"`
-	Ports         map[string]bool          `json:"ports"`
-	Slots         map[string]*string       `json:"slots"`
-	SlotLabels    map[string]string        `json:"slot_labels"`
+	Mode        string             `json:"mode"`
+	Description string             `json:"description"`
+	Services    map[string]string  `json:"services"`
+	Ports       map[string]bool    `json:"ports"`
+	Slots       map[string]*string `json:"slots"`
+	SlotLabels  map[string]string  `json:"slot_labels"`
+	// LoadOrder is the slots in the order a new load takes them: a just-freed slot comes last (engine.SlotOrderer).
+	LoadOrder     []string                 `json:"load_order"`
 	ModesAvail    map[string]modeAvail     `json:"modes_available"`
 	ServiceModes  map[string]svcModeInfo   `json:"service_modes"`
 	UI            map[string]any           `json:"ui"`
@@ -55,7 +59,10 @@ type statusResponse struct {
 	Switch        switchStateJSON          `json:"switch"`
 	SlotLoading   map[string]slotStateJSON `json:"slot_loading"`
 	SlotUnloading map[string]slotStateJSON `json:"slot_unloading"`
-	Alerts        []alertJSON              `json:"alerts,omitempty"`
+	// SlotStates is additive (ADR-0020 F4): per slot, empty|loading|ready|failed|unloading, and for a failed
+	// load the reason. slot_loading / slot_unloading above are unchanged.
+	SlotStates map[string]slotOpStateJSON `json:"slot_states"`
+	Alerts     []alertJSON                `json:"alerts,omitempty"`
 	// SlotActivity is additive (Sprint K, 2026-08-05): true while a loaded
 	// slot has requests_processing > 0 right now. Sourced from
 	// snap.Inference, which already carried RequestsProcessing per slot but
@@ -79,6 +86,10 @@ type statusResponse struct {
 	// window (activity.ConsumerFreshness). omitempty — absent when nothing
 	// is consuming.
 	SlotConsumers map[string]string `json:"slot_consumers,omitempty"`
+	// A0InFlight is additive: how many a0 requests are being served right now and the peak over the last
+	// peak_window_s seconds, per model and per consumer (rows with an empty consumer are the model totals). Counts and
+	// labels only. Absent when the gauge is not wired.
+	A0InFlight *inflight.Snapshot `json:"a0_in_flight,omitempty"`
 }
 
 // profilingStatus additive (Sprint K): lets Bay.tsx show a warning-stripe
@@ -273,6 +284,35 @@ type schedBudgetJSON struct {
 	TotalBytes int64 `json:"total_bytes"`
 	UsedBytes  int64 `json:"used_bytes"`
 	FreeBytes  int64 `json:"free_bytes"`
+
+	// Partition is the host-memory ledger behind free_bytes (additive; omitted until the collector has produced one).
+	Partition *memoryPartitionJSON `json:"partition,omitempty"`
+}
+
+// memoryPartitionJSON mirrors memledger.Ledger on the wire (web/src/lib/types.ts MemoryPartition).
+type memoryPartitionJSON struct {
+	HostTotalBytes          int64  `json:"host_total_bytes"`
+	HostAvailBytes          int64  `json:"host_avail_bytes"`
+	SwapTotalBytes          int64  `json:"swap_total_bytes"`
+	SwapUsedBytes           int64  `json:"swap_used_bytes"`
+	OSFloorBytes            int64  `json:"os_floor_bytes"`
+	SpecialistDeclaredBytes int64  `json:"specialist_declared_bytes"`
+	GrowthMarginBytes       int64  `json:"growth_margin_bytes"`
+	ModelBudgetBytes        int64  `json:"model_budget_bytes"`
+	ModelUsedBytes          int64  `json:"model_used_bytes"`
+	FreeBytes               int64  `json:"free_bytes"`
+	Binding                 string `json:"binding"`
+}
+
+func partitionJSON(l memledger.Ledger) *memoryPartitionJSON {
+	if l.HostTotal == 0 && l.ModelBudget == 0 {
+		return nil
+	}
+	return &memoryPartitionJSON{
+		HostTotalBytes: l.HostTotal, HostAvailBytes: l.HostAvail, SwapTotalBytes: l.SwapTotal, SwapUsedBytes: l.SwapUsed,
+		OSFloorBytes: l.OSFloor, SpecialistDeclaredBytes: l.SpecialistDeclared, GrowthMarginBytes: l.GrowthMargin,
+		ModelBudgetBytes: l.ModelBudget, ModelUsedBytes: l.ModelUsed, FreeBytes: l.Free, Binding: l.Binding,
+	}
 }
 
 type queueTicketJSON struct {
@@ -855,6 +895,8 @@ type apiKeyResponse struct {
 	RevokedAt  *float64 `json:"revoked_at,omitempty"`
 	// ExpiresAt is unset for a key that never expires (security sprint 3, #36).
 	ExpiresAt *float64 `json:"expires_at,omitempty"`
+	// Scope is "catalog" for a key limited to /api/v1/catalog/*; omitted for an unscoped key.
+	Scope string `json:"scope,omitempty"`
 }
 
 // apiKeysResponse mirrors web/src/lib/types.ts APIKeysResponse.
@@ -877,6 +919,9 @@ type apiKeyCreateRequest struct {
 	// TTLSeconds sets the key to expire that many seconds from now; 0/omitted
 	// mints a key that never expires. Security sprint 3, #36.
 	TTLSeconds int64 `json:"ttl_seconds,omitempty"`
+	// Scope narrows a forge key to part of the API: "catalog" = only /api/v1/catalog/*. A scoped key must set
+	// ttl_seconds and may live at most 24 hours (ADR-0020 F11). Omitted = unscoped.
+	Scope string `json:"scope,omitempty"`
 }
 
 // apiKeyCreateResponse mirrors web/src/lib/types.ts APIKeyCreateResponse. The

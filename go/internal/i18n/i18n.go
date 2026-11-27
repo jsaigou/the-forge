@@ -74,6 +74,10 @@ func T(key string, args ...any) string {
 	return t(Lang(), key, args...)
 }
 
+// TLang is T for a language chosen by the caller instead of the process environment, for text that is stored once and shown to every reader
+// (a notification carries its English and Japanese text side by side). Same fallback chain as T.
+func TLang(lang, key string, args ...any) string { return t(lang, key, args...) }
+
 // t is T with an explicit language, split out so tests can exercise the
 // fallback chain without mutating process environment variables.
 func t(lang, key string, args ...any) string {

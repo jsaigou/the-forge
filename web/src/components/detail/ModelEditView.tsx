@@ -11,6 +11,7 @@ import {
 } from "../../lib/queries";
 import type { CatalogFamily, CatalogGenealogy, CatalogModel } from "../../lib/types";
 import { IconPicker } from "../IconPicker";
+import { RemovalDialog } from "../RemovalDialog";
 import { SaveButton } from "../SaveButton";
 
 // ModelEditView (Sprint C) — model edit-in-place, pushed into DetailModal's
@@ -20,7 +21,8 @@ import { SaveButton } from "../SaveButton";
 // whole mechanism is now dead and removed alongside this file landing.
 // Same section styling as ConfigEditView for visual consistency across the
 // two editors.
-export function ModelEditView({ modelId, onDone, onCancel }: { modelId: string; onDone: () => void; onCancel: () => void }) {
+export function ModelEditView({ modelId, onDone, onCancel, onDeleted }: { modelId: string; onDone: () => void; onCancel: () => void; onDeleted: () => void }) {
+  const [removing, setRemoving] = useState(false);
   const models = useCatalogModels();
   const families = useCatalogFamilies();
   const genealogies = useCatalogGenealogies();
@@ -35,26 +37,30 @@ export function ModelEditView({ modelId, onDone, onCancel }: { modelId: string; 
   }
 
   return (
-    <ModelEditForm
-      existing={existing}
-      families={families.data ?? []}
-      genealogies={genealogies.data ?? []}
-      pending={update.isPending}
-      error={error}
-      onCancel={onCancel}
-      onUploadIcon={(file, dark) => uploadIcon.mutate({ id: existing.id, file, dark }, { onError: (e) => setError(apiErrorMessage(e)) })}
-      onSelectIcon={(slug, dark) => update.mutate({ id: existing.id, m: dark ? { ...existing, logo_dark: slug } : { ...existing, logo: slug } }, { onError: (e) => setError(apiErrorMessage(e)) })}
-      onClearIcon={(dark) => update.mutate({ id: existing.id, m: dark ? { ...existing, logo_dark: "" } : { ...existing, logo: "" } }, { onError: (e) => setError(apiErrorMessage(e)) })}
-      onSubmit={(draft, reason) => {
-        setError(null);
-        update.mutate(
-          { id: existing.id, m: draft, reason },
-          // Sprint K: delayed onDone so SaveButton's flash has time to
-          // paint before this view pops off DetailModal's stack.
-          { onSuccess: () => setTimeout(onDone, 700), onError: (e) => setError(apiErrorMessage(e)) },
-        );
-      }}
-    />
+    <>
+    {removing && <RemovalDialog kind="model" id={existing.id} onClose={() => setRemoving(false)} onRemoved={onDeleted} />}
+      <ModelEditForm
+        onDelete={() => setRemoving(true)}
+        existing={existing}
+        families={families.data ?? []}
+        genealogies={genealogies.data ?? []}
+        pending={update.isPending}
+        error={error}
+        onCancel={onCancel}
+        onUploadIcon={(file, dark) => uploadIcon.mutate({ id: existing.id, file, dark }, { onError: (e) => setError(apiErrorMessage(e)) })}
+        onSelectIcon={(slug, dark) => update.mutate({ id: existing.id, m: dark ? { ...existing, logo_dark: slug } : { ...existing, logo: slug } }, { onError: (e) => setError(apiErrorMessage(e)) })}
+        onClearIcon={(dark) => update.mutate({ id: existing.id, m: dark ? { ...existing, logo_dark: "" } : { ...existing, logo: "" } }, { onError: (e) => setError(apiErrorMessage(e)) })}
+        onSubmit={(draft, reason) => {
+          setError(null);
+          update.mutate(
+            { id: existing.id, m: draft, reason },
+            // Sprint K: delayed onDone so SaveButton's flash has time to
+            // paint before this view pops off DetailModal's stack.
+            { onSuccess: () => setTimeout(onDone, 700), onError: (e) => setError(apiErrorMessage(e)) },
+          );
+        }}
+      />
+    </>
   );
 }
 
@@ -64,6 +70,7 @@ function ModelEditForm({
   genealogies,
   onSubmit,
   onCancel,
+  onDelete,
   onUploadIcon,
   onSelectIcon,
   onClearIcon,
@@ -75,6 +82,7 @@ function ModelEditForm({
   genealogies: CatalogGenealogy[];
   onSubmit: (draft: Partial<CatalogModel>, reason: string) => void;
   onCancel: () => void;
+  onDelete: () => void;
   onUploadIcon: (file: File, dark?: boolean) => void;
   onSelectIcon: (slug: string, dark?: boolean) => void;
   onClearIcon: (dark?: boolean) => void;
@@ -114,6 +122,12 @@ function ModelEditForm({
         // model's icon on any other-field edit).
         logo: existing.logo,
         logo_dark: existing.logo_dark,
+        // This form has no controls for these three and UpdateModel is full-replace: omitting them would reset the
+        // input modalities to none, put a hidden model back to visible, and (ADR-0021) turn a decision or speech
+        // model back into a text model on every save. Carry them through unchanged (edit them in Settings -> Catalog).
+        modalities: existing.modalities,
+        output_modalities: existing.output_modalities,
+        visibility: existing.visibility,
       },
       reason,
     );
@@ -189,6 +203,7 @@ function ModelEditForm({
       </label>
 
       <div className="form-actions" style={{ marginTop: 20 }}>
+        <button type="button" className="btn danger" style={{ marginRight: "auto" }} onClick={onDelete}>{t("common:removal.open_model")}</button>
         <button type="button" className="btn" onClick={onCancel}>{t("model_edit.cancel")}</button>
         <SaveButton className="go" pending={pending} isError={!!error} disabled={pending || !name} onClick={submit} />
       </div>

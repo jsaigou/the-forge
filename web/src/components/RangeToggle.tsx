@@ -19,7 +19,7 @@ export function RangeToggle<K extends string>({
   onChange: (key: K) => void;
 }) {
   return (
-    <div className="sort-toggle" style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+    <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
       {options.map((o) => (
         <button
           key={o.key}

@@ -12,7 +12,13 @@
 // sibling of go/, not a descendant. This is also what makes them
 // self-healing on a host with no repo checkout at all: the deployed forge
 // binary carries its own launcher content, so a restore needs nothing but
-// the binary already running. Keep this the ONLY copy — the exact bug this
+// the binary already running.
+//
+// start-a1..a4.sh are the generic slot shim (ADR-0026 step e): three lines that exec `/opt/forge/forge slot-exec <slot>`, byte-identical to what is
+// installed on ForgeHost. The launch itself comes from the slot_launches database row, so a restored shim is correct only while the installed forge binary
+// has slot-exec. The legacy full scripts live on only as frozen test oracles in internal/launch/testdata/legacy.
+//
+// Keep this the ONLY copy — the exact bug this
 // package exists to prevent (forge-comfyui crash-looped a week undetected,
 // 2026-09-01) was a launcher script with no tracked source anywhere.
 package launchers

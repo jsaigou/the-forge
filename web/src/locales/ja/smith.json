@@ -36,6 +36,23 @@
       "down_more": "サービス「{{name}}」がポート{{port}}でリッスンしていません(他{{extra}}件)",
       "ok": "常時稼働サービスのポート{{count}}件すべてがリッスン中"
     },
+    "specialist_pool": {
+      "down": "エンジン「{{name}}」({{slot}})は{{state}}です{{error}}",
+      "down_more": "エンジン「{{name}}」({{slot}})は{{state}}です{{error}}(他{{extra}}件)",
+      "ok": "常時オンのエンジンはすべて稼働中"
+    },
+    "speech_readiness": {
+      "ok": "音声は設定どおりに動作しています",
+      "unused": "このホストでは音声は設定されていません",
+      "files_missing": "音声エンジン「{{engine}}」に必要なファイルがなくなっています{{more}}",
+      "failed": "音声エンジン「{{engine}}」の起動に失敗しました{{more}}",
+      "no_slot": "音声エンジン「{{engine}}」を動かす専用スロットがありません{{more}}",
+      "no_engine": "音声サービスは設定されていますが、音声エンジンがありません{{more}}",
+      "front_door_unset": "音声サービスのアドレスが設定されていません（ルーティング）{{more}}",
+      "front_door_down": "音声サービス（forge-tts）が応答していません{{more}}",
+      "key_expired": "音声サービスのキーの有効期限が切れています{{more}}",
+      "key_expiring": "音声サービスのキーはあと {{days}} 日で有効期限が切れます{{more}}"
+    },
     "forge_self": {
       "quick_check_failed": "DB整合性: PRAGMA quick_checkが{{detail}}を報告",
       "fk_unavailable": "DB整合性は正常(foreign_key_check利用不可)",
@@ -100,11 +117,40 @@
     "slot_model_identity": {
       "ok": "読み込み済みスロット{{count}}件でエンジン設定のエイリアスが実行中プロセスと一致"
     },
+    "slot_launch_matches_process": {
+      "mismatch": "スロット{{slot}}: 実行中プロセスのコマンドラインが有効な起動行と引数インデックス{{arg_index}}で異なります(行{{row_count}}個、プロセス{{process_count}}個) — スケジューラ外で起動された可能性があります(他{{more_count}}件)",
+      "ok": "稼働中のスロット{{count}}件が有効な起動行とまったく同じコマンドラインで動作中"
+    },
+    "slot_launch_matches_catalog": {
+      "differs": "スロット{{slot}}: カタログが「{{config}}」から組み立てる起動内容が有効な行と異なります({{reason}}) — カタログ編集後は想定内。反映するにはスロットを再読み込み(他{{more_count}}件)",
+      "ok": "カタログから再構築した起動内容が有効な行{{count}}件と一致"
+    },
+    "launcher_matches_embedded": {
+      "differs": "インストール済みランチャー{{path}}がこのforgeバイナリ内蔵のシムと異なります — 上書きはしません。比較して意図的に再インストールしてください(他{{more_count}}件)",
+      "ok": "インストール済みスロットランチャー{{count}}件が内蔵シムと一致"
+    },
+    "radiance_host_prereqs": {
+      "catalog_error": "Radianceビルドを調べるためのカタログを読み取れません: {{error}}",
+      "problem": "Radianceのホスト前提条件を満たしていません: {{first}}(他{{more_count}}件)",
+      "unverified": "Radianceのホスト前提条件で失敗はありません。{{count}}件は確認できませんでした: {{items}}",
+      "ok": "Radianceのホスト前提条件を満たしています(cwsr_enable、起動環境パス、プラグインディレクトリの権限)"
+    },
     "tailscale_peers": {
       "not_configured": "監視対象のtailscaleピア未設定(smith.tailscale.watch_peersが空)",
       "unreachable": "tailscaledのLocalAPIに接続できずピア状態を確認不可",
       "offline": "監視対象のtailscaleピア{{watch_count}}件中{{offline_count}}件がオフラインまたは到達不能: {{names}}",
       "online": "監視対象のtailscaleピア{{count}}件すべてオンライン"
+    },
+    "host_memory": {
+      "crit": "ホストメモリの空きが{{avail_gib}} GiBしかなく、下限{{floor_gib}} GiBを下回っています",
+      "warn": "ホストメモリの空きは{{avail_gib}} GiBで、下限{{floor_gib}} GiBの上の余裕枠に入っています",
+      "ok": "ホストメモリの空き: {{avail_gib}} GiB"
+    },
+    "swap_pressure": {
+      "none": "スワップは設定されていません",
+      "crit": "スワップが枯渇しています({{used_gib}} / {{total_gib}} GiB)。圧縮されたRAMなので、メモリ逼迫を意味します",
+      "warn": "スワップを{{used_gib}} GiB使用中(警告しきい値{{warn_gib}} GiB)。圧縮されたRAMです",
+      "ok": "スワップ使用量: {{used_gib}} GiB"
     }
   },
   "status": {

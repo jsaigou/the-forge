@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { SaveButton } from "../../components/SaveButton";
-import type { ConfigWritePayload } from "../../lib/configPayload";
+import { toConfigWritePayload, type ConfigWritePayload } from "../../lib/configPayload";
 import { useErrorState } from "../../lib/useErrorState";
 import {
   useCatalogConfigs,
@@ -59,40 +59,40 @@ export function ModelBehaviorSection({ canAdmin }: { canAdmin: boolean }) {
   const { t } = useTranslation("settings");
   return (
     <>
-      <div className="eyebrow" id="behavior" style={{ marginTop: 22 }}>{t("behavior.heading")}</div>
-      <div className="card" style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.55 }}>
+      <div className="eyebrow beh-mt5" id="behavior">{t("behavior.heading")}</div>
+      <div className="card beh-mb3">
+        <div className="beh-intro">
           <Trans i18nKey="behavior.intro" ns="settings" components={{ b: <b />, code: <code /> }} />
         </div>
       </div>
 
-      <div className="eyebrow" id="behavior-configs" style={{ marginTop: 22 }}>{t("behavior.configs_heading")}</div>
-      <div className="card" style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 10 }}>
+      <div className="eyebrow beh-mt5" id="behavior-configs">{t("behavior.configs_heading")}</div>
+      <div className="card beh-mb3">
+        <div className="beh-note">
           <Trans i18nKey="behavior.configs_note" ns="settings" components={{ code: <code /> }} />
         </div>
         <ConfigBehaviorMatrix canAdmin={canAdmin} />
       </div>
 
-      <div className="eyebrow" id="behavior-capability-tiers" style={{ marginTop: 22 }}>{t("behavior.tiers_heading")}</div>
-      <div className="card" style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 10 }}>
+      <div className="eyebrow beh-mt5" id="behavior-capability-tiers">{t("behavior.tiers_heading")}</div>
+      <div className="card beh-mb3">
+        <div className="beh-note">
           {t("behavior.tiers_note")}
         </div>
         <CapabilityTiersSection canAdmin={canAdmin} />
       </div>
 
-      <div className="eyebrow" id="behavior-aliases" style={{ marginTop: 22 }}>{t("behavior.aliases_heading")}</div>
+      <div className="eyebrow beh-mt5" id="behavior-aliases">{t("behavior.aliases_heading")}</div>
       <div className="card">
-        <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 10 }}>
+        <div className="beh-note">
           {t("behavior.aliases_note")}
         </div>
         <ModelAliasesSection canAdmin={canAdmin} />
       </div>
 
-      <div className="eyebrow" id="behavior-virtual-models" style={{ marginTop: 22 }}>{t("behavior.virtual_models_heading")}</div>
+      <div className="eyebrow beh-mt5" id="behavior-virtual-models">{t("behavior.virtual_models_heading")}</div>
       <div className="card">
-        <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 10 }}>
+        <div className="beh-note">
           <Trans i18nKey="behavior.virtual_models_note" ns="settings" components={{ b: <b /> }} />
         </div>
         <VirtualModelsSection canAdmin={canAdmin} />
@@ -131,9 +131,7 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
   // submitPatch, which documents the same trap for offerings).
   function patch(cfg: CatalogConfig, fields: Partial<ConfigWritePayload>) {
     clearError();
-    const { id, chat_template_caps: _caps, chat_template_caps_probed_at: _probedAt, ...rest } = cfg;
-    const payload: ConfigWritePayload = { ...rest, ...fields };
-    update.mutate({ id, c: payload }, { onError: showError });
+    update.mutate({ id: cfg.id, c: toConfigWritePayload(cfg, fields) }, { onError: showError });
   }
 
   if (configs.isError) {
@@ -145,16 +143,16 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+      {error && <div className="error-note beh-mb3">{error}</div>}
+      <div className="beh-matrix-wrap">
+        <table className="beh-matrix">
           <thead>
-            <tr style={{ textAlign: "left", color: "var(--text-mute)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em" }}>
-              <th style={{ padding: "4px 8px 4px 0" }}>{t("behavior.matrix.col_config")}</th>
-              <th style={{ padding: "4px 8px" }}>{t("behavior.matrix.col_tier")}</th>
-              <th style={{ padding: "4px 8px" }}>{t("behavior.matrix.col_reasoning")}</th>
-              <th style={{ padding: "4px 8px" }}>{t("behavior.matrix.col_thinking")}</th>
-              <th style={{ padding: "4px 8px" }}>{t("behavior.matrix.col_aliases")}</th>
+            <tr>
+              <th>{t("behavior.matrix.col_config")}</th>
+              <th>{t("behavior.matrix.col_tier")}</th>
+              <th>{t("behavior.matrix.col_reasoning")}</th>
+              <th>{t("behavior.matrix.col_thinking")}</th>
+              <th>{t("behavior.matrix.col_aliases")}</th>
             </tr>
           </thead>
           <tbody>
@@ -164,11 +162,11 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
               const thinkingOverride = c.chat_template_caps_override?.supports_enable_thinking;
               const thinkingState: ThinkingOverrideState = thinkingOverride === undefined ? "auto" : thinkingOverride ? "on" : "off";
               return (
-                <tr key={c.id} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={{ padding: "6px 8px 6px 0", fontFamily: "var(--mono)", fontWeight: 600, whiteSpace: "nowrap" }}>{c.name}</td>
-                  <td style={{ padding: "6px 8px" }}>
+                <tr key={c.id}>
+                  <td>{c.name}</td>
+                  <td>
                     {canAdmin ? (
-                      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                      <div className="beh-matrix-controls">
                         <select
                           value={c.capability_tier_id}
                           onChange={(e) => patch(c, { capability_tier_id: Number(e.target.value), capability_rank: 0 })}
@@ -190,7 +188,7 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
                       `${capabilityTierList.find((p) => p.id === c.capability_tier_id)?.name ?? "—"}${c.capability_tier_id !== 0 ? t("behavior.matrix.tier_rank_suffix", { rank: c.capability_rank }) : ""}`
                     )}
                   </td>
-                  <td style={{ padding: "6px 8px" }}>
+                  <td>
                     {canAdmin ? (
                       <select
                         value={c.reasoning_effort_default}
@@ -206,7 +204,7 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
                       c.reasoning_effort_default || "—"
                     )}
                   </td>
-                  <td style={{ padding: "6px 8px" }}>
+                  <td>
                     {nativeReasoning ? (
                       <span className="chip" title={t("behavior.matrix.thinking_native_title")}>
                         {t("behavior.matrix.thinking_native")}
@@ -230,7 +228,7 @@ function ConfigBehaviorMatrix({ canAdmin }: { canAdmin: boolean }) {
                       thinkingOverride === undefined ? "—" : thinkingOverride ? t("behavior.matrix.thinking_forced_on") : t("behavior.matrix.thinking_forced_off")
                     )}
                   </td>
-                  <td style={{ padding: "6px 8px", color: "var(--text-mute)" }}>
+                  <td>
                     {configAliases.length > 0 ? configAliases.map((a) => a.name).join(", ") : "—"}
                   </td>
                 </tr>
@@ -288,7 +286,7 @@ function CapabilityTiersSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+      {error && <div className="error-note beh-mb3">{error}</div>}
       {editing !== null ? (
         <CapabilityTierForm
           key={editing === "new" ? "new" : editing}
@@ -303,17 +301,16 @@ function CapabilityTiersSection({ canAdmin }: { canAdmin: boolean }) {
           {list.length === 0 && <div className="empty-note">{t("behavior.tiers.none_yet")}</div>}
           {list.map((p) => (
             <div className="qrow" key={p.id}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>{p.name}</span>
-              {p.mode && <span className="chip" style={{ fontSize: 10.5 }}>{p.mode}</span>}
-              <span style={{ fontSize: 11, color: "var(--text-mute)" }}>
+              <span className="beh-row-name beh-fill">{p.name}</span>
+              {p.mode && <span className="chip">{p.mode}</span>}
+              <span className="beh-meta">
                 {t("behavior.tiers.configs_count", { count: configList.filter((c) => c.capability_tier_id === p.id).length })}
               </span>
               {canAdmin && (
-                <div className="actions" style={{ marginLeft: 12, display: "flex", gap: 6 }}>
-                  <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(p.id); clearError(); }}>{t("behavior.tiers.edit")}</button>
+                <div className="actions beh-actions">
+                  <button className="btn beh-btn-xs" onClick={() => { setEditing(p.id); clearError(); }}>{t("behavior.tiers.edit")}</button>
                   <ConfirmButton
-                    className="btn"
-                    style={{ fontSize: 11, padding: "4px 8px" }}
+                    className="btn beh-btn-xs"
                     pending={remove.isPending}
                     onConfirm={() => handleDelete(p.id)}
                     warning={deleteWarning(p.id, p.name)}
@@ -323,7 +320,7 @@ function CapabilityTiersSection({ canAdmin }: { canAdmin: boolean }) {
             </div>
           ))}
           {canAdmin && (
-            <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); }}>
+            <button className="btn beh-mt3" onClick={() => { setEditing("new"); clearError(); }}>
               {t("behavior.tiers.new_tier")}
             </button>
           )}
@@ -352,7 +349,7 @@ function CapabilityTierForm({
   const [notes, setNotes] = useState(existing?.notes ?? "");
 
   return (
-    <div className="form-grid" style={{ marginTop: 4 }}>
+    <div className="form-grid beh-mt1">
       <label className="form-row">{t("behavior.tiers.form.name_label")}
         <input value={name} placeholder={t("behavior.tiers.form.name_placeholder")} onChange={(e) => setName(e.target.value)} />
       </label>
@@ -364,10 +361,10 @@ function CapabilityTierForm({
           <option value="prefer_smarter">{t("behavior.tiers.form.mode_prefer_smarter")}</option>
         </select>
       </label>
-      <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("behavior.tiers.form.notes_label")}
+      <label className="form-row beh-span">{t("behavior.tiers.form.notes_label")}
         <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </label>
-      <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
+      <div className="form-actions beh-span">
         <button className="btn" onClick={onCancel}>{t("behavior.tiers.form.cancel")}</button>
         <SaveButton
           className="go"
@@ -422,7 +419,7 @@ function ModelAliasesSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+      {error && <div className="error-note beh-mb3">{error}</div>}
       {editing !== null ? (
         <ModelAliasForm
           key={editing === "new" ? "new" : editing}
@@ -440,17 +437,16 @@ function ModelAliasesSection({ canAdmin }: { canAdmin: boolean }) {
             const forcedEffort = typeof a.request_defaults.reasoning_effort === "string" ? a.request_defaults.reasoning_effort : "";
             return (
               <div className="qrow" key={a.id}>
-                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{a.name}</span>
-                <span style={{ fontSize: 11, color: "var(--text-mute)" }}>→ {configName(a.config_id)}</span>
-                {forcedEffort && <span className="chip" style={{ fontSize: 10.5 }}>{t("behavior.aliases.forces_reasoning", { effort: forcedEffort })}</span>}
-                {a.visibility === "hidden" && <span className="chip" style={{ fontSize: 10.5 }}>{t("behavior.aliases.hidden_chip")}</span>}
-                <span style={{ flex: 1 }} />
+                <span className="beh-row-name">{a.name}</span>
+                <span className="beh-meta">→ {configName(a.config_id)}</span>
+                {forcedEffort && <span className="chip">{t("behavior.aliases.forces_reasoning", { effort: forcedEffort })}</span>}
+                {a.visibility === "hidden" && <span className="chip">{t("behavior.aliases.hidden_chip")}</span>}
+                <span className="beh-fill" />
                 {canAdmin && (
-                  <div className="actions" style={{ marginLeft: 12, display: "flex", gap: 6 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(a.id); clearError(); }}>{t("behavior.aliases.edit")}</button>
+                  <div className="actions beh-actions">
+                    <button className="btn beh-btn-xs" onClick={() => { setEditing(a.id); clearError(); }}>{t("behavior.aliases.edit")}</button>
                     <ConfirmButton
-                      className="btn"
-                      style={{ fontSize: 11, padding: "4px 8px" }}
+                      className="btn beh-btn-xs"
                       pending={remove.isPending}
                       onConfirm={() => handleDelete(a.id)}
                       warning={t("behavior.aliases.delete_confirm", { name: a.name })}
@@ -461,7 +457,7 @@ function ModelAliasesSection({ canAdmin }: { canAdmin: boolean }) {
             );
           })}
           {canAdmin && (
-            <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); }}>
+            <button className="btn beh-mt3" onClick={() => { setEditing("new"); clearError(); }}>
               {t("behavior.aliases.new_alias")}
             </button>
           )}
@@ -508,10 +504,10 @@ function ModelAliasForm({
   }
 
   return (
-    <div className="form-grid" style={{ marginTop: 4 }}>
+    <div className="form-grid beh-mt1">
       <label className="form-row">{t("behavior.aliases.form.name_label")}
         <input value={name} placeholder={t("behavior.aliases.form.name_placeholder")} onChange={(e) => setName(e.target.value)} />
-        <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>
+        <span className="beh-hint">
           {t("behavior.aliases.form.name_hint")}
         </span>
       </label>
@@ -529,15 +525,15 @@ function ModelAliasForm({
           <option value="medium">{t("behavior.aliases.form.effort_medium")}</option>
           <option value="high">{t("behavior.aliases.form.effort_high")}</option>
         </select>
-        <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>
+        <span className="beh-hint">
           {t("behavior.aliases.form.force_effort_hint")}
         </span>
       </label>
-      <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8, gridColumn: "1 / -1" }}>
+      <label className="form-row beh-check-row">
         <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
         {t("behavior.aliases.form.hidden_label")}
       </label>
-      <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
+      <div className="form-actions beh-span">
         <button className="btn" onClick={onCancel}>{t("behavior.aliases.form.cancel")}</button>
         <SaveButton
           className="go"
@@ -590,7 +586,7 @@ function VirtualModelsSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+      {error && <div className="error-note beh-mb3">{error}</div>}
       {editing !== null ? (
         <VirtualModelForm
           key={editing === "new" ? "new" : editing}
@@ -606,18 +602,17 @@ function VirtualModelsSection({ canAdmin }: { canAdmin: boolean }) {
           {list.length === 0 && <div className="empty-note">{t("behavior.virtual_models.none_yet")}</div>}
           {list.map((m) => (
             <div className="qrow" key={m.id}>
-              <span style={{ fontSize: 12.5, fontWeight: 600 }}>{m.name}</span>
-              <span style={{ fontSize: 11, color: "var(--text-mute)" }}>
+              <span className="beh-row-name">{m.name}</span>
+              <span className="beh-meta">
                 {m.kind === "capability_tier" ? t("behavior.virtual_models.resolves_tier", { tier: tierName(m.capability_tier_id) }) : t("behavior.virtual_models.resolves_throughput")}
               </span>
-              {m.visibility === "hidden" && <span className="chip" style={{ fontSize: 10.5 }}>{t("behavior.virtual_models.hidden_chip")}</span>}
-              <span style={{ flex: 1 }} />
+              {m.visibility === "hidden" && <span className="chip">{t("behavior.virtual_models.hidden_chip")}</span>}
+              <span className="beh-fill" />
               {canAdmin && (
-                <div className="actions" style={{ marginLeft: 12, display: "flex", gap: 6 }}>
-                  <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(m.id); clearError(); }}>{t("behavior.virtual_models.edit")}</button>
+                <div className="actions beh-actions">
+                  <button className="btn beh-btn-xs" onClick={() => { setEditing(m.id); clearError(); }}>{t("behavior.virtual_models.edit")}</button>
                   <ConfirmButton
-                    className="btn"
-                    style={{ fontSize: 11, padding: "4px 8px" }}
+                    className="btn beh-btn-xs"
                     pending={remove.isPending}
                     onConfirm={() => handleDelete(m.id)}
                     warning={t("behavior.virtual_models.delete_confirm", { name: m.name })}
@@ -627,7 +622,7 @@ function VirtualModelsSection({ canAdmin }: { canAdmin: boolean }) {
             </div>
           ))}
           {canAdmin && (
-            <button className="btn" style={{ marginTop: 14 }} onClick={() => { setEditing("new"); clearError(); }}>
+            <button className="btn beh-mt3" onClick={() => { setEditing("new"); clearError(); }}>
               {t("behavior.virtual_models.new_virtual_model")}
             </button>
           )}
@@ -672,10 +667,10 @@ function VirtualModelForm({
   const canSave = !!name && (kind === "throughput" || capabilityTierId !== 0);
 
   return (
-    <div className="form-grid" style={{ marginTop: 4 }}>
+    <div className="form-grid beh-mt1">
       <label className="form-row">{t("behavior.virtual_models.form.name_label")}
         <input value={name} placeholder={t("behavior.virtual_models.form.name_placeholder")} onChange={(e) => setName(e.target.value)} />
-        <span style={{ fontSize: 10.5, color: "var(--text-mute)" }}>
+        <span className="beh-hint">
           {t("behavior.virtual_models.form.name_hint")}
         </span>
       </label>
@@ -693,14 +688,14 @@ function VirtualModelForm({
           </select>
         </label>
       )}
-      <label className="form-row" style={{ gridColumn: "1 / -1" }}>{t("behavior.virtual_models.form.notes_label")}
+      <label className="form-row beh-span">{t("behavior.virtual_models.form.notes_label")}
         <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </label>
-      <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8, gridColumn: "1 / -1" }}>
+      <label className="form-row beh-check-row">
         <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
         {t("behavior.virtual_models.form.hidden_label")}
       </label>
-      <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
+      <div className="form-actions beh-span">
         <button className="btn" onClick={onCancel}>{t("behavior.virtual_models.form.cancel")}</button>
         <SaveButton
           className="go"

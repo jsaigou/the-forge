@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiErrorMessage } from "./api";
 import { formatGB } from "./format";
+import { slotsInLoadOrder } from "./loadOrder";
 import { qk, useLoadModel, useUnloadSlot } from "./queries";
 import type { ConfigCard, Status } from "./types";
 
@@ -91,7 +92,7 @@ export function useLoadConfig(card: ConfigCard, status: Status): UseLoadConfigRe
 
   const slotKeys = Object.keys(status.slot_labels);
   const { state, slot: activeSlot } = deriveConfigState(card.name, status);
-  const emptySlot = slotKeys.find(
+  const emptySlot = slotsInLoadOrder(status).find(
     (s) => !status.slots[s] && !status.slot_loading[s]?.in_progress && !status.slot_unloading[s]?.in_progress,
   );
   const busy = load.isPending || unload.isPending;

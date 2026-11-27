@@ -2,16 +2,19 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Bay } from "../components/Bay";
 import { Icon } from "../components/Icon";
-import { ServiceChip } from "../components/ServicesBar";
+import { ExternalToolChip, ServiceChip } from "../components/ServicesBar";
+import { SpecialistStrip } from "../components/SpecialistStrip";
 import { UnifiedModelCarousel } from "../components/UnifiedModelCarousel";
 import { AskSmithButton } from "../components/smith/AskSmithButton";
 import { SmithChatTray } from "../components/smith/SmithChatTray";
 import { appLocale, formatCurrency } from "../lib/format";
-import { sortConfigCards, type ConfigSortMode } from "../lib/modelSort";
+import { defaultConfigSort, sortConfigCards, type ConfigSortMode } from "../lib/modelSort";
 import { providerIconSlug } from "../lib/providerPresets";
 import { useConfigCards, useFavorites, useInfraServices, useMetrics, useProviders, useReservations, useSchedulerStatus, useStatus, useUpdateProvider } from "../lib/queries";
 import { useSession } from "../lib/session";
+import { visibleBays } from "../lib/visibleBays";
 import type { Provider, ProviderHealth } from "../lib/types";
+import { safeHref } from "../lib/safeHref";
 
 // Console usability pass #2, 2026-07-29 (operator feedback: readability +
 // things that didn't belong on this page):
@@ -26,6 +29,9 @@ import type { Provider, ProviderHealth } from "../lib/types";
 //   "utilization" sub-line removed).
 // - The A0 row's "routing" chip was removed (normal state = noise); only
 //   the abnormal passthrough state still shows a chip (ServicesBar.tsx).
+//
+// Design feedback 2026-11-27: at most one free bay is shown (lib/visibleBays.ts),
+// reversing the "all 4 bays always render" decision below.
 //
 // Pre-release feedback round, 2026-08-06: Resources and Services merged back
 // into one section (the earlier Resources/Services split, and the
@@ -101,6 +107,7 @@ function ProviderCreditTile({ p }: { p: Provider }) {
           style={{ width: 20, height: 20, fontSize: 10, flex: "0 0 auto" }}
           disabled={update.isPending}
           title={p.enabled ? t("provider.stop_routing_title") : t("provider.resume_routing_title")}
+          aria-label={p.enabled ? t("provider.stop_routing_title") : t("provider.resume_routing_title")}
           onClick={(e) => {
             e.stopPropagation();
             update.mutate({ id: p.id, req: { enabled: !p.enabled } });
@@ -109,12 +116,13 @@ function ProviderCreditTile({ p }: { p: Provider }) {
           {p.enabled ? "⏸" : "▶"}
         </button>
       )}
-      {p.billing_console_url && (
+      {safeHref(p.billing_console_url) && (
         <a
-          href={p.billing_console_url}
+          href={safeHref(p.billing_console_url)}
           target="_blank"
           rel="noreferrer"
           title={t("provider.billing_page_title", { name: p.name })}
+          aria-label={t("provider.billing_page_title", { name: p.name })}
           style={{ color: "var(--text-mute)", fontSize: 11, flex: "0 0 auto" }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -141,7 +149,7 @@ function ResourceBar() {
   const vramPct = vramUsed != null && vramTotal ? (vramUsed / vramTotal) * 100 : null;
 
   const items = [
-    { key: "vram", label: t("resource_bar.vram"), pct: vramPct, fill: "#FF006E" },
+    { key: "vram", label: t("resource_bar.vram"), pct: vramPct, fill: "var(--prog-accent)" },
   ];
 
   return (
@@ -167,21 +175,27 @@ export function Console() {
   const schedulerStatus = useSchedulerStatus();
   const infraServices = useInfraServices();
   const configCards = useConfigCards("7d");
-  const [sortMode, setSortMode] = useState<ConfigSortMode>("alpha");
+  // null until the operator picks a view: then the default follows whether anything is starred.
+  const [chosenSort, setSortMode] = useState<ConfigSortMode | null>(null);
   const reservations = useReservations();
   const providers = useProviders();
   const favorites = useFavorites();
   const starredIds = new Set(favorites.data?.subject_ids ?? []);
 
+  const sortMode: ConfigSortMode = chosenSort ?? defaultConfigSort(configCards.data?.cards ?? [], starredIds);
+  const shownCards = configCards.data ? sortConfigCards(configCards.data.cards, sortMode, starredIds) : [];
   const providerList = providers.data?.providers ?? [];
-  const slotKeys = status.data ? Object.keys(status.data.slot_labels) : [];
+  const slotKeys = status.data ? visibleBays(Object.keys(status.data.slot_labels), status.data, reservations.data?.reservations) : [];
   // Operator feedback 2026-08-14: ComfyUI lives in the same column as the
   // providers, not in the services strip.
   const comfyServices = (infraServices.data?.services ?? []).filter((s) => s.name === "ComfyUI");
+  const externalTools = (infraServices.data?.services ?? []).filter((s) => s.kind === "external");
 
   return (
     <section className="page">
       <ResourceBar />
+      {/* Design/QA 2026-11-26: the engines strip sits directly under VRAM. */}
+      <SpecialistStrip />
       {/* Operator feedback 2026-08-27: replaced the runbook-only suggestions
           tray with a collapsible clone of the "Ask the smith" chat card,
           collapsed by default. */}
@@ -237,10 +251,11 @@ export function Console() {
         ) : (
           <div className="empty-note">{t("bays.loading_status")}</div>
         )}
-        {(providerList.length > 0 || comfyServices.length > 0) && (
+        {(providerList.length > 0 || comfyServices.length > 0 || externalTools.length > 0) && (
           <div className="provider-col">
             {comfyServices.map((s) => <ServiceChip key={s.name} s={s} addon />)}
-            {comfyServices.length > 0 && providerList.length > 0 && <div className="provider-divider" />}
+            {externalTools.map((s) => <ExternalToolChip key={s.name} s={s} />)}
+            {(comfyServices.length > 0 || externalTools.length > 0) && providerList.length > 0 && <div className="provider-divider" />}
             {providerList.map((p) => (
               <ProviderCreditTile key={p.name} p={p} />
             ))}
@@ -254,26 +269,30 @@ export function Console() {
           toggle retained (operator follow-up same day). */}
       <div className="eyebrow" id="model-gallery" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <span>{t("gallery.title")}</span>
-        <div className="sort-toggle" style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-          {(["alpha", "use", "new"] as const).map((m) => (
+        <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+          {(["favorites", "alpha", "use", "new"] as const).map((m) => (
             <button
               key={m}
               className={`tab ${sortMode === m ? "active" : ""}`}
               style={{ fontSize: 11, padding: "3px 10px" }}
               onClick={() => setSortMode(m)}
             >
-              {m === "alpha" ? t("gallery.sort_alpha") : m === "use" ? t("gallery.sort_most_used") : t("gallery.sort_newest")}
+              {m === "favorites" ? t("gallery.sort_favorites") : m === "alpha" ? t("gallery.sort_alpha") : m === "use" ? t("gallery.sort_most_used") : t("gallery.sort_newest")}
             </button>
           ))}
         </div>
       </div>
-      {configCards.data && status.data ? (
+      {configCards.data && status.data && !(favorites.isLoading && (chosenSort === null || chosenSort === "favorites")) ? (
+        shownCards.length === 0 ? (
+          <div className="empty-note">{t("gallery.no_favorites")}</div>
+        ) : (
         <UnifiedModelCarousel
-          cards={sortConfigCards(configCards.data.cards, sortMode, starredIds)}
+          cards={shownCards}
           status={status.data}
           displayCurrency={configCards.data?.display_currency ?? "USD"}
           variant="config"
         />
+        )
       ) : (
         <div className="empty-note">{t("gallery.loading")}</div>
       )}

@@ -32,8 +32,14 @@ func comfyPlan(fits bool) engine.Plan {
 func comfyCore(t *testing.T, plan engine.Plan, idle bool) (*Core, *fakeEngine, *bool) {
 	t.Helper()
 	eng := newFakeEngine()
-	eng.planFn = func(string) (engine.Plan, error) { return plan, nil }
 	stopped := false
+	// Like the real engine, which probes live: once ComfyUI is stopped the model fits.
+	eng.planFn = func(string) (engine.Plan, error) {
+		if stopped {
+			return engine.Plan{Fits: true, Message: "Fits now"}, nil
+		}
+		return plan, nil
+	}
 	c := newTestCore(t, eng, staticSource(testNow, eng.Slots(), nil), func(d *Deps) {
 		d.Now = func() time.Time { return testNow }
 		d.ComfyUI = &ComfyUISeam{

@@ -146,23 +146,15 @@ function EvidenceRow({ evidence }: { evidence: string | Record<string, unknown> 
   const [expanded, setExpanded] = useState(false);
   const text = useMemo(() => renderEvidence(evidence), [evidence]);
   return (
-    <div style={{ marginTop: 4 }}>
+    <div className="diag-evidence">
       <button
-        className="tab"
-        style={{ fontSize: 10, padding: "2px 8px", cursor: "pointer" }}
+        className="tab diag-tab-xs"
         onClick={() => setExpanded(!expanded)}
       >
         {expanded ? "▼ " : "▶ "}{t("diagnostics.common.evidence")}
       </button>
       {expanded && (
-        <pre
-          style={{
-            marginTop: 4, padding: 8, borderRadius: 6, maxHeight: 240, overflow: "auto",
-            fontSize: 10.5, lineHeight: 1.45, fontFamily: "var(--mono)",
-            background: "var(--bg)", color: "var(--text-dim)",
-            border: "1px solid var(--border)",
-          }}
-        >
+        <pre className="diag-evidence-pre">
           {text}
         </pre>
       )}
@@ -182,31 +174,23 @@ function KBRefChip({ refId }: { refId: string }) {
   return (
     <div>
       <button
-        className="chip"
-        style={{ cursor: "pointer", fontSize: 10 }}
+        className="chip diag-chip-btn"
         onClick={() => setExpanded(!expanded)}
         title={t("diagnostics.finding.kb_ref_title")}
       >
         {expanded ? "▼" : "▶"} 📖 {refId}
       </button>
       {expanded && (
-        <div
-          style={{
-            marginTop: 4, padding: 8, borderRadius: 6, maxWidth: 560,
-            fontSize: 11.5, lineHeight: 1.5,
-            background: "var(--bg)", color: "var(--text-dim)",
-            border: "1px solid var(--border)",
-          }}
-        >
+        <div className="diag-kb-body">
           {chunk.isLoading ? (
             t("diagnostics.common.loading")
           ) : chunk.isError || !chunk.data ? (
-            <span className="error-note" style={{ fontSize: 11 }}>
+            <span className="error-note diag-note-xs">
               {chunk.error ? apiErrorMessage(chunk.error) : t("diagnostics.finding.kb_ref_unavailable")}
             </span>
           ) : (
             <>
-              <div style={{ fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>
+              <div className="diag-kb-title">
                 {chunk.data.chunk.title}
               </div>
               <Markdown text={chunk.data.chunk.body} />
@@ -252,15 +236,15 @@ function FindingCard({ f, stored }: { f: FindingLike; stored?: boolean }) {
   // rows only; ok/info rows aren't problems to ask about.
   const askable = f.severity === "warn" || f.severity === "crit";
   return (
-    <div className="card" style={{ padding: "10px 14px", marginBottom: 6 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+    <div className="card diag-row-card">
+      <div className="diag-row">
         {sevChip(f.severity, t)}
         {confChip(f.confidence, f.confidence_note, t)}
-        {repeatCount > 1 && <span className="chip" style={{ fontSize: 10 }}>×{repeatCount}</span>}
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{f.check_id}</span>
+        {repeatCount > 1 && <span className="chip">×{repeatCount}</span>}
+        <span className="diag-title">{f.check_id}</span>
         {sweepKind && <span className="chip">{sweepKind}</span>}
         {createdAt && (
-          <span style={{ fontSize: 10, color: "var(--text-mute)", marginLeft: "auto" }}>
+          <span className="diag-stamp">
             {fmtTime(createdAt)}
           </span>
         )}
@@ -271,10 +255,10 @@ function FindingCard({ f, stored }: { f: FindingLike; stored?: boolean }) {
           />
         )}
       </div>
-      <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>{findingSummaryText(t, i18n, f)}</div>
+      <div className="diag-summary">{findingSummaryText(t, i18n, f)}</div>
       <EvidenceRow evidence={f.evidence as string | Record<string, unknown>} />
       {f.kb_refs.length > 0 && (
-        <div style={{ marginTop: 4, display: "flex", gap: 4, flexWrap: "wrap" }}>
+        <div className="diag-chips diag-mt-1">
           {f.kb_refs.map((ref) => (
             <KBRefChip key={ref} refId={ref} />
           ))}
@@ -300,12 +284,11 @@ function FindingsPurgeButtons() {
     { label: t("diagnostics.purge.delete_all"), maxAge: "all", confirm: t("diagnostics.purge.delete_all_confirm") },
   ];
   return (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+    <div className="diag-btnrow">
       {buttons.map((b) => (
         <button
           key={b.maxAge}
-          className="tab"
-          style={{ fontSize: 10, padding: "2px 8px" }}
+          className="tab diag-tab-xs"
           disabled={purge.isPending}
           onClick={() => {
             if (window.confirm(b.confirm)) purge.mutate(b.maxAge);
@@ -314,7 +297,7 @@ function FindingsPurgeButtons() {
           {purge.isPending ? t("diagnostics.purge.purging") : b.label}
         </button>
       ))}
-      {purge.isError && <span className="error-note" style={{ fontSize: 10 }}>{apiErrorMessage(purge.error)}</span>}
+      {purge.isError && <span className="error-note diag-note-2xs">{apiErrorMessage(purge.error)}</span>}
     </div>
   );
 }
@@ -324,9 +307,9 @@ function FindingsPurgeButtons() {
 export function SweepResult({ count, worst }: { count: number; worst: string }) {
   const { t } = useTranslation("help");
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-      <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{t("diagnostics.sweep_result.count", { count })}</span>
-      <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{t("diagnostics.sweep_result.worst")}</span>
+    <div className="diag-row diag-mt-1">
+      <span className="diag-dim">{t("diagnostics.sweep_result.count", { count })}</span>
+      <span className="diag-dim">{t("diagnostics.sweep_result.worst")}</span>
       {sevChip(worst, t)}
     </div>
   );
@@ -350,17 +333,14 @@ function InvestigationRow({
   const { t } = useTranslation("help");
   return (
     <div
-      className="card"
-      style={{
-        padding: "8px 12px", marginBottom: 4, cursor: "pointer",
-        borderLeft: active ? "3px solid var(--cool)" : undefined,
-      }}
+      className="card diag-inv-card"
+      style={{ borderLeft: active ? "3px solid var(--cool)" : undefined }}
       onClick={onClick}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <div className="diag-row">
         {statusChip(inv.status, t)}
         <span className="chip">{inv.trigger}</span>
-        <span style={{ fontSize: 10, color: "var(--text-mute)", marginLeft: "auto" }}>
+        <span className="diag-stamp">
           {fmtTime(inv.opened_at)}
         </span>
         {/* Sprint S3-Web (§2.3, R5): "Ask smith" affordance on investigation
@@ -373,7 +353,7 @@ function InvestigationRow({
         </span>
       </div>
       {inv.summary && (
-        <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 2 }}>{inv.summary}</div>
+        <div className="diag-inv-summary">{inv.summary}</div>
       )}
     </div>
   );
@@ -413,25 +393,25 @@ function InvestigationDetail({
 
   return (
     <div className="card">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-        <button className="tab" onClick={onBack} style={{ cursor: "pointer" }}>{t("diagnostics.investigations.back")}</button>
+      <div className="diag-row diag-mb-2">
+        <button className="tab" onClick={onBack}>{t("diagnostics.investigations.back")}</button>
         {statusChip(inv.status, t)}
         <span className="chip">{inv.trigger}</span>
-        <span style={{ fontSize: 10, color: "var(--text-mute)", marginLeft: "auto" }}>
+        <span className="diag-stamp">
           {t("diagnostics.investigations.opened_at", { time: fmtTime(inv.opened_at) })}
           {inv.closed_at ? t("diagnostics.investigations.closed_at", { time: fmtTime(inv.closed_at) }) : ""}
         </span>
       </div>
 
       {inv.summary && (
-        <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 10 }}>{inv.summary}</div>
+        <div className="diag-detail-summary">{inv.summary}</div>
       )}
 
       {/* Run more checks */}
       {inv.status === "open" && (
-        <div style={{ marginBottom: 10, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
-          <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 4 }}>{t("diagnostics.investigations.run_more_checks")}</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <div className="diag-sec">
+          <div className="diag-label">{t("diagnostics.investigations.run_more_checks")}</div>
+          <div className="diag-chips">
             <button
               className="tab"
               onClick={() => runChecks("quick")}
@@ -448,7 +428,7 @@ function InvestigationDetail({
             </button>
           </div>
           {checksRun.isError && (
-            <div className="error-note" style={{ marginTop: 4 }}>
+            <div className="error-note diag-mt-1">
               {apiErrorMessage(checksRun.error)}
             </div>
           )}
@@ -457,8 +437,8 @@ function InvestigationDetail({
       )}
 
       {/* Findings trail */}
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 4 }}>
+      <div className="diag-section">
+        <div className="diag-label">
           {t("diagnostics.investigations.findings_trail", { count: inv.findings.length })}
         </div>
         {inv.findings.length === 0 ? (
@@ -472,8 +452,8 @@ function InvestigationDetail({
           investigation (auto-proposed from its findings, or manually
           created), with approve/reject/handoff. Additive alongside the
           findings trail above, not a replacement for it. */}
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 4 }}>{t("diagnostics.investigations.actions")}</div>
+      <div className="diag-section">
+        <div className="diag-label">{t("diagnostics.investigations.actions")}</div>
         <ActionsTray investigationId={inv.id} />
       </div>
 
@@ -481,7 +461,7 @@ function InvestigationDetail({
           conversation (created on first use, smith_investigations.
            conversation_id) and jumps to Ask the smith with it open, mirroring
            the existing #help/smith/inv/{id} deep-link convention. */}
-      <div style={{ marginBottom: 10, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+      <div className="diag-sec">
         <button
           className="tab"
           onClick={() =>
@@ -494,7 +474,7 @@ function InvestigationDetail({
           {analyze.isPending ? t("diagnostics.investigations.asking_smith") : t("diagnostics.investigations.ask_smith_analyze")}
         </button>
         {analyze.isError && (
-          <div className="error-note" style={{ marginTop: 4 }}>
+          <div className="error-note diag-mt-1">
             {apiErrorMessage(analyze.error)}
           </div>
         )}
@@ -502,7 +482,7 @@ function InvestigationDetail({
 
       {/* Resolve / Dismiss */}
       {inv.status === "open" && (
-        <div style={{ display: "flex", gap: 6, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+        <div className="diag-chips diag-sep">
           <button
             className="tab active"
             onClick={() => resolve.mutate("resolved")}
@@ -520,7 +500,7 @@ function InvestigationDetail({
         </div>
       )}
       {resolve.isError && (
-        <div className="error-note" style={{ marginTop: 4 }}>
+        <div className="error-note diag-mt-1">
           {apiErrorMessage(resolve.error)}
         </div>
       )}
@@ -549,20 +529,20 @@ function procRunStatusColor(status: string): string {
 
 function ProcedureStepRow({ step }: { step: SmithProcedureStepOutcome }) {
   return (
-    <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
-      <span style={{ color: step.ok ? "var(--ok)" : "var(--crit)", fontSize: 12, flex: "0 0 auto", width: 14 }}>
+    <div className="diag-step-row">
+      <span className="diag-step-glyph" style={{ color: step.ok ? "var(--ok)" : "var(--crit)" }}>
         {step.ok ? "✓" : "✗"}
       </span>
-      <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-        <div style={{ fontSize: 12, color: "var(--text)" }}>{step.title}</div>
-        {step.error && <div style={{ fontSize: 11, color: "var(--crit)", marginTop: 2 }}>{step.error}</div>}
+      <div className="diag-step-main">
+        <div className="diag-step-title">{step.title}</div>
+        {step.error && <div className="diag-step-error">{step.error}</div>}
         {step.verify && step.verify.length > 0 && (
-          <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+          <div className="diag-chips diag-mt-1">
             {step.verify.map((v) => (
               <span
                 key={v.check_id}
-                className="chip"
-                style={{ fontSize: 9, color: SEV_COLOR[v.severity] ?? "var(--text-mute)" }}
+                className="chip diag-verify-chip"
+                style={{ color: SEV_COLOR[v.severity] ?? "var(--text-mute)" }}
               >
                 {v.check_id}: {v.severity}
               </span>
@@ -570,7 +550,7 @@ function ProcedureStepRow({ step }: { step: SmithProcedureStepOutcome }) {
           </div>
         )}
       </div>
-      <span style={{ fontSize: 10, color: "var(--text-mute)", flex: "0 0 auto" }}>
+      <span className="diag-step-duration">
         {(step.duration_ms / 1000).toFixed(1)}s
       </span>
     </div>
@@ -591,13 +571,13 @@ function ScorecardStrip({ actionId }: { actionId: number }) {
     // both would misleadingly imply an attempt happened. This run never
     // executed a single step, so neither framing applies.
     return (
-      <div style={{ fontSize: 11, color: "var(--reserved)", padding: "8px 0 0", marginTop: 6, borderTop: "1px solid var(--border)" }}>
+      <div className="diag-scorecard-note">
         {t("diagnostics.procedure_runs.precondition_not_met")}
       </div>
     );
   }
   return (
-    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, color: "var(--text-dim)", padding: "8px 0 0", marginTop: 6, borderTop: "1px solid var(--border)" }}>
+    <div className="diag-scorecard">
       <span style={{ color: d.unattended_completion ? "var(--ok)" : "var(--text-dim)" }}>
         {d.unattended_completion
           ? t("diagnostics.procedure_runs.unattended")
@@ -629,25 +609,25 @@ function ProcedureRunRow({
   const duration = run.finished_at != null ? run.finished_at - run.started_at : null;
   const color = procRunStatusColor(run.status);
   return (
-    <div className="card" style={{ padding: "10px 14px", marginBottom: 6, cursor: "pointer" }} onClick={onClick}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+    <div className="card diag-row-card diag-clickable" onClick={onClick}>
+      <div className="diag-row">
         <span className="chip" style={{ color, borderColor: `color-mix(in srgb, ${color} 40%, var(--border))` }}>
           {t(`diagnostics.procedure_status.${run.status}`, { defaultValue: run.status })}
         </span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{run.procedure_id}</span>
-        <span style={{ fontSize: 11, color: "var(--text-mute)" }}>{run.action_title}</span>
-        <span style={{ fontSize: 10, color: "var(--text-mute)", marginLeft: "auto" }}>
+        <span className="diag-title">{run.procedure_id}</span>
+        <span className="diag-subtitle">{run.action_title}</span>
+        <span className="diag-stamp">
           {fmtTime(run.started_at)}
           {duration != null ? ` · ${fmtDuration(duration)}` : ""}
         </span>
       </div>
       {expanded && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="diag-sep diag-mt-2" onClick={(e) => e.stopPropagation()}>
           {run.steps.map((step) => (
             <ProcedureStepRow key={step.index} step={step} />
           ))}
           {run.checkpoint_note && (
-            <div className="empty-note" style={{ marginTop: 6 }}>{run.checkpoint_note}</div>
+            <div className="empty-note diag-mt-1">{run.checkpoint_note}</div>
           )}
           <ScorecardStrip actionId={run.action_id} />
         </div>
@@ -663,19 +643,18 @@ function ProcedureRunsSection() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   return (
-    <div className="card" style={{ marginTop: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <h3 style={{ margin: 0 }}>{t("diagnostics.procedure_runs.heading")}</h3>
+    <div className="card diag-mt-3">
+      <div className="diag-head">
+        <h3 className="diag-heading">{t("diagnostics.procedure_runs.heading")}</h3>
         <button
-          className="tab"
-          style={{ marginLeft: "auto", cursor: "pointer" }}
+          className="tab diag-tab-end"
           onClick={() => setCollapsed(!collapsed)}
         >
           {collapsed ? (runs.data ? t("diagnostics.common.show_count", { count: runs.data.length }) : t("diagnostics.common.show")) : t("diagnostics.common.hide")}
         </button>
       </div>
       {!collapsed && (
-        <div style={{ marginTop: 8 }}>
+        <div className="diag-mt-2">
           {runs.isLoading ? (
             <div className="empty-note">{t("diagnostics.common.loading")}</div>
           ) : runs.isError ? (
@@ -707,54 +686,53 @@ function BlockedItemRow({ item }: { item: SmithBlockedItem }) {
   const { t } = useTranslation("help");
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="card" style={{ padding: "10px 14px", marginBottom: 6 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+    <div className="card diag-row-card">
+      <div className="diag-row">
         {statusChip(item.status, t)}
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
+        <span className="diag-title">
           #{item.number} {item.title}
         </span>
         {item.last_checked && (
-          <span style={{ fontSize: 10, color: "var(--text-mute)", marginLeft: "auto" }}>
+          <span className="diag-stamp">
             {t("diagnostics.blocked_work.checked_at", { time: item.last_checked })}
           </span>
         )}
       </div>
       {item.blocked_on && (
-        <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4 }}>
-          <span style={{ color: "var(--text-mute)" }}>{t("diagnostics.blocked_work.blocked_on")}</span>
+        <div className="diag-summary">
+          <span className="diag-mute">{t("diagnostics.blocked_work.blocked_on")}</span>
           <Markdown text={item.blocked_on} />
         </div>
       )}
       <button
-        className="tab"
-        style={{ fontSize: 10, padding: "2px 8px", marginTop: 6, cursor: "pointer" }}
+        className="tab diag-tab-xs diag-mt-1"
         onClick={() => setExpanded(!expanded)}
       >
         {expanded ? "▼ " : "▶ "}{t("diagnostics.common.details")}
       </button>
       {expanded && (
-        <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--border)" }}>
+        <div className="diag-details">
           {item.status_text && (
-            <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>
+            <div className="diag-details-note">
               <Markdown text={item.status_text} />
             </div>
           )}
           {item.where_to_check && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 10, color: "var(--text-mute)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>
+            <div className="diag-mb-2">
+              <div className="diag-mini-label">
                 {t("diagnostics.blocked_work.where_to_check")}
               </div>
-              <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+              <div className="diag-details-text">
                 <Markdown text={item.where_to_check} />
               </div>
             </div>
           )}
           {item.when_unblocked && (
             <div>
-              <div style={{ fontSize: 10, color: "var(--text-mute)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>
+              <div className="diag-mini-label">
                 {t("diagnostics.blocked_work.when_unblocked")}
               </div>
-              <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+              <div className="diag-details-text">
                 <Markdown text={item.when_unblocked} />
               </div>
             </div>
@@ -771,19 +749,18 @@ function BlockedWorkSection() {
   const [collapsed, setCollapsed] = useState(true);
 
   return (
-    <div className="card" style={{ marginTop: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <h3 style={{ margin: 0 }}>{t("diagnostics.blocked_work.heading")}</h3>
+    <div className="card diag-mt-3">
+      <div className="diag-head">
+        <h3 className="diag-heading">{t("diagnostics.blocked_work.heading")}</h3>
         <button
-          className="tab"
-          style={{ marginLeft: "auto", cursor: "pointer" }}
+          className="tab diag-tab-end"
           onClick={() => setCollapsed(!collapsed)}
         >
           {collapsed ? (blocked.data ? t("diagnostics.common.show_count", { count: blocked.data.count }) : t("diagnostics.common.show")) : t("diagnostics.common.hide")}
         </button>
       </div>
       {!collapsed && (
-        <div style={{ marginTop: 8 }}>
+        <div className="diag-mt-2">
           {blocked.isLoading ? (
             <div className="empty-note">{t("diagnostics.common.loading")}</div>
           ) : blocked.isError ? (
@@ -860,16 +837,15 @@ export function Diagnostics({
   return (
     <>
       {/* ── Findings ── */}
-      <div className="card" style={{ marginBottom: 12 }}>
+      <div className="card diag-mb-3">
         <h3>{t("diagnostics.findings.heading")}</h3>
         {status.data?.missed_patterns && status.data.missed_patterns.length > 0 && (
           <MissedPatterns patterns={status.data.missed_patterns} />
         )}
         {/* Severity filter */}
-        <div style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
+        <div className="diag-chips diag-mb-2">
           <button
-            className={`tab ${!severityFilter ? "active" : ""}`}
-            style={{ fontSize: 10, padding: "2px 8px" }}
+            className={`tab ${!severityFilter ? "active" : ""} diag-tab-xs`}
             onClick={() => setSeverityFilter("")}
           >
             {t("diagnostics.severity.all")}
@@ -877,8 +853,8 @@ export function Diagnostics({
           {SEV_ORDER.map((s) => (
             <button
               key={s}
-              className={`tab ${severityFilter === s ? "active" : ""}`}
-              style={{ fontSize: 10, padding: "2px 8px", ...(severityFilter === s ? { color: SEV_COLOR[s] } : {}) }}
+              className={`tab ${severityFilter === s ? "active" : ""} diag-tab-xs`}
+              style={severityFilter === s ? { color: SEV_COLOR[s] } : undefined}
               onClick={() => setSeverityFilter(s)}
             >
               {t(`diagnostics.severity.${s}`, { defaultValue: s })}
@@ -897,7 +873,7 @@ export function Diagnostics({
         ) : (
           <>
             {findings.data && (
-              <div style={{ fontSize: 10, color: "var(--text-mute)", marginBottom: 6 }}>
+              <div className="diag-count diag-mb-1">
                 {t("diagnostics.findings.total_count", { count: findings.data.count })}
                 {severityFilter
                   ? t("diagnostics.findings.filtered_suffix", { severity: t(`diagnostics.severity.${severityFilter}`, { defaultValue: severityFilter }) })
@@ -905,10 +881,10 @@ export function Diagnostics({
               </div>
             )}
             {SEV_ORDER.filter((s) => groupedFindings.has(s)).map((sev) => (
-              <div key={sev} style={{ marginBottom: 8 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+              <div key={sev} className="diag-mb-2">
+                <div className="diag-sev-head">
                   {sevChip(sev, t)}
-                  <span style={{ fontSize: 10, color: "var(--text-mute)" }}>
+                  <span className="diag-count">
                     ({groupedFindings.get(sev)!.length})
                   </span>
                 </div>
@@ -923,11 +899,10 @@ export function Diagnostics({
 
       {/* ── Investigations ── */}
       <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <h3 style={{ margin: 0 }}>{t("diagnostics.investigations.heading")}</h3>
+        <div className="diag-head diag-mb-2">
+          <h3 className="diag-heading">{t("diagnostics.investigations.heading")}</h3>
           <button
-            className="tab"
-            style={{ marginLeft: "auto", cursor: "pointer" }}
+            className="tab diag-tab-end"
             onClick={() => setShowManual(!showManual)}
           >
             {showManual ? t("diagnostics.investigations.cancel") : t("diagnostics.investigations.open_new")}
@@ -936,17 +911,13 @@ export function Diagnostics({
 
         {/* Manual open form */}
         {showManual && (
-          <div style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
+          <div className="diag-form">
             <input
+              className="diag-inv-input"
               type="text"
               placeholder={t("diagnostics.investigations.summary_placeholder")}
               value={manualSummary}
               onChange={(e) => setManualSummary(e.target.value)}
-              style={{
-                width: "100%", padding: "6px 8px", fontSize: 12, marginBottom: 6,
-                background: "var(--bg)", color: "var(--text)",
-                border: "1px solid var(--border)", borderRadius: 6, fontFamily: "var(--ui)",
-              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   createInvestigation.mutate(manualSummary, {
@@ -975,7 +946,7 @@ export function Diagnostics({
               {t("diagnostics.investigations.create")}
             </button>
             {createInvestigation.isError && (
-              <div className="error-note" style={{ marginTop: 4 }}>
+              <div className="error-note diag-mt-1">
                 {apiErrorMessage(createInvestigation.error)}
               </div>
             )}
@@ -993,7 +964,7 @@ export function Diagnostics({
           <div className="empty-note">{t("diagnostics.investigations.none")}</div>
         ) : (
           <>
-            <div style={{ fontSize: 10, color: "var(--text-mute)", marginBottom: 6 }}>
+            <div className="diag-count diag-mb-1">
               {t("diagnostics.investigations.total_count", { count: investigations.data.count })}
             </div>
             {investigations.data.investigations.map((inv) => (

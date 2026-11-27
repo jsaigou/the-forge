@@ -3,18 +3,24 @@ package tts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Server struct {
 	Engine   Engine
 	Token    string
 	AudioDir string
+
+	engineLister EngineLister
+	readiness    ReadinessReporter
 }
 
 func NewServer(engine Engine, token, audioDir string) *Server {
@@ -31,6 +37,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/v1/audio/speech", s.handleSpeech)
 	mux.HandleFunc("/v1/voices", s.handleVoices)
+	mux.HandleFunc("/v1/engines", s.handleEngines)
+	mux.HandleFunc("/v1/readiness", s.handleReadiness)
+	mux.HandleFunc("/v1/style/vocabulary", s.handleStyleVocabulary)
+	mux.HandleFunc("/v1/style/parse", s.handleStyleParse)
 	mux.HandleFunc("/v1/voices/import", s.handleImport)
 	mux.HandleFunc("/v1/voices/preview", s.handlePreview)
 	mux.HandleFunc("/v1/voices/", s.handleVoiceItem)
@@ -75,24 +85,77 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": s.Engine.Models(), "object": "list"})
 }
 
+// copyStream writes audio to the client as the engine makes it, flushing every read so the first frame leaves at once instead of with the last. Errors
+// after the headers can only end the body early: the status has been sent.
+func (s *Server) copyStream(w http.ResponseWriter, r *http.Request, stream *SpeechStream) {
+	defer stream.Body.Close()
+	w.Header().Set("Content-Type", "audio/pcm")
+	w.Header().Set("Cache-Control", "no-store")
+	setNotes(w.Header(), stream.Notes)
+	w.WriteHeader(http.StatusOK)
+	rc := http.NewResponseController(w)
+	_ = rc.Flush() // the client learns the stream has started before the first frame is made
+	buf := make([]byte, 16<<10)
+	for {
+		n, err := stream.Body.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return // the client went away: closing the body stops the engine's work
+			}
+			_ = rc.Flush()
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
 func (s *Server) handleSpeech(w http.ResponseWriter, r *http.Request) {
 	var req SpeechRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+	if strings.EqualFold(req.ResponseFormat, "pcm") {
+		if se, ok := s.Engine.(StreamEngine); ok {
+			stream, err := se.SpeechStream(r.Context(), req)
+			if err == nil {
+				s.copyStream(w, r, stream)
+				return
+			}
+			if !errors.Is(err, ErrNoStream) {
+				if writeEngineError(w, err) {
+					return
+				}
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+	}
 	res, err := s.Engine.Speech(r.Context(), req)
 	if err != nil {
+		if writeEngineError(w, err) {
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	setNotes(w.Header(), res.Notes)
 	ct := "audio/wav"
+	audio := res.Audio
 	if res.Format == "pcm" {
 		ct = "audio/pcm"
+	} else if strings.EqualFold(req.ResponseFormat, "mp3") {
+		mp3, err := encodeMP3(r.Context(), res.Audio)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		ct, audio = "audio/mpeg", mp3
 	}
 	w.Header().Set("Content-Type", ct)
 	w.WriteHeader(http.StatusOK)
-	w.Write(res.Audio)
+	w.Write(audio)
 }
 
 type voiceView struct {
@@ -107,6 +170,8 @@ type voiceView struct {
 	Instruct     string `json:"instruct,omitempty"`
 	RefText      string `json:"ref_text,omitempty"`
 	XVectorOnly  bool   `json:"x_vector_only,omitempty"`
+	// Engine is the engine the voice is bound to ("" = the default for its kind). Optional: callers that do not know it ignore it.
+	Engine string `json:"engine,omitempty"`
 }
 
 func (s *Server) handleVoices(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +207,7 @@ func (s *Server) listVoices(w http.ResponseWriter, r *http.Request) {
 			Builtin:    tier == "fast",
 			SampleText: v.SampleText,
 			HasSample:  s.sampleExists(v.ID),
+			Engine:     v.Engine,
 		}
 		if s.authorized(r) {
 			if v.Design != nil {
@@ -289,8 +355,22 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "id, name and type required", http.StatusBadRequest)
 		return
 	}
+	// id becomes a file name (id+".wav", id+"_sample.wav"): refuse a path-shaped one before anything is written.
+	if err := checkVoiceID(id); err != nil {
+		http.Error(w, "id: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	entry := VoiceEntry{ID: id, Name: name, Type: vtype, Language: lang}
+	// An optional engine the voice is bound to. An older voice-studio does not send it; an older forge-tts ignores it. It is stored as given and is
+	// resolved by the daemon, so a name this node does not know is not an import error: the voice then reports an unavailable engine when it is played.
+	if eng := strings.TrimSpace(first(formValue(r, "engine"))); eng != "" {
+		if !validEngineName(eng) {
+			http.Error(w, "engine: 1 to 64 characters, no spaces or control characters", http.StatusBadRequest)
+			return
+		}
+		entry.Engine = eng
+	}
 	switch vtype {
 	case "design":
 		entry.Design = &DesignSpec{Instruct: first(formValue(r, "instruct"))}
@@ -359,6 +439,9 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 			Mode: "clone", RefAudio: data, RefText: refText, Text: text, Language: lang, Format: respFmt,
 		})
 		if err != nil {
+			if writeEngineError(w, err) {
+				return
+			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -385,6 +468,9 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := s.Engine.Preview(r.Context(), p)
 	if err != nil {
+		if writeEngineError(w, err) {
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -402,6 +488,12 @@ func (s *Server) handleVoiceItem(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodDelete:
 		if err := s.Engine.DeleteVoice(r.Context(), rest); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// Deleting what is not there is a 404, which voice-studio's delete client tolerates (it deletes on every node before a rename or
+				// redeploy, including nodes the voice was never on). It used to answer 500.
+				http.Error(w, "voice not found", http.StatusNotFound)
+				return
+			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -440,6 +532,9 @@ func (s *Server) handleSample(w http.ResponseWriter, r *http.Request, id string)
 			return
 		}
 		if err := s.Engine.GenerateSample(r.Context(), id); err != nil {
+			if writeEngineError(w, err) {
+				return
+			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -521,4 +616,73 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.WriteHeader(code)
 	b, _ := json.Marshal(v)
 	w.Write(b)
+}
+
+// validEngineName accepts what the daemon accepts for an occupant name (1-64 characters), minus whitespace and control characters, which could only
+// be a mistake in a name that ends up in URLs and logs.
+func validEngineName(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		if r <= ' ' || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+// writeEngineError answers an engine that could not be resolved and reports whether it did. A transient failure (the engine is loading, the pool is
+// full, the engine service did not answer) is a 503 whose body contains `model_not_ready`, the exact text voice-studio retries on; a hard one (the engine is
+// turned off, or nothing can play this voice) is a 503 with its own code and without that text, so nobody retries a thing that will not change.
+func writeEngineError(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, ErrNoVoice) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"code": "speech_no_voice", "type": "invalid_request", "message": err.Error()}})
+		return true
+	}
+	ee, ok := IsEngineError(err)
+	if !ok {
+		return false
+	}
+	code, typ := ee.Code, "unavailable"
+	if ee.Transient {
+		code, typ = "model_not_ready", "model_not_ready"
+		if ee.RetryAfter <= 0 {
+			ee.RetryAfter = 2 * time.Second
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(int((ee.RetryAfter+time.Second-1)/time.Second)))
+	}
+	msg := ee.Message
+	if ee.Transient && ee.Code != "" && ee.Code != "model_not_ready" {
+		msg = ee.Message + " (" + ee.Code + ")"
+	}
+	writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": map[string]any{"code": code, "type": typ, "message": msg, "engine": ee.Engine}})
+	return true
+}
+
+// EngineLister lists the speech engines a node can use. Only the daemon resolver can; with fixed addresses there is nothing to choose from.
+type EngineLister interface {
+	Engines(ctx context.Context) ([]EngineInfo, error)
+}
+
+// SetEngineLister turns on GET /v1/engines.
+func (s *Server) SetEngineLister(l EngineLister) { s.engineLister = l }
+
+// handleEngines answers GET /v1/engines: the enabled-or-not speech engines with their kind and state, so voice-studio can offer an Engine choice. It is
+// open like the voice list (names and states only). Without a daemon resolver it answers 404, which voice-studio reads as "no choice to offer".
+func (s *Server) handleEngines(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.engineLister == nil {
+		http.Error(w, "engines are fixed on this node", http.StatusNotFound)
+		return
+	}
+	list, err := s.engineLister.Engines(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"code": "engine_list_unavailable", "message": err.Error()}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"engines": list})
 }

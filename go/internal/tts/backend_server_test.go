@@ -32,7 +32,7 @@ func TestServerBackendSpeechAndRegister(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	b := NewServerBackend(ts.URL, ts.URL, ts.URL, nil)
+	b := staticServerBackend(ts.URL, ts.URL, ts.URL)
 	res, err := b.Speech(context.Background(), SynthSpec{
 		Mode:     ModeBase,
 		ID:       "clone1",
@@ -67,7 +67,7 @@ func TestServerBackendCustomVoiceNoRegister(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	b := NewServerBackend(ts.URL, ts.URL, ts.URL, nil)
+	b := staticServerBackend(ts.URL, ts.URL, ts.URL)
 	_, err := b.Speech(context.Background(), SynthSpec{
 		Mode:    ModeCustomVoice,
 		ID:      "aiden",
@@ -91,59 +91,21 @@ func TestServerBackendHealth(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	b := NewServerBackend(ts.URL, "", "", nil)
+	// Health never contacts an engine (asking the daemon for one may start it): it reports what the resolver knows.
+	b := staticServerBackend(ts.URL, "", "")
 	h, err := b.Health(context.Background())
 	if err != nil {
 		t.Fatalf("health: %v", err)
 	}
-	if h["status"] != "ok" {
+	if h["status"] != "ok" || h["resolver"] != "static" {
 		t.Fatalf("health status: %v", h)
 	}
 }
 
-type fakeFallback struct {
-	speechCalled bool
-	healthCalled bool
-	lastSpec     SynthSpec
-}
-
-func (f *fakeFallback) Speech(ctx context.Context, spec SynthSpec, text string) (*SpeechResult, error) {
-	f.speechCalled = true
-	f.lastSpec = spec
-	return &SpeechResult{Audio: []byte("FALLBACKWAV"), Format: "wav"}, nil
-}
-
-func (f *fakeFallback) Health(ctx context.Context) (map[string]any, error) {
-	f.healthCalled = true
-	return map[string]any{"status": "ok", "fallback": true}, nil
-}
-
-func (f *fakeFallback) Close() error { return nil }
-
-func TestServerBackendFallsBackWhenUnconfigured(t *testing.T) {
-	ff := &fakeFallback{}
-	b := NewServerBackend("", "", "", ff)
-	res, err := b.Speech(context.Background(), SynthSpec{
-		Mode:    ModeCustomVoice,
-		ID:      "aiden",
-		Speaker: "aiden",
-	}, "hi")
-	if err != nil {
-		t.Fatalf("speech: %v", err)
-	}
-	if !ff.speechCalled {
-		t.Fatalf("expected fallback to be used when no server configured")
-	}
-	if string(res.Audio) != "FALLBACKWAV" {
-		t.Fatalf("audio mismatch: %q", res.Audio)
-	}
-
-	// no server configured at all -> health falls back too
-	h, err := b.Health(context.Background())
-	if err != nil {
-		t.Fatalf("health: %v", err)
-	}
-	if !ff.healthCalled || h["fallback"] != true {
-		t.Fatalf("expected health fallback")
+func TestServerBackendWithNoEngineIsAnErrorNotASlowFallback(t *testing.T) {
+	b := staticServerBackend("", "", "")
+	res, err := b.Speech(context.Background(), SynthSpec{Mode: ModeCustomVoice, ID: "aiden", Speaker: "aiden"}, "hi")
+	if err == nil || res != nil {
+		t.Fatalf("speech with no engine = %v, %v; want an error and no audio", res, err)
 	}
 }

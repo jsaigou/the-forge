@@ -6,12 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/enginekind"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -54,7 +56,10 @@ type SlotCatalog interface {
 // a short TTL cache so the /v1/models list and the router's per-request gate
 // don't double-probe during a mode-switch dead window.
 type ttlCatalog struct {
-	client  *http.Client
+	client *http.Client
+	// specOf names the engine Spec of the slot on a port (which probe to use, which busy series to read). Nil reads every slot as llama.cpp, the
+	// default kind, so a catalog built without it behaves exactly as before engine kinds existed.
+	specOf  func(port int) enginekind.Spec
 	cacheMu sync.Mutex
 	health  map[int]slotCacheEntry
 	busyMu  sync.Mutex
@@ -131,6 +136,11 @@ func (c *ttlCatalog) probeSlot(port int) SlotProbe {
 	if !c.slotHealthy(port) {
 		return SlotProbe{}
 	}
+	if spec := c.spec(port); spec.ContextFromModels && !spec.ContextFromProps {
+		// This kind does not serve /props (Radiance): the OpenAI /v1/models entry carries the id, max_model_len and capabilities.
+		nCtx, id, supportsTools := c.slotModels(port)
+		return SlotProbe{Healthy: true, NCtx: nCtx, ModelPath: id, SupportsTools: supportsTools}
+	}
 	nCtx, modelPath, supportsTools := c.slotProps(port)
 	return SlotProbe{Healthy: true, NCtx: nCtx, ModelPath: modelPath, SupportsTools: supportsTools}
 }
@@ -148,6 +158,37 @@ func (c *ttlCatalog) slotHealthy(port int) bool {
 	_ = json.Unmarshal(raw, &status)
 	// Empty/missing status = ok (vLLM); explicit non-ok = unhealthy.
 	return status.Status == "" || status.Status == "ok"
+}
+
+// spec is the engine Spec of the slot on port; llama.cpp when no lookup is wired.
+func (c *ttlCatalog) spec(port int) enginekind.Spec {
+	if c.specOf != nil {
+		return c.specOf(port)
+	}
+	spec, _ := enginekind.Lookup("")
+	return spec
+}
+
+// slotModels reads the first /v1/models entry: max_model_len, id (the name the engine answers to) and capabilities.tools. Best-effort like
+// slotProps: /health already confirmed the slot is up, a failure leaves everything zero/empty/false.
+func (c *ttlCatalog) slotModels(port int) (nCtx int, id string, supportsTools bool) {
+	raw, err := c.getRaw(port, "/v1/models", propsTimeout)
+	if err != nil {
+		return 0, "", false
+	}
+	var top struct {
+		Data []struct {
+			ID           string                     `json:"id"`
+			MaxModelLen  int                        `json:"max_model_len"`
+			Capabilities map[string]json.RawMessage `json:"capabilities"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &top) != nil || len(top.Data) == 0 {
+		return 0, "", false
+	}
+	d := top.Data[0]
+	_ = json.Unmarshal(d.Capabilities["tools"], &supportsTools) // absent or non-boolean stays false
+	return d.MaxModelLen, d.ID, supportsTools
 }
 
 // slotProps reads /props for n_ctx + model_path + chat_template_caps.
@@ -179,9 +220,9 @@ func (c *ttlCatalog) slotProps(port int) (nCtx int, modelPath string, supportsTo
 	return nCtx, top.ModelPath, supportsTools
 }
 
-// probeBusy returns true if llama-server is currently processing a request.
-// Same signal monitor.py's hang detector uses (llamacpp:requests_processing
-// from /metrics). Any failure is reported as "not busy" (fail toward the
+// probeBusy returns true if the slot's engine is currently processing a request.
+// The series comes from the kind's Spec (llamacpp:requests_processing, or
+// vllm:num_requests_running for Radiance). Any failure is reported as "not busy" (fail toward the
 // existing wait-mode behavior) — a probe failure here is a /health problem,
 // already handled separately.
 func (c *ttlCatalog) probeBusy(port int) bool {
@@ -189,7 +230,11 @@ func (c *ttlCatalog) probeBusy(port int) bool {
 	if err != nil {
 		return false
 	}
-	return parsePromScalar(string(raw), "llamacpp:requests_processing") > 0
+	series := c.spec(port).BusySeries
+	if series == "" {
+		series = enginekind.SeriesLlamaCppBusy
+	}
+	return parsePromScalar(string(raw), series) > 0
 }
 
 func (c *ttlCatalog) getRaw(port int, path string, timeout time.Duration) ([]byte, error) {
@@ -287,10 +332,10 @@ type ModelEntry struct {
 // false if ANY read failed — callers then omit `architecture` entirely
 // (a read failure must never be read as "text only", see ModelEntry.Architecture).
 type modalitySnapshot struct {
-	ok            bool
-	modelByID     map[int64]store.Model
-	modelIDByVar  map[int64]int64 // Variant.ID -> Variant.ModelID
-	mmprojMissing map[int64]bool  // Artifact.ID -> Missing (mmproj artifacts only)
+	ok           bool
+	modelByID    map[int64]store.Model
+	modelIDByVar map[int64]int64    // Variant.ID -> Variant.ModelID
+	lk           store.ConfigLookup // the same rows as an in-memory lookup, for store.ResolveConfig
 }
 
 // loadModalitySnapshot reads ListModels + ListVariants + ListArtifacts —
@@ -300,33 +345,31 @@ type modalitySnapshot struct {
 func loadModalitySnapshot(ctx context.Context, storeCat store.Catalog) modalitySnapshot {
 	models, err := storeCat.ListModels(ctx)
 	if err != nil {
+		log.Printf("router: /v1/models: list models: %v (architecture omitted)", err)
 		return modalitySnapshot{}
 	}
 	variants, err := storeCat.ListVariants(ctx)
 	if err != nil {
+		log.Printf("router: /v1/models: list variants: %v (architecture omitted)", err)
 		return modalitySnapshot{}
 	}
 	artifacts, err := storeCat.ListArtifacts(ctx)
 	if err != nil {
+		log.Printf("router: /v1/models: list artifacts: %v (architecture omitted)", err)
 		return modalitySnapshot{}
 	}
 
 	s := modalitySnapshot{
-		ok:            true,
-		modelByID:     make(map[int64]store.Model, len(models)),
-		modelIDByVar:  make(map[int64]int64, len(variants)),
-		mmprojMissing: make(map[int64]bool, len(artifacts)),
+		ok:           true,
+		modelByID:    make(map[int64]store.Model, len(models)),
+		modelIDByVar: make(map[int64]int64, len(variants)),
+		lk:           store.SnapshotLookup(variants, models, artifacts),
 	}
 	for _, m := range models {
 		s.modelByID[m.ID] = m
 	}
 	for _, v := range variants {
 		s.modelIDByVar[v.ID] = v.ModelID
-	}
-	for _, a := range artifacts {
-		if a.ArtifactType == "mmproj" {
-			s.mmprojMissing[a.ID] = a.Missing
-		}
 	}
 	return s
 }
@@ -353,20 +396,44 @@ func (s modalitySnapshot) offeringModalities(o store.Offering) []string {
 // disagree. nil when the snapshot is unusable or the config's model can't
 // be resolved.
 func (s modalitySnapshot) configModalities(c store.Config) []string {
+	res, ok := s.resolve(c)
+	if !ok {
+		return nil
+	}
+	return res.Input.Enabled
+}
+
+// configOutputs returns what this specific Config can actually produce, via store.ResolveOutputModalities (the same rule
+// the dashboard uses). nil when the snapshot is unusable or the config's model can't be resolved ("unknown").
+func (s modalitySnapshot) configOutputs(c store.Config) []string {
+	res, ok := s.resolve(c)
+	if !ok {
+		return nil
+	}
+	return res.Output.Enabled
+}
+
+// resolve is store.ResolveConfig over the snapshot's rows. ok is false when the snapshot is unusable or the Config's model can't be resolved
+// ("unknown": the entry then omits its architecture rather than claim text-only).
+func (s modalitySnapshot) resolve(c store.Config) (store.ResolvedConfig, bool) {
 	if !s.ok {
-		return nil
+		return store.ResolvedConfig{}, false
 	}
-	modelID, ok := s.modelIDByVar[c.VariantID]
-	if !ok {
-		return nil
+	res, err := store.ResolveConfig(context.Background(), s.lk, c)
+	if err != nil {
+		log.Printf("router: /v1/models: %v (architecture omitted)", err)
+		return store.ResolvedConfig{}, false
 	}
-	mdl, ok := s.modelByID[modelID]
-	if !ok {
-		return nil
+	return res, true
+}
+
+// keepForOutput decides whether an entry with these resolved outputs belongs in a listing filtered by output. outs == nil
+// means unknown. See BuildModelsResponseFor.
+func keepForOutput(outs []string, output string) bool {
+	if output == "" || output == store.OutputText {
+		return outs == nil || hasOutput(outs, store.OutputText)
 	}
-	missing := s.mmprojMissing[c.MMProjArtifactID] // false for id 0 / unknown id, correctly
-	res := store.ResolveModalities(c, mdl, missing)
-	return res.Enabled
+	return outs != nil && hasOutput(outs, output)
 }
 
 // nonTextModalities drops "text" out of a modality list (offeringModalities
@@ -409,11 +476,29 @@ func openCodeModalities(storeMods []string) []string {
 // modalities are always ["text"] — nothing a0 routes emits image or audio
 // on the chat-completions path. nil in -> nil out (propagates "unknown").
 func architectureFor(storeMods []string) *ModelArchitecture {
+	return architectureWithOutputs(storeMods, nil)
+}
+
+// architectureWithOutputs is architectureFor with the entry's resolved output modalities (store vocabulary text|audio|
+// decisions, the same words llama-server uses). nil outputs means "text", the only thing a0 ever advertised before decision
+// and speech models existed, so an entry that produces text is byte-identical to the old listing. Unknown words are dropped
+// rather than leaked onto the wire, same rule as openCodeModalities.
+func architectureWithOutputs(storeMods, outs []string) *ModelArchitecture {
 	input := openCodeModalities(storeMods)
 	if input == nil {
 		return nil
 	}
-	return &ModelArchitecture{InputModalities: input, OutputModalities: []string{"text"}}
+	out := make([]string, 0, len(outs))
+	for _, o := range outs {
+		switch o {
+		case store.OutputText, store.OutputAudio, store.OutputDecisions:
+			out = append(out, o)
+		}
+	}
+	if len(out) == 0 {
+		out = []string{store.OutputText}
+	}
+	return &ModelArchitecture{InputModalities: input, OutputModalities: out}
 }
 
 // assignUniqueDisplayNames sets Name on each entry whose candidate name is
@@ -462,6 +547,18 @@ func assignUniqueDisplayNames(data []ModelEntry, candidates []string) {
 // actively asserting a vision-capable model is text-only — see
 // modalitySnapshot and ModelEntry.Architecture.
 func BuildModelsResponse(ctx context.Context, storeCat store.Catalog, providers []store.ProviderRow) ModelsResponse {
+	return BuildModelsResponseFor(ctx, storeCat, providers, "")
+}
+
+// BuildModelsResponseFor is BuildModelsResponse with the ?output= filter (docs/lfm3-capability-plan.md, D17):
+//
+//   - "" or "text" (the default every existing consumer gets): everything that produces text. A config that produces
+//     decisions and no text (a d1 model) is HIDDEN, so LibreChat's and OpenCode's pickers never offer a model that cannot chat.
+//   - "decisions" / "audio": only entries that produce that output (entries whose outputs are unknown are left out).
+//
+// Every returned entry still carries its real architecture.output_modalities. When the catalog cannot say what an entry
+// produces (a snapshot read failure), the default listing keeps it, same fail-open stance as the input gates.
+func BuildModelsResponseFor(ctx context.Context, storeCat store.Catalog, providers []store.ProviderRow, output string) ModelsResponse {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
@@ -531,6 +628,9 @@ func BuildModelsResponse(ctx context.Context, storeCat store.Catalog, providers 
 				if o.ContextLength > 0 {
 					entry.ContextLength = o.ContextLength
 				}
+				if !keepForOutput([]string{store.OutputText}, output) {
+					continue
+				}
 				entry.Architecture = architectureFor(modSnap.offeringModalities(o))
 				data = append(data, entry)
 				nameCandidates = append(nameCandidates, modSnap.modelByID[o.ModelID].Name)
@@ -566,7 +666,11 @@ func BuildModelsResponse(ctx context.Context, storeCat store.Catalog, providers 
 				if c.NCtx > 0 {
 					entry.ContextLength = c.NCtx
 				}
-				entry.Architecture = architectureFor(modSnap.configModalities(c))
+				outs := modSnap.configOutputs(c)
+				if !keepForOutput(outs, output) {
+					continue
+				}
+				entry.Architecture = architectureWithOutputs(modSnap.configModalities(c), outs)
 				data = append(data, entry)
 				modelID := modSnap.modelIDByVar[c.VariantID]
 				nameCandidates = append(nameCandidates, modSnap.modelByID[modelID].Name)
@@ -609,7 +713,11 @@ func BuildModelsResponse(ctx context.Context, storeCat store.Catalog, providers 
 				if target.NCtx > 0 {
 					entry.ContextLength = target.NCtx
 				}
-				entry.Architecture = architectureFor(modSnap.configModalities(target))
+				outs := modSnap.configOutputs(target)
+				if !keepForOutput(outs, output) {
+					continue
+				}
+				entry.Architecture = architectureWithOutputs(modSnap.configModalities(target), outs)
 				data = append(data, entry)
 				modelID := modSnap.modelIDByVar[target.VariantID]
 				nameCandidates = append(nameCandidates, modSnap.modelByID[modelID].Name)
@@ -636,6 +744,7 @@ func BuildModelsResponse(ctx context.Context, storeCat store.Catalog, providers 
 					continue
 				}
 				entry := ModelEntry{ID: vm.Name, Object: "model", Created: now, OwnedBy: "forge-local"}
+				var vmOuts []string // unknown unless a tier member tells us
 				if vm.Kind == "capability_tier" && vm.CapabilityTierID != 0 {
 					if members, merr := storeCat.ListConfigsForCapabilityTier(ctx, vm.CapabilityTierID); merr == nil && len(members) > 0 {
 						top := members[0]
@@ -647,8 +756,14 @@ func BuildModelsResponse(ctx context.Context, storeCat store.Catalog, providers 
 						if top.NCtx > 0 {
 							entry.ContextLength = top.NCtx
 						}
-						entry.Architecture = architectureFor(modSnap.configModalities(top))
+						vmOuts = modSnap.configOutputs(top)
+						entry.Architecture = architectureWithOutputs(modSnap.configModalities(top), vmOuts)
 					}
+				}
+				// A virtual model always resolves to a chat model (route_opts / systemone.go), so it never belongs in a
+				// decisions or audio listing even when its outputs are unknown.
+				if !keepForOutput(vmOuts, output) || (output != "" && output != store.OutputText) {
+					continue
 				}
 				data = append(data, entry)
 				seen[vm.Name] = true

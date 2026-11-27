@@ -1,0 +1,38 @@
+# /etc/systemd/system/forge-pool@.service
+# Specialist slot pool (ADR-0022, docs/adr/0022-specialist-slot-pool.md). Each instance is one specialist slot: %i is the slot name (s1..s6).
+# The daemon (internal/specialist) writes /var/lib/forge/pool/%i.env for the occupant it wants in that slot, then starts and stops the instance
+# over the shared D-Bus adapter. This repo's code never authors unit files at runtime, same convention as forge-compress@.service.
+#
+# Needs no new polkit grant: forge-pool@s1.service already matches polkit/50-forge.rules's ^forge-.*\.service$ glob.
+#
+# Restart=no ON PURPOSE, unlike the LLM slots (Restart=on-failure): the daemon supervises these (restart with backoff 10 s, 30 s, 2 min, then every
+# 5 min, a visible failed state, a Smith anomaly after 3 failures). Two restart mechanisms would double-restart and hide the failed state.
+# TimeoutStopSec=60 for every instance to start with (operator, 2026-11-02); raise it if a larger occupant needs longer.
+# The stop-timeout failure mode (kill instead of the host's default abort, which dumps core) is NOT set here: a distribution drop-in overrides a line in
+# this file. It is in forge-pool@.service.d/90-kill-on-timeout.conf, which also explains why.
+#
+# ONE-TIME MANUAL ROOT INSTALL (not something to script unattended against the live host). Nothing here has been run on ForgeHost:
+#   sudo cp systemd/forge-pool@.service /etc/systemd/system/forge-pool@.service
+#   sudo cp systemd/start-pool.sh /usr/local/lib/forge/start-pool.sh
+#   sudo chmod 755 /usr/local/lib/forge/start-pool.sh
+#   sudo chcon -t bin_t /usr/local/lib/forge/start-pool.sh
+#   sudo mkdir -p /var/lib/forge/pool && sudo chown testuser:testuser /var/lib/forge/pool && sudo chmod 700 /var/lib/forge/pool
+#   sudo systemctl daemon-reload
+# Do not enable the instances: the daemon starts the ones it wants. Ports 8100-8105 on 127.0.0.1 (kokoro uses its own fixed 8880).
+
+[Unit]
+Description=Forge specialist slot (%i)
+After=network.target
+
+[Service]
+Type=simple
+User=testuser
+Group=testuser
+WorkingDirectory=/opt/forge
+EnvironmentFile=/var/lib/forge/pool/%i.env
+ExecStart=/usr/local/lib/forge/start-pool.sh %i
+Restart=no
+TimeoutStopSec=60
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-pool-%i

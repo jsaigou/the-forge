@@ -19,10 +19,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
+	"os/user"
+	"time"
 
 	"github.com/jsaigou/the-forge/internal/config"
 	"github.com/jsaigou/the-forge/internal/i18n"
 	"github.com/jsaigou/the-forge/internal/router"
+	"github.com/jsaigou/the-forge/internal/settingsvc"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -80,6 +84,7 @@ func runConfigGet(args []string) error {
 func runConfigSet(args []string) error {
 	fs := flag.NewFlagSet("config set", flag.ContinueOnError)
 	dbPath := fs.String("db", "/var/lib/forge/forge.db", i18n.T("forge.cli.flag_db_path"))
+	force := fs.Bool("force", false, i18n.T("forge.config.flag_force"))
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -89,9 +94,10 @@ func runConfigSet(args []string) error {
 	}
 	key, value := rest[0], rest[1]
 
-	var probe any
-	if err := json.Unmarshal([]byte(value), &probe); err != nil {
-		return fmt.Errorf("%s: %w", i18n.T("forge.config.err_invalid_json"), err)
+	// One validation path for every writer of a setting by name (ADR-0020 F7): JSON syntax, then whether any reader
+	// uses the key, then the shape its reader expects.
+	if err := settingsvc.Check(key, []byte(value), *force); err != nil {
+		return fmt.Errorf("%s: %w", i18n.T("forge.config.err_rejected", key), err)
 	}
 
 	db, err := store.Open(*dbPath)
@@ -100,8 +106,17 @@ func runConfigSet(args []string) error {
 	}
 	defer db.Close()
 
-	if err := db.Settings().Set(context.Background(), key, []byte(value)); err != nil {
+	ctx := context.Background()
+	if err := db.Settings().Set(ctx, key, []byte(value)); err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("forge.config.err_set", key), err)
+	}
+	// The API handlers audit every settings write; this path used to leave no record. The value is not logged
+	// (a setting can hold a credential), only which key changed and how large the new value is.
+	detail, _ := json.Marshal(map[string]any{"bytes": len(value), "forced": *force && !settingsvc.Known(key)})
+	if err := db.Audit().Write(ctx, store.AuditEntry{
+		TS: time.Now(), Actor: cliActor(), Action: "settings_set", Target: key, Detail: string(detail),
+	}); err != nil {
+		return fmt.Errorf("%s: %w", i18n.T("forge.config.err_audit", key), err)
 	}
 	fmt.Printf("%s = %s\n", key, value)
 	fmt.Println(i18n.T("forge.config.set_note"))
@@ -163,4 +178,15 @@ func runConfigDump(args []string) error {
 	fmt.Println(i18n.T("forge.config.dump_router_note2"))
 	fmt.Println(string(routerBody))
 	return nil
+}
+
+// cliActor names who ran a CLI command for the audit log: "cli:<login>", falling back to $USER, then "unknown".
+func cliActor() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return "cli:" + u.Username
+	}
+	if n := os.Getenv("USER"); n != "" {
+		return "cli:" + n
+	}
+	return "cli:unknown"
 }

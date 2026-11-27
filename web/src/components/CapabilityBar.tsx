@@ -1,5 +1,6 @@
 import { BENCHMARK_REFS, normalizeScore } from "../lib/benchmarks";
 import type { ModelCapability } from "../lib/types";
+import { own } from "../lib/own";
 
 // CapabilityBar — one capability row (label, normalized bar, raw/normalized
 // tooltip). Extracted (Sprint B) from three identical private copies
@@ -23,7 +24,7 @@ import type { ModelCapability } from "../lib/types";
 export function CapabilityBar({ cap }: { cap: ModelCapability }) {
   const rawPct = Math.min(100, Math.max(0, cap.score * 100));
   const normPct = normalizeScore(cap.score, cap.benchmark) * 100;
-  const ref = BENCHMARK_REFS[cap.benchmark];
+  const ref = own(BENCHMARK_REFS, cap.benchmark);
   const tooltip = ref
     ? `${cap.benchmark}: ${rawPct.toFixed(1)}% raw · frontier ceiling ~${(ref.ceiling * 100).toFixed(0)}% (${ref.source}, ${ref.asOf}) · ${normPct.toFixed(0)}% relative-to-frontier`
     : `${cap.benchmark}: ${rawPct.toFixed(1)}% (no frontier reference available)`;

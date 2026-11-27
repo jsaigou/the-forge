@@ -172,8 +172,12 @@ func TestStartJobDownloadsVerifiesAndRegisters(t *testing.T) {
 	if cfg.Status != "unverified" || cfg.Visibility != "hidden" {
 		t.Errorf("Config = status=%q visibility=%q, want unverified/hidden", cfg.Status, cfg.Visibility)
 	}
-	if cfg.Parallel != 1 {
-		t.Errorf("Config.Parallel = %d, want 1 (the hard rule — --parallel N splits context)", cfg.Parallel)
+	hasParallel1 := false
+	for i := 0; i+1 < len(cfg.ExtraArgs); i++ {
+		hasParallel1 = hasParallel1 || (cfg.ExtraArgs[i] == "--parallel" && cfg.ExtraArgs[i+1] == "1")
+	}
+	if !hasParallel1 {
+		t.Errorf("ExtraArgs = %v, want --parallel 1 (the hard rule — --parallel N splits context)", cfg.ExtraArgs)
 	}
 	if cfg.NCtx != 8192 {
 		t.Errorf("Config.NCtx = %d, want 8192 (from the GGUF trained_ctx)", cfg.NCtx)
@@ -551,4 +555,40 @@ func TestConfigNameRepointsExistingArtifactInsteadOfRegisteringNewModel(t *testi
 		t.Errorf("found %d models named 'existing', want exactly 1 (repoint must not duplicate)", count)
 	}
 	_ = cfgID
+}
+
+// A new installation turns catalog.show_new_downloads on, so what it downloads can be loaded without a trip to the catalog editor.
+func TestShowNewDownloads(t *testing.T) {
+	payload := testGGUF(t, "testarch", 8192)
+	svc, db, _ := newTestService(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(payload) })
+	ctx := context.Background()
+	if got, err := svc.newDownloadVisibility(ctx); err != nil || got != "hidden" {
+		t.Errorf("unset: %q %v", got, err)
+	}
+	for _, tc := range []struct{ value, want string }{{"false", "hidden"}, {"true", "visible"}} {
+		if err := db.Settings().Set(ctx, SettingShowNewDownloads, []byte(tc.value)); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := svc.newDownloadVisibility(ctx); err != nil || got != tc.want {
+			t.Errorf("%s: %q %v, want %q", tc.value, got, err, tc.want)
+		}
+	}
+	if err := db.Settings().Set(ctx, SettingShowNewDownloads, []byte(`"yes"`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.newDownloadVisibility(ctx); err == nil {
+		t.Error("a value that is not true or false must be reported, not guessed")
+	}
+	if err := db.Settings().Set(ctx, SettingShowNewDownloads, []byte("true")); err != nil {
+		t.Fatal(err)
+	}
+	jobID, err := svc.StartJob(ctx, CreateJobRequest{Repo: "testorg/shown", Files: []PreflightFile{{Filename: "shown-Q4_K_M.gguf", SizeBytes: int64(len(payload))}}})
+	if err != nil {
+		t.Fatalf("StartJob: %v", err)
+	}
+	job := waitForState(t, svc, jobID, "done", 5*time.Second)
+	cfg, err := db.Catalog().GetConfig(ctx, job.CreatedConfigID)
+	if err != nil || cfg.Visibility != "visible" || cfg.Status != "unverified" {
+		t.Fatalf("config: visibility=%q status=%q %v", cfg.Visibility, cfg.Status, err)
+	}
 }

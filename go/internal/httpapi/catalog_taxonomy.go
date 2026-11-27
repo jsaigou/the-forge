@@ -123,7 +123,7 @@ func (s *Server) handleCatalogFamilyCreate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var b familyBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
@@ -156,7 +156,7 @@ func (s *Server) handleCatalogFamilyUpdate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var b familyBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
@@ -280,7 +280,7 @@ func (s *Server) handleCatalogGenealogyCreate(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var b genealogyBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
@@ -312,7 +312,7 @@ func (s *Server) handleCatalogGenealogyUpdate(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var b genealogyBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}

@@ -20,6 +20,18 @@ export interface SlotLoadingState {
   started_at: number | null;
 }
 
+// Per-slot operation state (ADR-0020 F4), additive on GET /api/v1/status. `message` and `detail` are the
+// daemon's diagnostics for a failed load (the reason, and the unit's last log lines) and are shown as sent.
+export interface SlotOpState {
+  state: "empty" | "loading" | "ready" | "failed" | "unloading";
+  mode: string | null;
+  message?: string;
+  detail?: string;
+  n_ctx?: number;
+  operation_id?: string;
+  finished_at?: number;
+}
+
 export interface ModeAvailable {
   label: string;
   description: string;
@@ -46,6 +58,8 @@ export interface Status {
   ports: Record<string, boolean>;
   slots: Record<string, string | null>;
   slot_labels: Record<string, string>;
+  // The slots in the order a new load takes them: a just-freed slot comes last. Absent from an older server.
+  load_order?: string[];
   modes_available: Record<string, ModeAvailable>;
   service_modes: Record<string, ServiceModeInfo>;
   ui: Record<string, unknown>;
@@ -60,6 +74,8 @@ export interface Status {
   };
   slot_loading: Record<string, SlotLoadingState>;
   slot_unloading: Record<string, SlotLoadingState>;
+  // Absent on a daemon older than ADR-0020 phase 2.
+  slot_states?: Record<string, SlotOpState>;
   // alerts is superseded by GET /api/v1/notifications (product/QA sprint,
   // 2026-07-29) — that endpoint persists + dedupes the same collector
   // signal with ack/dismiss, which this bare array never had. Kept on the
@@ -84,6 +100,8 @@ export interface Status {
   // after config.LoadFromStore on every fresh start. `keys` are the raw
   // settings-store keys touched (e.g. "infra.router"), not field names.
   restart_required?: RestartRequiredInfo;
+  // Live a0 request concurrency; absent when the gauge is not wired.
+  a0_in_flight?: A0InFlight;
 }
 
 export interface RestartRequiredInfo {
@@ -183,6 +201,22 @@ export interface MetricsHistoryResponse {
   points: MetricsHistoryPoint[];
 }
 
+// Host-memory partition behind memory_budget.free_bytes (go/internal/memledger). Host RAM is split into the OS floor, the declared always-on
+// specialists, a growth margin and the model budget; free_bytes is the smallest of the partition, MemAvailable-minus-floor and GTT bounds.
+export interface MemoryPartition {
+  host_total_bytes: number;
+  host_avail_bytes: number;
+  swap_total_bytes: number;
+  swap_used_bytes: number;
+  os_floor_bytes: number;
+  specialist_declared_bytes: number;
+  growth_margin_bytes: number;
+  model_budget_bytes: number;
+  model_used_bytes: number;
+  free_bytes: number;
+  binding: "partition" | "host" | "gtt";
+}
+
 export interface SchedulerStatus {
   slots: Record<string, string | null>;
   slot_labels: Record<string, string>;
@@ -196,7 +230,7 @@ export interface SchedulerStatus {
   // always-on services, compressor proxies — whoever holds GTT while no
   // slot does). Additive S2 attribution; slot units never appear here.
   unit_memory_bytes: Record<string, number>;
-  memory_budget: { total_bytes: number; used_bytes: number; free_bytes: number };
+  memory_budget: { total_bytes: number; used_bytes: number; free_bytes: number; partition?: MemoryPartition };
   queue: QueueTicket[];
 }
 
@@ -320,6 +354,10 @@ export interface ModelCard {
   // to deliver it — see ConfigCard.modalities for the narrowed, config-
   // scoped view.
   modalities: string[];
+  // ADR-0021: what the architecture can PRODUCE ("text" | "audio" | "decisions";
+  // "audio" = speech). Model-level, independent of any config; no forced "text"
+  // (a native decision model is exactly ["decisions"]).
+  output_modalities: string[];
   logo: string;
   logo_dark: string; // dark-theme variant (Phase 3); "" = same as logo
   hf_repo: string;
@@ -396,6 +434,12 @@ export interface ConfigCard {
   // rather than omitting silently.
   modalities: string[];
   modalities_unavailable: { id: string; reason: string }[];
+  // ADR-0021: what THIS config can produce — the config's override else the
+  // model's outputs, with "audio" dropped when no mmproj is linked (the speech
+  // codec lives there). output_modalities_unavailable names what the model can
+  // produce but this config can't, with a reason — render as a fixable gap.
+  output_modalities: string[];
+  output_modalities_unavailable: { id: string; reason: string }[];
   logo: string;
   logo_dark: string; // dark-theme variant (Phase 3); "" = same as logo
   hf_repo: string;
@@ -404,11 +448,18 @@ export interface ConfigCard {
 
   // Sprint B: the load recipe (config expanded view's "load options" list).
   // extra_args is the flat llama.cpp argv token array — the only source of
-  // truth for --parallel and friends (store's `parallel` column is a dead
-  // field, never read by the launcher — see llamaFlags.ts). backend is
-  // rocm|vulkan|vllm from the linked Build.
+  // truth for --parallel and friends (the old `parallel` column was dropped
+  // in migration 0096 — see llamaFlags.ts). backend is
+  // rocm|vulkan|vllm from the linked Build (the GPU path; the legacy value "vllm"
+  // is still read). engine_kind is the runtime that serves the config
+  // ("llamacpp" | "vllm" | "radiance" | ...), derived server-side from the
+  // engine row and backend (enginekind.Resolve); an unknown kind arrives raw.
+  // Use lib/runtime.ts, never `backend`, to decide per-runtime behaviour.
   extra_args: string[];
   backend: string;
+  engine_kind: string;
+  // A verified, visible config on the Radiance engine (derived server-side; information, not a ranking).
+  recommended: boolean;
   variant_name: string;
 
   // Variant quality.
@@ -550,7 +601,7 @@ export interface InfraService {
   unit: string | null; // still on the wire; FE may hide it
   port: number | null; // still on the wire; FE hides it (Sprint 0 §0.5)
   active: boolean;
-  kind: "systemd" | "service_mode";
+  kind: "systemd" | "service_mode" | "external";
   mode_key: string | null; // config.toml [modes.<mode_key>] key, when kind === "service_mode"
   detail: string | null; // Sprint 0 §0.5: short status line, e.g. "passthrough on"
   compressor_passthrough: boolean | null; // Sprint 0 §0.5: only meaningful on the A0/LLM-Proxy row
@@ -585,6 +636,18 @@ export interface InfraService {
 // wire). An empty string as a PUT value clears that service's override.
 export interface ServiceLinks {
   links: Record<string, string>;
+}
+
+// GET/PUT /api/v1/external-tools (infra.external_tools): link-only Console entries for tools that run elsewhere (voice-studio, talk-studio). They arrive
+// in /api/v1/infra-services as rows of kind "external" with the link in `url`. PUT replaces the whole list.
+export interface ExternalTool {
+  name: string;
+  url: string;
+  icon?: string;
+  description?: string;
+}
+export interface ExternalTools {
+  tools: ExternalTool[];
 }
 
 // RouterSettings mirrors go/internal/httpapi/shapes.go's
@@ -690,43 +753,100 @@ export type MetricsSettingsUpdate = Partial<MetricsSettings>;
 // frontend component renders them).
 export interface UISettings {}
 
-// VoiceSettings mirrors GET/PUT /api/v1/voice/settings (Tier 1 Sprint 2,
-// Voice & Speech settings, 2026-08-27) — the bare tts.engines shape, no
-// wrapper object (same unwrapped convention as MonitorSettings above).
-// Keyed to match go/internal/ttsctl.Engines exactly: customvoice/voicedesign/
-// base mirror tts.VoiceMode's three constants; kokoro gets its own field
-// since it isn't a VoiceMode at all (dual_engine routes to it by voice-id
-// namespace, never through the Qwen engine).
-export type VoiceEngineMode = "resident" | "available" | "disabled";
+// The four kinds of voice a speech engine can make. `kokoro` voices are advertised by the Kokoro engine; the other three are registry voices:
+// customvoice = built-in speakers, voicedesign = Describe, base = Clone. Same names as the daemon's speech modes (docs/speech-routing-plan.md).
+export type SpeechKind = "kokoro" | "customvoice" | "voicedesign" | "base";
 
-export interface VoiceEngineConfig {
+/** One speech engine as GET /api/v1/speech/defaults describes it. `state` is the slot state, or "idle" while it is not loaded. */
+export interface SpeechEngineInfo {
+  name: string;
+  label: string;
+  mode: SpeechKind;
+  policy: SpecialistPolicy;
   enabled: boolean;
-  mode: VoiceEngineMode;
-  /** Systemd unit to start/stop for resident mode. "" = daemon-unmanaged. */
-  unit: string;
-  /** Resident backend URL. "" = not configured (falls back to CLI/omitted). */
-  url: string;
+  stopped: boolean;
+  state: string;
 }
 
-export interface VoiceSettings {
-  kokoro: VoiceEngineConfig;
-  customvoice: VoiceEngineConfig;
-  voicedesign: VoiceEngineConfig;
-  base: VoiceEngineConfig;
+/** GET /api/v1/speech/defaults. `defaults` holds only the kinds that have a default; `engines` lists engine names per kind. */
+export interface SpeechDefaultsResponse {
+  defaults: Partial<Record<SpeechKind, string>>;
+  modes: SpeechKind[];
+  engines: Record<string, string[]>;
+  engine_info: SpeechEngineInfo[];
 }
 
-export type VoiceSettingsUpdate = VoiceSettings; // always a full replace, never a partial patch
+/** One capability of GET /api/v1/speech/readiness. `recipe` names what to register or install when the kind has no engine. */
+export interface SpeechCapability {
+  id: "preset" | "clone" | "design";
+  mode: SpeechKind;
+  state: "ready" | "starting" | "not_installed" | "files_missing" | "not_registered" | "no_slot" | "disabled" | "stopped" | "failed" | "unknown";
+  usable: boolean;
+  engine?: string;
+  recipe?: string;
+  code?: string;
+  action?: string;
+  detail?: string;
+}
 
-// VoiceListResponse mirrors GET /api/v1/voice/list (Sprint 1 UI papercuts,
-// 2026-08-27) — forge-tts's live voice registry, passed through with an
-// added `engine` field (one of the VoiceSettings keys) per entry so the
-// Settings UI can group by engine without re-deriving forge-tts's own Type
-// taxonomy ("design"/"clone" vs. the engine keys "voicedesign"/"base").
+export interface SpeechReadiness {
+  ready: boolean;
+  usable: boolean;
+  capabilities: SpeechCapability[];
+  front_door?: { state: "ok" | "unreachable" | "not_configured"; code?: string };
+}
+
+export interface SpeechFileProblem {
+  path: string;
+  problem: "missing" | "not_a_file" | "not_executable" | "wrong_size" | "unreadable";
+  detail?: string;
+}
+
+/** An engine the server knows how to set up, with what it has of it. */
+export interface SpeechRecipe {
+  id: string;
+  label: string;
+  mode: SpeechKind;
+  state: "registered" | "present" | "absent";
+  engine?: string;
+  memory_bytes: number;
+  download_bytes: number;
+  license: string;
+  problems?: SpeechFileProblem[];
+  installable: boolean;
+  /** For an engine that is absent and can be built: what to run on the server. */
+  install_command?: string;
+}
+
+export interface SpeechRecipesResponse {
+  root: string;
+  recipes: SpeechRecipe[];
+}
+
+export interface SpeechRegisterResult {
+  recipe: string;
+  engine: string;
+  created: boolean;
+  policy: SpecialistPolicy;
+  enabled: boolean;
+  slot_added?: string;
+  default_set: boolean;
+  front_door_set: boolean;
+  restart_required: boolean;
+}
+
+/** The draft the defaults card edits: every kind present, "" = no default. PUT replaces the whole object, so all four are always sent. */
+export type SpeechDefaultsDraft = Record<SpeechKind, string>;
+
+// VoiceListResponse mirrors GET /api/v1/voice/list: forge-tts's live voice registry, passed through with a `kind` per entry (which kind of engine
+// can render it) next to the `engine` forge-tts reports: the engine NAME the voice is bound to, or "" when it is not bound to one and the default
+// engine for its kind applies.
 export interface VoiceListEntry {
   id: string;
   name: string;
   type: string;
-  engine: keyof VoiceSettings | string;
+  kind: SpeechKind | string;
+  engine: string;
   language: string;
   tier?: string;
   builtin: boolean;
@@ -1311,6 +1431,8 @@ export interface ProfileResult {
   last_error_at?: number;
 }
 
+export type ProfileState = "never" | "current" | "outdated" | "unsupported";
+
 export interface ProfileListItem {
   mode: string;
   config_id: number;
@@ -1320,9 +1442,78 @@ export interface ProfileListItem {
   safe_memory_bytes: number;
   prefill_tps: number;
   decode_tps: number;
-  stale: boolean;
+  // never | current | outdated | unsupported; reason qualifies outdated (context | backend | launch) and unsupported (the engine).
+  state: ProfileState;
+  reason?: string;
+  stale: boolean; // state === "outdated"
   measured_at: number;
   depth_benchmarks: DepthBenchmark[];
+}
+
+export interface ProfileNightItem {
+  mode: string;
+  config_id: number;
+  state: ProfileState;
+  estimate_seconds: number;
+}
+
+export interface ProfileNightResult {
+  mode: string;
+  outcome: "profiled" | "failed" | "no_time" | "cancelled";
+  message?: string;
+  seconds?: number;
+}
+
+export interface ProfileNight {
+  state: {
+    status: "idle" | "armed" | "running";
+    starts_at?: number;
+    ends_at?: number;
+    armed_by?: string;
+    current?: string;
+    waiting?: "slot_busy" | "reservation" | "maintenance";
+    finished_at?: number;
+    results?: ProfileNightResult[];
+    restore_failed?: ProfileNightResult[];
+  };
+  window: { starts_at: number; ends_at: number };
+  queue: ProfileNightItem[];
+}
+
+export type RemovalKind = "model" | "config";
+
+export interface RemovalFile {
+  path: string;
+  bytes: number;
+  is_dir: boolean;
+  delete: boolean;
+  keep: "" | "shared" | "referenced" | "outside_models_dir" | "symlink" | "missing";
+  kept_by: string;
+}
+
+export interface RemovalPlan {
+  kind: RemovalKind;
+  id: number;
+  name: string;
+  model_id: number;
+  model_name: string;
+  configs: { id: number; name: string }[];
+  variants: number;
+  offerings: string[];
+  aliases: string[];
+  benchmarks: number;
+  notes: number;
+  last_config_of_model: boolean;
+  blockers: { code: string; config: string; name: string }[];
+  files: RemovalFile[];
+  token: string;
+}
+
+export interface RemovalResult {
+  ok: boolean;
+  files_deleted: string[];
+  bytes_freed: number;
+  file_errors: Record<string, string>;
 }
 
 export interface ProfilesListResponse {
@@ -1413,6 +1604,9 @@ export interface CatalogModel {
   key_features: string[];
   // Sprint J1 — subset of "text" | "vision" | "audio".
   modalities: string[];
+  // ADR-0021 — subset of "text" | "audio" | "decisions"; always present on
+  // read, empty/absent on write means ["text"].
+  output_modalities: string[];
   // Model-level decommission flag (0062): "visible" | "hidden". Hidden
   // models are excluded from the Models gallery but stay in Settings.
   visibility: string;
@@ -1450,6 +1644,8 @@ export interface CatalogArtifact {
 export interface CatalogEngine {
   id: number;
   name: string;
+  // engines.kind: the runtime this engine is ("llamacpp" | "vllm" | "radiance" | ...); see lib/runtime.ts.
+  kind: string;
 }
 
 export interface CatalogBuild {
@@ -1457,7 +1653,27 @@ export interface CatalogBuild {
   engine_id: number;
   name: string;
   binary_path: string;
+  backend: string;
   reason: string;
+  retired: boolean;
+  // Present only on the write responses: whether the binary takes --load-mode (ADR-0020 F8).
+  load_mode_supported?: boolean;
+}
+
+export interface BuildWritePayload {
+  engine_id: number;
+  name: string;
+  binary_path: string;
+  backend: string;
+  reason: string;
+}
+
+export interface ArtifactWritePayload {
+  variant_id: number;
+  quantization_id: number;
+  format_id: number;
+  file_path: string;
+  artifact_type: string;
 }
 
 // GET /api/v1/audit (Sprint C — audit_log's first read surface; the table
@@ -1487,7 +1703,6 @@ export interface CatalogConfig {
   build_id: number;
   mmproj_artifact_id: number;
   n_ctx: number;
-  parallel: number;
   extra_args: string[];
   status: string;
   visibility: string;
@@ -1502,6 +1717,10 @@ export interface CatalogConfig {
   // (field omitted by the server, via `omitzero`) = derive; an explicit
   // array (even []) = use verbatim.
   modalities?: string[];
+  // ADR-0021: per-config OUTPUT override, same derive/override semantics as
+  // `modalities`: omitted by the server in derive mode, an explicit array
+  // (never meaningfully empty — the server treats [] as ["text"]) = use verbatim.
+  output_modalities?: string[];
   // Capability-tier substitution (Sprint P1, 2026-09-13) — see
   // CatalogCapabilityTier's doc comment. 0 = no class, never substitutes or is
   // substituted for. capability_rank is meaningless when capability_tier_id is 0.
@@ -2849,3 +3068,92 @@ export interface ContextCreationResult {
   suspects_by_consumer?: { consumer: string; suspects: number; requests: number }[];
   ledger?: { observed: number; dropped: number; parse_failures: number; panics: number; flush_errors: number };
 }
+
+// ── Specialist slot pool (ADR-0022) ─────────────────────────────────────────
+export type SpecialistPolicy = "always_on" | "on_demand";
+/** The one setting every specialist has (Specialists tab, Models page, Voice & Speech): Disabled is `enabled=false`, the others are the policy. */
+export type SpecialistBehavior = SpecialistPolicy | "disabled";
+export type SpecialistFunction = "embeddings" | "speech" | "transcription" | "alignment" | "decisions" | "duplex";
+export type SpecialistState = "empty" | "starting" | "running" | "failed" | "stopped" | "stopping";
+
+export interface SpecialistSlot {
+  slot: string;
+  label: string;
+  port: number;
+  occupant: string;
+  policy: SpecialistPolicy | "";
+  functions: SpecialistFunction[];
+  state: SpecialistState;
+  error: string;
+  attempts: number;
+  next_retry_at: string;
+  idle_seconds: number;
+  memory_bytes: number;
+}
+
+export interface SpecialistOccupant {
+  name: string;
+  label: string;
+  kind: string;
+  params: Record<string, string>;
+  functions: SpecialistFunction[];
+  memory_bytes: number;
+  policy: SpecialistPolicy;
+  home_slot: string;
+  enabled: boolean;
+  notes: string;
+}
+
+export interface SpecialistKind {
+  name: string;
+  fixed_port: number;
+  params: Record<string, boolean>; // name -> required
+}
+
+export interface SpecialistsResponse {
+  slots: SpecialistSlot[];
+  occupants: SpecialistOccupant[];
+  defaults: Partial<Record<SpecialistFunction, string>>;
+  functions: SpecialistFunction[];
+  kinds: SpecialistKind[];
+}
+
+// ── a0 request concurrency ────────────────────────────────────────────────
+// GET /api/v1/usage/concurrency (operator) — docs/v5-api-contract.md, 2026-11-11.
+export interface ConcurrencyQuantiles {
+  p50: number;
+  p90: number;
+  p99: number;
+  max: number;
+}
+
+export interface ConcurrencyResponse {
+  model?: string;
+  consumer?: string;
+  since: number; // unix seconds
+  until: number; // unix seconds
+  requests: number;
+  excluded_untimed: number;
+  outcomes: Record<string, number>; // ok / error / aborted (a key can be absent)
+  in_flight: ConcurrencyQuantiles;
+  busy_seconds: number;
+  overlapped_requests: number;
+  overlap_fraction: number; // 0..1
+  prompt_tokens: ConcurrencyQuantiles;
+  completion_tokens: ConcurrencyQuantiles;
+  token_samples: number;
+}
+
+// `a0_in_flight` on GET /api/v1/status (absent when the gauge is not wired).
+export interface A0InFlightRow {
+  model: string;
+  consumer?: string; // empty/absent = the model total
+  in_flight: number;
+  peak: number;
+}
+
+export interface A0InFlight {
+  peak_window_s: number;
+  rows: A0InFlightRow[];
+}
+

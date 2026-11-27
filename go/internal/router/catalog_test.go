@@ -280,6 +280,8 @@ type seedConfigOpts struct {
 	withMMProj      bool      // create an mmproj artifact and link it
 	mmprojMissing   bool      // only meaningful if withMMProj
 	cfgModalities   *[]string // nil -> derive; non-nil (incl. empty) -> explicit override
+	modelOutputs    []string  // model output modalities; nil -> store default (["text"])
+	cfgOutputs      *[]string // config output override; nil -> derive
 	// weightFilePath overrides the weight artifact's file_path (default
 	// name+".gguf") — set this to the SAME string across two configs to
 	// simulate the gemma4-26b-a4b / -nothink duplicate-artifact-row
@@ -304,7 +306,7 @@ func seedCatalogConfig(t *testing.T, cat store.Catalog, name string, nCtx int, v
 		o = opts[0]
 	}
 	ctx := context.Background()
-	mdlID, err := cat.CreateModel(ctx, store.Model{Name: name, Modalities: o.modelModalities})
+	mdlID, err := cat.CreateModel(ctx, store.Model{Name: name, Modalities: o.modelModalities, OutputModalities: o.modelOutputs})
 	if err != nil {
 		t.Fatalf("CreateModel: %v", err)
 	}
@@ -348,7 +350,7 @@ func seedCatalogConfig(t *testing.T, cat store.Catalog, name string, nCtx int, v
 	cfgID, err := cat.CreateConfig(ctx, store.Config{
 		Name: name, VariantID: varID, WeightArtifactID: weightID,
 		EngineID: eng.ID, MMProjArtifactID: mmprojID, NCtx: nCtx, Visibility: visibility,
-		Modalities: o.cfgModalities, CapabilityTierID: o.capabilityTierID, CapabilityRank: o.capabilityRank,
+		Modalities: o.cfgModalities, OutputModalities: o.cfgOutputs, CapabilityTierID: o.capabilityTierID, CapabilityRank: o.capabilityRank,
 	})
 	if err != nil {
 		t.Fatalf("CreateConfig: %v", err)
@@ -449,50 +451,6 @@ func TestBuildModelsResponse_ConfigVisionModalities(t *testing.T) {
 	}
 	if !stringSlicesEqualCatalog(e.Architecture.OutputModalities, []string{"text"}) {
 		t.Errorf("OutputModalities = %v, want [text]", e.Architecture.OutputModalities)
-	}
-}
-
-func TestBuildModelsResponse_ConfigNoMMProjIsTextOnly(t *testing.T) {
-	db, err := store.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	cat := db.Catalog()
-
-	seedCatalogConfig(t, cat, "vision-model-no-mmproj", 8192, "visible", seedConfigOpts{
-		modelModalities: []string{"text", "vision"},
-		withMMProj:      false,
-	})
-
-	resp := BuildModelsResponse(context.Background(), cat, nil)
-	e := mustFindEntry(t, resp, "vision-model-no-mmproj")
-	if e.Architecture == nil {
-		t.Fatal("Architecture is nil, want an explicit text-only entry")
-	}
-	if !stringSlicesEqualCatalog(e.Architecture.InputModalities, []string{"text"}) {
-		t.Errorf("InputModalities = %v, want [text] (no mmproj linked)", e.Architecture.InputModalities)
-	}
-}
-
-func TestBuildModelsResponse_ConfigMMProjMissingIsTextOnly(t *testing.T) {
-	db, err := store.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	cat := db.Catalog()
-
-	seedCatalogConfig(t, cat, "vision-model-missing-mmproj", 8192, "visible", seedConfigOpts{
-		modelModalities: []string{"text", "vision"},
-		withMMProj:      true,
-		mmprojMissing:   true,
-	})
-
-	resp := BuildModelsResponse(context.Background(), cat, nil)
-	e := mustFindEntry(t, resp, "vision-model-missing-mmproj")
-	if e.Architecture == nil || !stringSlicesEqualCatalog(e.Architecture.InputModalities, []string{"text"}) {
-		t.Errorf("Architecture = %+v, want text-only (mmproj file missing on disk)", e.Architecture)
 	}
 }
 

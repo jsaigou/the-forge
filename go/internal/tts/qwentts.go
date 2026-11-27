@@ -5,35 +5,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type QwenTTS struct {
 	Backend    Backend
 	Registry   *Registry
-	Disabled   map[VoiceMode]bool // Sprint 2, Voice & Speech settings: modes the operator has turned off entirely
 	modelInfos []ModelInfo
 }
 
-func NewQwenTTS(backend Backend, reg *Registry, disabled map[VoiceMode]bool) *QwenTTS {
+func NewQwenTTS(backend Backend, reg *Registry) *QwenTTS {
 	return &QwenTTS{
 		Backend:  backend,
 		Registry: reg,
-		Disabled: disabled,
 		modelInfos: []ModelInfo{
 			{ID: "tts-1", Object: "model", OwnedBy: "forge"},
 		},
 	}
-}
-
-// checkEnabled refuses a mode the operator has disabled (Sprint 2) before
-// any work is done — a single gate shared by every entry point that ends up
-// resolving a SynthSpec.Mode (Speech via resolveSpec, GenerateSample via
-// resolveSpec, Preview which builds its own spec).
-func (q *QwenTTS) checkEnabled(mode VoiceMode) error {
-	if q.Disabled[mode] {
-		return fmt.Errorf("tts mode %q is disabled", mode)
-	}
-	return nil
 }
 
 func (q *QwenTTS) Health(ctx context.Context) (map[string]any, error) { return q.Backend.Health(ctx) }
@@ -57,6 +45,9 @@ func (q *QwenTTS) resolveSpec(req SpeechRequest) (SynthSpec, error) {
 		return spec, fmt.Errorf("unknown voice %q", req.Voice)
 	}
 	spec.ID = v.ID
+	spec.Engine = v.Engine
+	spec.VoiceLanguage = v.Language
+	spec.Style = req.styled
 
 	switch v.Type {
 	case "design":
@@ -84,9 +75,6 @@ func (q *QwenTTS) resolveSpec(req SpeechRequest) (SynthSpec, error) {
 	default:
 		return spec, fmt.Errorf("unsupported voice type %q", v.Type)
 	}
-	if err := q.checkEnabled(spec.Mode); err != nil {
-		return spec, err
-	}
 	return spec, nil
 }
 
@@ -96,6 +84,19 @@ func (q *QwenTTS) Speech(ctx context.Context, req SpeechRequest) (*SpeechResult,
 		return nil, err
 	}
 	return q.Backend.Speech(ctx, spec, req.Input)
+}
+
+// SpeechStream streams the premium engine's audio when its backend can; otherwise ErrNoStream and the caller answers the buffered way.
+func (q *QwenTTS) SpeechStream(ctx context.Context, req SpeechRequest) (*SpeechStream, error) {
+	sb, ok := q.Backend.(StreamBackend)
+	if !ok {
+		return nil, ErrNoStream
+	}
+	spec, err := q.resolveSpec(req)
+	if err != nil {
+		return nil, err
+	}
+	return sb.SpeechStream(ctx, spec, req.Input)
 }
 
 func (q *QwenTTS) Preview(ctx context.Context, p PreviewRequest) (*SpeechResult, error) {
@@ -124,9 +125,6 @@ func (q *QwenTTS) Preview(ctx context.Context, p PreviewRequest) (*SpeechResult,
 			return nil, fmt.Errorf("design preview requires an instruct string")
 		}
 		spec = SynthSpec{Mode: ModeVoiceDesign, Instruct: p.Instruct, Language: lang, Format: format}
-	}
-	if err := q.checkEnabled(spec.Mode); err != nil {
-		return nil, err
 	}
 	return q.Backend.Speech(ctx, spec, p.Text)
 }
@@ -165,4 +163,30 @@ func (q *QwenTTS) GetSample(ctx context.Context, id string) ([]byte, error) {
 }
 func (q *QwenTTS) SetSample(ctx context.Context, id string, wav []byte) error {
 	return q.Registry.SetSample(id, wav)
+}
+
+// CloneSpecs resolves every cloned voice in the registry to the spec a request for it would use, for warming the clone engine. A voice whose reference
+// cannot be read is skipped and named in the error, which is returned with the specs that did resolve.
+func (q *QwenTTS) CloneSpecs() ([]SynthSpec, error) {
+	voices, err := q.Registry.List()
+	if err != nil {
+		return nil, err
+	}
+	var specs []SynthSpec
+	var bad []string
+	for _, v := range voices {
+		if v.Type != "clone" || v.Clone == nil {
+			continue
+		}
+		spec, err := q.resolveSpec(SpeechRequest{Voice: v.ID, Language: v.Language})
+		if err != nil {
+			bad = append(bad, fmt.Sprintf("%s: %v", v.ID, err))
+			continue
+		}
+		specs = append(specs, spec)
+	}
+	if len(bad) > 0 {
+		return specs, fmt.Errorf("cloned voices that could not be read: %s", strings.Join(bad, "; "))
+	}
+	return specs, nil
 }

@@ -3,13 +3,16 @@
 package router
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
 
 	"github.com/jsaigou/the-forge/internal/authz"
+	"github.com/jsaigou/the-forge/internal/store"
 )
 
 // embeddings implements POST /v1/embeddings as a STATIC passthrough to the
@@ -24,9 +27,35 @@ import (
 // request body passes through byte-for-byte — a0 does not inspect, validate,
 // or rewrite embeddings requests (no wire_model concept here).
 func (s *Server) embeddings(w http.ResponseWriter, r *http.Request) {
-	if !s.checkAuth(r).ok {
+	auth := s.checkAuth(r)
+	if !auth.ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication required"})
 		return
+	}
+	flightFrom(r.Context()).setConsumer(s.consumerLabel(r, auth))
+
+	// The specialist pool first (ADR-0022): a member named by `model`, else the embeddings default. With no pool or no member this falls
+	// through to the static passthrough below, exactly as before.
+	if s.deps.Specialists != nil {
+		pctx := r.Context()
+		if timeout := s.cfg().requestTimeout(); timeout > 0 {
+			var cancel context.CancelFunc
+			pctx, cancel = context.WithTimeout(pctx, timeout)
+			defer cancel()
+		}
+		pctx = context.WithValue(pctx, clientAddrKey{},
+			authz.EffectiveRemoteAddr(parseRemoteAddr(r.RemoteAddr), r.Header.Get("X-Forwarded-For")).String())
+		r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		if s.viaPool(pctx, w, r, store.FnEmbeddings, peekModel(raw), "/v1/embeddings", raw, r.Header.Get("Content-Type")) {
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		r.ContentLength = int64(len(raw))
 	}
 
 	base := s.cfg().EmbeddingURL

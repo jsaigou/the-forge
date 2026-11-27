@@ -1,4 +1,5 @@
 {
+  "eyes_flash": "MY EYES !!!",
   "language": {
     "label": "Language",
     "hint": "Stored in this browser only — not synced across devices or other operators.",
@@ -89,21 +90,6 @@
     "next_noun": "Next {{noun}}",
     "go_to_card": "Go to {{name}}"
   },
-  "compressor_chips": {
-    "local_label": "Local · compressor saved ({{window}})",
-    "external_label": "External · compressor saved ({{window}})",
-    "local_title_none": "No cached or compressed local requests this window",
-    "local_title_tokens_dropped": "{{tokens}} tokens dropped by compression",
-    "local_title_tokens_cached": "{{tokens}} tokens not re-prefilled (cache hit, estimated)",
-    "local_title_time_suffix": ", avoided-prefill time estimated against real prefill TPS via {{sources}}",
-    "local_title_no_tps": "No model with cached/compressed requests this window had a real measured prefill TPS — time estimate unavailable",
-    "external_title_none": "No compressed external requests this window",
-    "external_title_priced": "{{tokens}} tokens compressed, priced at each provider's blended input rate in {{currency}}",
-    "external_title_unpriced": "{{tokens}} tokens compressed, but no priced offering to value them against this window",
-    "value_unmeasured": "unmeasured",
-    "value_no_data": "no data",
-    "value_unpriced": "unpriced"
-  },
   "routing_tree": {
     "layout_az": "A–Z",
     "layout_group": "Group",
@@ -112,12 +98,10 @@
     "model_fallback_name": "Model #{{id}}",
     "no_offerings": "No offerings configured — nothing to map yet.",
     "all_disabled": "All offerings are currently disabled.",
-    "legend_compressing": "compressing",
-    "legend_degraded": "compressing · degraded",
-    "legend_bypassed": "operator bypass",
-    "legend_autobypass": "auto-bypassed (compressor down)",
-    "legend_failing": "failing (compressor + upstream down)",
+    "legend_reachable": "provider reachable",
+    "legend_degraded": "provider degraded",
     "legend_unreachable": "provider unreachable",
+    "legend_unknown": "health not known",
     "legend_disabled": "disabled",
     "legend_note": "thicker = higher priority",
     "legend_note_hold_suffix": " · hold a provider node to enable/disable"
@@ -191,7 +175,9 @@
       "malformed_hint": "Saved as one malformed argv token (a flag and its value on the same line) — will be split into two well-formed tokens when this config is saved.",
       "remove_flag_aria": "Remove {{flag}}",
       "add_custom_flag": "+ Add custom flag",
-      "edit_as_raw_text": "Edit as raw text"
+      "edit_as_raw_text": "Edit as raw text",
+      "radiance_note": "Radiance has no defaults. Context length, sequences, KV dtype, speculation depth and any card-memory budget (--gpu-memory-mib, --gpu-headroom-mib) are per-model choices, and --max-num-seqs is required.",
+      "required_flag_missing": "{{flag}} is required for this runtime. Set a value, or the launch will be refused."
     }
   },
   "confirm_button": {
@@ -226,15 +212,15 @@
   "llama_flags": {
     "--parallel": {
       "label": "Parallel slots",
-      "why": "Splits the configured context N ways rather than multiplying it — n_ctx 131072 with --parallel 2 gives each request only 65536 usable tokens. Must be 1 for any mode meant to serve one long conversation at its full context; qwen25coder's --parallel 4 is the one deliberate exception (a short fast-worker mode for concurrent short requests). Found live 2026-07-23 on gemma4-e2b/nemotron-nano."
+      "why": "Splits the configured context N ways rather than multiplying it — n_ctx 131072 with --parallel 2 gives each request only 65536 usable tokens. Use 1 for a config meant to serve one long conversation at its full context; more only for short requests served concurrently."
     },
     "--ctx-checkpoints": {
       "label": "Context checkpoints",
-      "why": "Lets the engine restore a saved KV-cache checkpoint instead of reprocessing a whole conversation from scratch. Upstream llama.cpp has open, unresolved hang bugs in this exact code path as of 2026-07 (docs/investigations.md item 9) — most configs on this box use 16, swallow-32b/swallow-8b explicitly use 0 to avoid it."
+      "why": "Lets the engine restore a saved KV-cache checkpoint instead of reprocessing a whole conversation from scratch. Upstream llama.cpp has had hang bugs in this code path, so test a model before relying on it; 0 turns it off."
     },
     "--cache-type-k": {
       "label": "KV cache quant (K)",
-      "why": "Quantizes the attention key cache to shrink its memory footprint at some quality cost. Several configs already run this asymmetric with --cache-type-v (e.g. q4_0/q8_0) — a real, already-shipped tradeoff, not a hazard."
+      "why": "Quantizes the attention key cache to shrink its memory footprint at some quality cost. It can differ from --cache-type-v (e.g. q4_0/q8_0)."
     },
     "--cache-type-v": {
       "label": "KV cache quant (V)",
@@ -242,7 +228,7 @@
     },
     "--flash-attn": {
       "label": "Flash attention",
-      "why": "Enables the fused flash-attention kernel — faster and lower-memory attention on supported backends. Safe to leave on; it's on for nearly every config on this box."
+      "why": "Enables the fused flash-attention kernel — faster and lower-memory attention on supported backends. Normally safe to leave on."
     },
     "--jinja": {
       "label": "Jinja chat template",
@@ -262,11 +248,11 @@
     },
     "--threads": {
       "label": "CPU threads",
-      "why": "CPU thread count for the parts of inference that aren't offloaded to the GPU (tokenization, sampling, any CPU-resident layers). Rarely the bottleneck on this box's GPU-bound modes."
+      "why": "CPU thread count for the parts of inference that aren't offloaded to the GPU (tokenization, sampling, any CPU-resident layers). Rarely the bottleneck when the whole model is on the GPU."
     },
     "--swa-full": {
       "label": "Full sliding-window attention cache",
-      "why": "Keeps the full sliding-window attention cache resident rather than the reduced form — needed by some hybrid/recurrent architectures to reuse cache across turns. Interacts with --ctx-checkpoints; read docs/investigations.md item 9 before changing either on a model that sets this."
+      "why": "Keeps the full sliding-window attention cache resident rather than the reduced form — needed by some hybrid/recurrent architectures to reuse the cache across turns. It interacts with --ctx-checkpoints, so test the model before changing either."
     },
     "--spec-type": {
       "label": "Speculative decoding",
@@ -274,7 +260,7 @@
     },
     "--spec-draft-model": {
       "label": "Draft model",
-      "why": "Path to the smaller draft model used for speculative decoding, hand-typed (there is no catalog-linked draft-model artifact, unlike --mmproj). qwen36-mtp's config sets --spec-type draft-mtp with no draft-model path at all — worth checking if that's intentional before copying it as a template."
+      "why": "Path to the smaller draft model used for speculative decoding, typed by hand (unlike --mmproj there is no catalog-linked draft-model artifact). Some drafting methods need no separate file."
     },
     "--spec-draft-n-max": {
       "label": "Max draft tokens",
@@ -282,19 +268,19 @@
     },
     "--model-draft": {
       "label": "Draft model",
-      "why": "Short-flag form of the draft-model path (-md), used by this box's draft-dflash configs (laguna-s-21) where --spec-draft-model is used by draft-mtp configs instead — same role, different flag name depending on which speculative-decoding path the config uses. Hand-typed, not catalog-linked — see --spec-draft-model."
+      "why": "Short-flag form of the draft-model path (-md): the same role as --spec-draft-model, used by some speculative-decoding methods. Typed by hand, not catalog-linked."
     },
     "--n-gpu-layers": {
       "label": "GPU-offloaded layers",
-      "why": "Number of transformer layers placed on the GPU rather than the CPU. 999 (nemotron-puzzle's value) means \"all of them\" — llama.cpp clamps to the model's real layer count. Lowering this trades inference speed for less GPU memory pressure."
+      "why": "Number of transformer layers placed on the GPU rather than the CPU. 999 means all of them — llama.cpp clamps to the model's real layer count. Lowering it trades inference speed for less GPU memory pressure."
     },
     "--batch-size": {
       "label": "Prompt batch size",
-      "why": "Logical batch size for prompt (prefill) processing. Larger values process a prompt faster at the cost of a bigger compute buffer; several configs on this box pair it with --ubatch-size."
+      "why": "Logical batch size for prompt (prefill) processing. Larger values process a prompt faster at the cost of a bigger compute buffer; usually tuned together with --ubatch-size."
     },
     "--ubatch-size": {
       "label": "Physical batch size",
-      "why": "The physical (GPU-kernel) batch size within each logical batch (--batch-size). Must be ≤ --batch-size; tuned alongside it for this hardware's memory/throughput tradeoff."
+      "why": "The physical (GPU-kernel) batch size within each logical batch (--batch-size). Must be ≤ --batch-size; tune the two together for the hardware."
     },
     "--reasoning-budget": {
       "label": "Reasoning token budget",
@@ -302,23 +288,23 @@
     },
     "--chat-template-kwargs": {
       "label": "Chat template kwargs",
-      "why": "Extra JSON kwargs passed into the Jinja chat template — on this box, almost always {\"preserve_thinking\":true|false} (gemma4-mtp-nothink instead uses {\"enable_thinking\":false} — the kwarg name itself is template-dependent). The two lineages disagree: Qwen 3.6 (qwen36/qwen36-mtp) must preserve prior turns' reasoning, but Ornith (Qwen 3.5 lineage) must NOT — froggeric v21.3's default true made Ornith burn its whole budget inside <think> with empty content (see docs/pitfalls.md). Get this backwards and the symptom looks like a reasoning-budget or template bug, not a one-line kwarg."
+      "why": "Extra JSON arguments passed into the Jinja chat template, for example {\"preserve_thinking\":true}. The names and the right value depend on the model's template; a wrong value can look like a reasoning-budget or template bug (for example all thinking and an empty answer)."
     },
     "--chat-template-file": {
       "label": "Chat template override",
-      "why": "Replaces the GGUF's embedded chat template with an external file. Ornith needs this because its original embedded template unconditionally re-injects every prior turn's <think> block (a real broken-template bug, not the reprocessing issue tracked in docs/investigations.md item 9) — see docs/pitfalls.md."
+      "why": "Replaces the GGUF's embedded chat template with an external file, for a model whose embedded template is broken or missing something it needs."
     },
     "--repeat-penalty": {
       "label": "Repeat penalty",
-      "why": "Penalizes tokens the model has already generated recently. llama-server's default (1.0) is effectively off, which lets reasoning-heavy MoE models degenerate into text-repetition loops — a sampling issue, not a template one. Ornith sets 1.08 to fix a real incident (docs/pitfalls.md)."
+      "why": "Penalizes tokens the model has generated recently. llama-server's default (1.0) is effectively off, which lets some reasoning-heavy models fall into repetition loops — a sampling issue, not a template one."
     },
     "--dry-multiplier": {
       "label": "DRY sampler strength",
-      "why": "Strength of the DRY (Don't Repeat Yourself) repetition-breaking sampler, off by default (0.0). Paired with --repeat-penalty on Ornith to fix a real live text-repetition-loop incident (docs/pitfalls.md) — removing it on a model that needs it brings the loop back."
+      "why": "Strength of the DRY (Don't Repeat Yourself) repetition-breaking sampler, off by default (0.0). Often used with --repeat-penalty; removing it from a model that needs it can bring repetition loops back."
     },
     "--temp": {
       "label": "Sampling temperature",
-      "why": "Standard sampling temperature. Called out here only because it's part of the same curated sampler fix as --repeat-penalty/--dry-multiplier on Ornith (0.7) — changing it in isolation can reintroduce the repetition-loop symptom that fix addressed."
+      "why": "Standard sampling temperature. If a config pairs it with repetition controls, change them together: altering the temperature alone can bring repetition loops back."
     }
   },
   "vllm_flags": {
@@ -328,20 +314,20 @@
     },
     "--dtype": {
       "label": "Weight dtype",
-      "why": "The compute/storage dtype vLLM loads weights as (e.g. bfloat16). Distinct from a GGUF quantization scheme — vLLM configs on this box run unquantized bf16 weights."
+      "why": "The compute/storage dtype vLLM loads weights as (e.g. bfloat16). Distinct from a GGUF quantization scheme."
     },
     "--tensor-parallel-size": {
       "label": "Tensor-parallel size",
-      "why": "Number of GPUs to shard each layer's weights across. 1 on this box (single-GPU Strix Halo) — only meaningful if this host ever gains a second GPU."
+      "why": "Number of GPUs to shard each layer's weights across. 1 on a single-GPU machine."
     },
     "--gpu-memory-utilization": {
       "label": "GPU memory utilization",
-      "why": "Fraction of GPU memory vLLM is allowed to reserve for weights + KV cache (0.98 = nearly all of it). Lowering this leaves compressor for other processes but shrinks the usable KV cache."
+      "why": "Fraction of GPU memory vLLM is allowed to reserve for weights + KV cache (0.98 = nearly all of it). Lowering this leaves memory for other processes but shrinks the usable KV cache."
     }
   },
   "hazards": {
     "parallel": "Context is split, not multiplied: n_ctx {{nCtx}} with {{flag}} {{n}} gives each request only {{perSlot}} usable tokens. Verify this is intentional (a deliberate concurrent-short-request tradeoff) rather than a leftover default.",
-    "ctx_checkpoints": "Open upstream llama.cpp hang bugs exist in this exact code path (docs/investigations.md item 9). Verify this is intentional before relying on it for a long-running conversation."
+    "ctx_checkpoints": "Upstream llama.cpp has had hang bugs in this code path. Check that this is intentional before relying on it for a long-running conversation."
   },
   "provider_presets": {
     "data_residency_groups": {
@@ -526,5 +512,99 @@
   },
   "markdown": {
     "copy_code_title": "Copy code"
+  },
+  "card": {
+    "star_add": "Star this config",
+    "star_remove": "Unstar",
+    "recommended": "Recommended",
+    "recommended_title": "Verified on the Radiance runtime for this model."
+  },
+  "radiance_flags": {
+    "--tp": {
+      "label": "Tensor-parallel ranks",
+      "why": "How many GPU ranks Radiance shards the model across (--tp N). No default is stated, so set it per model to the number of cards the weights need."
+    },
+    "--max-num-seqs": {
+      "label": "Max sequences per step",
+      "why": "The largest number of sequences one step may carry. Required for Radiance: Forge refuses to launch without it. It bounds the KV cache together with the context length, so it is a per-model choice with no default."
+    },
+    "--max-model-len": {
+      "label": "Max context length",
+      "why": "Context bound in tokens. 0 means the model's training context, which is rarely what you want, so always set it explicitly per model. It reserves nothing per request; with the sequence count it sizes the KV pool."
+    },
+    "--kv-cache-dtype": {
+      "label": "KV cache dtype",
+      "why": "Storage type of the KV cache. Radiance 2.x takes bf16, i8 or fp8 and refuses the packed types; Radiance 1.x takes bf16, fp8, fp8_v4 or k6_v4, not i8. The smaller types cost fewer bytes per token of context at some loss of precision; choose per model."
+    },
+    "--num-speculative-tokens": {
+      "label": "Speculation depth",
+      "why": "Speculative window: how many draft tokens each step tries. 0 disables speculation. The default is auto (the drafter's own operating point), so set it explicitly per model. A model with no draft head is unaffected."
+    },
+    "--kernels": {
+      "label": "Kernel libraries",
+      "why": "The kernel libraries Radiance loads, separated by ',' or ':'; the first that matches wins and unnamed ones are not loaded. Without it every library on the search path is used (the host may set RADIANCE_KERNELS in the build's launch environment)."
+    }
+  },
+  "removal": {
+    "title_model": "Delete model {{name}}",
+    "title_config": "Delete config {{name}}",
+    "loading": "Checking…",
+    "blocked": "This can't be deleted yet:",
+    "blocker": {
+      "config_loaded": "{{config}} is loaded or loading. Unload it first.",
+      "pool_engine": "The engine pool entry {{name}} runs {{config}}. Remove it on the Engines page first.",
+      "scheduled_job": "The scheduled job {{name}} loads {{config}}.",
+      "reservation": "The reservation {{name}} holds {{config}}.",
+      "queued_load": "A load of {{config}} is queued (asked by {{name}}).",
+      "setting": "The setting {{name}} names {{config}}. Point it elsewhere first.",
+      "shared_artifact": "The config {{name}} uses one of these files."
+    },
+    "will_remove": "This removes:",
+    "the_model": "The model {{name}}, its variants and file records",
+    "configs_one": "{{count}} config:",
+    "configs_other": "{{count}} configs:",
+    "no_configs": "No local configs",
+    "aliases": "Model aliases: {{names}}",
+    "offerings": "Remote offerings from: {{names}}",
+    "benchmarks_one": "{{count}} recorded benchmark",
+    "benchmarks_other": "{{count}} recorded benchmarks",
+    "notes_one": "{{count}} note",
+    "notes_other": "{{count}} notes",
+    "history": "Favorites and measured profiles for these configs. Usage and load history stay.",
+    "also_model": "This is the last config of {{name}}. Delete the model too.",
+    "delete_files_one": "Also delete {{count}} file from disk ({{size}} GB)",
+    "delete_files_other": "Also delete {{count}} files from disk ({{size}} GB)",
+    "folder": "(folder)",
+    "kept_files": "Files that stay on disk:",
+    "keep": {
+      "shared": "also used by {{by}}",
+      "referenced": "referred to by {{by}}",
+      "outside_models_dir": "outside the models folder",
+      "symlink": "a link; left alone",
+      "missing": "already gone"
+    },
+    "warn_catalog": "The catalog entries can't be restored from here. Files stay on disk.",
+    "warn_files": "Deleted files can't be recovered. Getting them back means downloading them again.",
+    "cancel": "Cancel",
+    "removing": "Deleting…",
+    "confirm_model_one": "Delete model and {{count}} config",
+    "confirm_model_other": "Delete model and {{count}} configs",
+    "confirm_model_files_one": "Delete model, {{count}} config and files",
+    "confirm_model_files_other": "Delete model, {{count}} configs and files",
+    "confirm_config": "Delete config",
+    "confirm_bare_model": "Delete model",
+    "confirm_bare_model_files": "Delete model and files",
+    "confirm_config_files": "Delete config and files",
+    "partial_title": "Deleted, with files left over",
+    "partial_body": "The catalog entries are gone, but these files could not be deleted. Remove them on the server.",
+    "close": "Close",
+    "open_model": "Delete model…",
+    "open_config": "Delete config…"
+  },
+  "offer": {
+    "chip": "Remote offer",
+    "remote_only": "Remote offer",
+    "also": "+ Remote offer",
+    "providers": "Offered by {{names}}"
   }
 }

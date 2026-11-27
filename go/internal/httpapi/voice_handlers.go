@@ -2,14 +2,9 @@
 
 package httpapi
 
-// voice_handlers.go — Tier 1 Sprint 2, Voice & Speech settings (2026-08-27).
-// GET/PUT /api/v1/voice/settings against the single `tts.engines` settings
-// key (go/internal/ttsctl.Engines). Unlike infra_handlers.go's merge-partial
-// pattern, this always reads/writes the whole Engines object — the
-// frontend's useSettingsGroup convention already submits everything it
-// displayed on every save (same whole-object-replace-when-present rule
-// smith_chat.go's settings groups use), so there's no partial-field-loss
-// risk to guard against here.
+// voice_handlers.go — Voice & Speech: GET /api/v1/voice/list, the saved voices with the kind and engine of each. Settings for the engines
+// themselves no longer live here (docs/speech-routing-plan.md section 4.5): a speech engine is a pool occupant (behavior on
+// /api/v1/specialists/occupants/{name}/behavior) and the default engine per kind is the tts.defaults setting (/api/v1/speech/defaults).
 
 import (
 	"context"
@@ -17,39 +12,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
-
-	"github.com/jsaigou/the-forge/internal/ttsctl"
 )
 
-const settingTTSEngines = "tts.engines"
-
-// GET/PUT both use the bare ttsctl.Engines shape at the top level — no
-// wrapper object — matching monitorSettings/metricsSettings' existing
-// unwrapped convention (api.ts's `get<MonitorSettings>(...)`).
-func (s *Server) handleVoiceSettingsGet(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.readVoiceEngines(r))
-}
-
-// readVoiceEngines reads tts.engines, falling back to
-// ttsctl.DefaultEngines() for any field the stored JSON doesn't set
-// (including "never set at all").
-func (s *Server) readVoiceEngines(r *http.Request) ttsctl.Engines {
-	cfg := ttsctl.DefaultEngines()
-	if raw := s.getRawSetting(r.Context(), settingTTSEngines); len(raw) > 0 {
-		_ = json.Unmarshal(raw, &cfg)
-	}
-	return cfg
-}
-
-// voiceTypeToEngine maps forge-tts's per-voice Type (set when a voice is
-// registered — go/internal/tts/tts.go's VoiceEntry) onto the engine key this
-// repo's tts.engines settings and VOICE_FIELDS use. "clone"/"design" don't
-// share a name with their engine ("base"/"voicedesign") on the wire, so this
+// voiceTypeToKind maps forge-tts's per-voice Type (set when a voice is registered — go/internal/tts/tts.go's VoiceEntry) onto the kind of speech
+// (the speech-engine kinds: kokoro, customvoice, voicedesign, base). "clone"/"design" don't share a name with their kind on the wire, so this
 // mapping can't just be the identity function.
-var voiceTypeToEngine = map[string]string{
+var voiceTypeToKind = map[string]string{
 	"kokoro":      "kokoro",
 	"customvoice": "customvoice",
 	"design":      "voicedesign",
@@ -57,9 +27,13 @@ var voiceTypeToEngine = map[string]string{
 }
 
 type voiceListEntry struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Type       string `json:"type"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	// Kind is the kind of speech engine that can render the voice (kokoro, customvoice, voicedesign or base), derived from Type.
+	Kind string `json:"kind"`
+	// Engine is the name of the speech engine the voice is bound to, as forge-tts reports it. Empty when the voice has none, which means the
+	// default engine for its kind applies.
 	Engine     string `json:"engine"`
 	Language   string `json:"language"`
 	Tier       string `json:"tier,omitempty"`
@@ -68,16 +42,13 @@ type voiceListEntry struct {
 	SampleText string `json:"sample_text,omitempty"`
 }
 
-// handleVoiceList — GET /api/v1/voice/list (operator, read-only). Fetches
-// forge-tts's live voice registry through the same router.tts_url setting
-// the a0 passthrough (GET /v1/voices on the router) already uses, and adds
-// an `engine` field per voice (see voiceTypeToEngine) so the Settings UI can
-// group the flat list by engine without duplicating forge-tts's Type
-// taxonomy on the frontend.
+// handleVoiceList — GET /api/v1/voice/list (operator, read-only). Fetches forge-tts's live voice registry through the same router.tts_url
+// setting the a0 passthrough (GET /v1/voices on the router) already uses, and adds a `kind` per voice (see voiceTypeToKind) so the Settings UI
+// can group the flat list by kind without duplicating forge-tts's Type taxonomy on the frontend. `engine` passes through as forge-tts reports it.
 func (s *Server) handleVoiceList(w http.ResponseWriter, r *http.Request) {
 	ttsURL := s.resolvedRouterConfig(r.Context()).TTSURL
 	if ttsURL == "" {
-		writeError(w, http.StatusServiceUnavailable, "TTS not configured (set router.tts_url under Settings > Routing)")
+		writeErrorCode(w, http.StatusServiceUnavailable, "tts_not_configured", nil, "TTS not configured (set router.tts_url under Settings > Routing)")
 		return
 	}
 
@@ -92,7 +63,7 @@ func (s *Server) handleVoiceList(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("forge-tts unreachable: %v", err))
+		writeErrorCode(w, http.StatusBadGateway, "tts_upstream_failed", map[string]any{"detail": fmt.Sprintf("forge-tts unreachable: %v", err)}, fmt.Sprintf("forge-tts unreachable: %v", err))
 		return
 	}
 	defer resp.Body.Close()
@@ -102,7 +73,7 @@ func (s *Server) handleVoiceList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if resp.StatusCode != http.StatusOK {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("forge-tts returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
+		writeErrorCode(w, http.StatusBadGateway, "tts_upstream_failed", map[string]any{"detail": fmt.Sprintf("forge-tts returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))}, fmt.Sprintf("forge-tts returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
 		return
 	}
 
@@ -110,103 +81,15 @@ func (s *Server) handleVoiceList(w http.ResponseWriter, r *http.Request) {
 		Voices []voiceListEntry `json:"voices"`
 	}
 	if err := json.Unmarshal(body, &upstreamResp); err != nil {
-		writeError(w, http.StatusBadGateway, "forge-tts returned an unexpected voice-list shape")
+		writeErrorCode(w, http.StatusBadGateway, "tts_upstream_failed", map[string]any{"detail": "forge-tts returned an unexpected voice-list shape"}, "forge-tts returned an unexpected voice-list shape")
 		return
 	}
 	for i := range upstreamResp.Voices {
-		if eng, ok := voiceTypeToEngine[upstreamResp.Voices[i].Type]; ok {
-			upstreamResp.Voices[i].Engine = eng
+		if kind, ok := voiceTypeToKind[upstreamResp.Voices[i].Type]; ok {
+			upstreamResp.Voices[i].Kind = kind
 		} else {
-			upstreamResp.Voices[i].Engine = upstreamResp.Voices[i].Type
+			upstreamResp.Voices[i].Kind = upstreamResp.Voices[i].Type
 		}
 	}
 	writeJSON(w, http.StatusOK, upstreamResp)
-}
-
-func validateEngineMode(mode ttsctl.EngineMode, field string, fields, codes map[string]string) {
-	switch mode {
-	case ttsctl.ModeResident, ttsctl.ModeAvailable, ttsctl.ModeDisabled:
-	default:
-		fields[field] = "must be one of resident, available, disabled"
-		codes[field] = "must_be_one_of"
-	}
-}
-
-func validateEngineUnit(unit, field string, fields map[string]string) {
-	if unit != "" && !serviceRE.MatchString(unit) {
-		fields[field] = "must be a lowercase systemd-unit-shaped name (a-z0-9_- , starting with a letter), or empty"
-	}
-}
-
-func validateEngineURL(rawURL, field string, fields map[string]string) {
-	if rawURL == "" {
-		return
-	}
-	u, err := url.Parse(rawURL)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		fields[field] = "must be an absolute http(s) URL, or empty"
-	}
-}
-
-// handleVoiceSettingsPut validates the entire submitted Engines object
-// before writing any of it, then — if a Provisioner is wired — applies it
-// live (env file + start/stop the configured units + restart forge-tts)
-// synchronously, mirroring how compressor_handlers.go calls
-// CompressorProvisioner.Provision directly rather than backgrounding it: the
-// operator submitting this form wants to know it actually took effect, not
-// a fire-and-forget 200.
-func (s *Server) handleVoiceSettingsPut(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Settings == nil {
-		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "settings store"}, "settings store not wired")
-		return
-	}
-	var body ttsctl.Engines
-	if fields := decodeJSONBody(r, &body); fields != nil {
-		writeValidationError(w, fields)
-		return
-	}
-
-	fields := map[string]string{}
-	codes := map[string]string{}
-	for name, eng := range map[string]ttsctl.EngineConfig{
-		"kokoro": body.Kokoro, "customvoice": body.CustomVoice,
-		"voicedesign": body.VoiceDesign, "base": body.Base,
-	} {
-		validateEngineMode(eng.Mode, name+".mode", fields, codes)
-		validateEngineUnit(eng.Unit, name+".unit", fields)
-		validateEngineURL(eng.URL, name+".url", fields)
-	}
-	if len(fields) > 0 {
-		writeValidationErrorCodes(w, fields, codes)
-		return
-	}
-
-	raw, err := json.Marshal(body)
-	if err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	if err := s.deps.Settings.Set(r.Context(), settingTTSEngines, raw); err != nil {
-		writeInternalError(w, err)
-		return
-	}
-	s.audit(r, identity(r).Name, "voice_settings_update", "tts.engines", "")
-
-	if s.deps.TTSProvisioner != nil {
-		if err := s.deps.TTSProvisioner.Apply(r.Context(), body); err != nil {
-			// The setting is already persisted (source of truth for the next
-			// successful apply/restart) — surface the live-apply failure
-			// distinctly rather than a bare 500, so an operator knows the
-			// setting saved but didn't (yet) take effect on the host.
-			writeJSON(w, http.StatusOK, map[string]any{
-				"kokoro":      body.Kokoro,
-				"customvoice": body.CustomVoice,
-				"voicedesign": body.VoiceDesign,
-				"base":        body.Base,
-				"warning":     "settings saved, but applying them live failed: " + err.Error(),
-			})
-			return
-		}
-	}
-	writeJSON(w, http.StatusOK, body)
 }

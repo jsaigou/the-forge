@@ -4,6 +4,7 @@ import { useSession } from "../lib/session";
 import { Icon } from "./Icon";
 import { formatGB } from "../lib/format";
 import type { InfraService } from "../lib/types";
+import { safeHref } from "../lib/safeHref";
 
 // §0.5 / FE-1a: trimmed rows — name + active dot only. Unit/port noise is
 // dropped (still on the wire, just not rendered). The A0/LLM-Proxy row
@@ -131,10 +132,11 @@ export function ServiceChip({ s, addon = false }: { s: InfraService; addon?: boo
           links, infra.service_links), preferred whenever present. */}
       {toggleable && (s.url != null || s.port != null) && (
         <a
-          href={s.url ?? `http://${window.location.hostname}:${s.port}`}
+          href={safeHref(s.url) ?? `http://${window.location.hostname}:${s.port}`}
           target="_blank"
           rel="noreferrer"
           title={t("services.open_in_new_window_title", { name: s.name })}
+          aria-label={t("services.open_in_new_window_title", { name: s.name })}
           style={{ marginLeft: "auto", color: "var(--text-mute)", fontSize: 11, flex: "0 0 auto", textDecoration: "none" }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -146,6 +148,7 @@ export function ServiceChip({ s, addon = false }: { s: InfraService; addon?: boo
           className="icon-btn action"
           style={{ width: 20, height: 20, fontSize: 10, flex: "0 0 auto", ...(s.port == null ? { marginLeft: "auto" } : {}) }}
           title={s.active ? t("services.stop") : t("services.start")}
+          aria-label={s.active ? t("services.stop") : t("services.start")}
           disabled={busy}
           onClick={() => {
             if (s.mode_key) serviceModeToggle.mutate({ name: s.mode_key, action: s.active ? "stop" : "start" });
@@ -157,6 +160,27 @@ export function ServiceChip({ s, addon = false }: { s: InfraService; addon?: boo
         </button>
       )}
     </div>
+  );
+}
+
+// ExternalToolChip is a link-only chip (infra.external_tools): a tool that runs elsewhere, like voice-studio or talk-studio on Core. It has an icon, a name
+// and a link, and nothing else: no status dot, because this console is not checking whether the tool is up, and no start or stop.
+export function ExternalToolChip({ s }: { s: InfraService }) {
+  const { t } = useTranslation("console");
+  if (!s.url) return null;
+  return (
+    <a
+      className="cchip cchip-provider cchip-link"
+      href={safeHref(s.url)}
+      target="_blank"
+      rel="noreferrer noopener"
+      title={s.detail ?? t("services.open_in_new_window_title", { name: s.name })}
+      aria-label={t("services.open_in_new_window_title", { name: s.name })}
+    >
+      {s.logo && <Icon slug={s.logo} name={s.name} sm />}
+      <div className="nm">{s.name}</div>
+      <span className="ext-arrow" aria-hidden="true">↗</span>
+    </a>
   );
 }
 
@@ -176,7 +200,7 @@ export function ServicesBar({ services }: { services: InfraService[] | undefined
   const withAligner = hasAligner ? services : [...services, ALIGNER_STUB];
 
   const compressorRows = withAligner.filter((s) => s.name.startsWith(COMPRESSOR_PREFIX));
-  const rows = withAligner.filter((s) => !s.name.startsWith(COMPRESSOR_PREFIX) && s.name !== "ComfyUI");
+  const rows = withAligner.filter((s) => !s.name.startsWith(COMPRESSOR_PREFIX) && s.name !== "ComfyUI" && s.kind !== "external");
 
   return (
     <div className="services">

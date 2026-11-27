@@ -104,6 +104,14 @@ type SchedBudget struct {
 	TotalBytes int64 `json:"total_bytes"`
 	UsedBytes  int64 `json:"used_bytes"`
 	FreeBytes  int64 `json:"free_bytes"`
+
+	Partition *struct {
+		ModelBudgetBytes int64  `json:"model_budget_bytes"`
+		ModelUsedBytes   int64  `json:"model_used_bytes"`
+		FreeBytes        int64  `json:"free_bytes"`
+		SwapUsedBytes    int64  `json:"swap_used_bytes"`
+		Binding          string `json:"binding"`
+	} `json:"partition,omitempty"`
 }
 
 // QueueTicket is one scheduler queue entry.
@@ -138,11 +146,26 @@ type UnloadRequest struct {
 	Slot string `json:"slot"`
 }
 
-// LifecycleResult is the common {success,message,n_ctx} reply.
+// LifecycleResult is the common {success,message,n_ctx} reply. Operation is present on load and single-slot
+// unload from a daemon that tracks them (ADR-0020); an older daemon omits it.
 type LifecycleResult struct {
-	Success bool   `json:"success"`
+	Success   bool       `json:"success"`
+	Message   string     `json:"message"`
+	NCtx      int        `json:"n_ctx,omitempty"`
+	Operation *Operation `json:"operation,omitempty"`
+}
+
+// Operation is one background load or unload (GET /api/v1/operations/{id}). State is running, succeeded or
+// failed; Detail is the failed unit's own last log lines when the daemon had them.
+type Operation struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Slot    string `json:"slot"`
+	Config  string `json:"config"`
+	State   string `json:"state"`
 	Message string `json:"message"`
-	NCtx    int    `json:"n_ctx,omitempty"`
+	Detail  string `json:"detail"`
+	NCtx    int    `json:"n_ctx"`
 }
 
 // InfraServices is GET /api/v1/infra-services.

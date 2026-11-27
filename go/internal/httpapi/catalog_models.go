@@ -34,6 +34,9 @@ type modelJSON struct {
 	// a subset of text/vision/audio. See store.Model.Modalities's doc
 	// comment and registry.resolveModalities for how a Config narrows this.
 	Modalities []string `json:"modalities"`
+	// OutputModalities (ADR-0021) is what the model can produce: text, audio (speech) and/or decisions.
+	// An empty or absent value means ["text"] (every model before migration 0098 produced text).
+	OutputModalities []string `json:"output_modalities"`
 	// Visibility is visible (Models gallery) or hidden (Settings only) —
 	// model-level decommission flag (0062). Default "visible".
 	Visibility string `json:"visibility"`
@@ -45,7 +48,7 @@ func modelToJSON(m store.Model) modelJSON {
 		ParameterCount: m.ParameterCount, Description: m.Description, Creator: m.Creator,
 		LicenseName: m.LicenseName, LicenseURL: m.LicenseURL, HFRepo: m.HFRepo,
 		Logo: m.Logo, LogoDark: m.LogoDark, KeyFeatures: m.KeyFeatures, Modalities: m.Modalities,
-		Visibility: m.Visibility,
+		OutputModalities: m.OutputModalities, Visibility: m.Visibility,
 	}
 }
 
@@ -101,7 +104,7 @@ func (s *Server) handleCatalogModelCreate(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var b modelBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
@@ -116,7 +119,7 @@ func (s *Server) handleCatalogModelCreate(w http.ResponseWriter, r *http.Request
 		ParameterCount: b.ParameterCount, Description: b.Description, Creator: b.Creator,
 		LicenseName: b.LicenseName, LicenseURL: b.LicenseURL, HFRepo: b.HFRepo,
 		Logo: b.Logo, LogoDark: b.LogoDark, KeyFeatures: b.KeyFeatures, Modalities: b.Modalities,
-		Visibility: b.Visibility,
+		OutputModalities: b.OutputModalities, Visibility: b.Visibility,
 	})
 	if err != nil {
 		writeInternalError(w, err)
@@ -140,7 +143,7 @@ func (s *Server) handleCatalogModelUpdate(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var b modelBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
@@ -155,7 +158,7 @@ func (s *Server) handleCatalogModelUpdate(w http.ResponseWriter, r *http.Request
 		ParameterCount: b.ParameterCount, Description: b.Description, Creator: b.Creator,
 		LicenseName: b.LicenseName, LicenseURL: b.LicenseURL, HFRepo: b.HFRepo,
 		Logo: b.Logo, LogoDark: b.LogoDark, KeyFeatures: b.KeyFeatures, Modalities: b.Modalities,
-		Visibility: b.Visibility,
+		OutputModalities: b.OutputModalities, Visibility: b.Visibility,
 	})
 	if err != nil {
 		if isNotFound(err) {
@@ -204,11 +207,11 @@ func (s *Server) handleCatalogModelValidate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var b modelBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
-	if fields := s.validateModel(r.Context(), b, 0); len(fields) > 0 {
+	if fields := s.validateModel(r.Context(), b, validateExcludeID(r)); len(fields) > 0 {
 		writeValidationError(w, fields)
 		return
 	}
@@ -233,6 +236,8 @@ type modelBody struct {
 	// Modalities (Sprint J1) is a subset of text/vision/audio -- validated
 	// against that enum in validateModel. See modelJSON.Modalities.
 	Modalities []string `json:"modalities"`
+	// OutputModalities is validated against text/audio/decisions in validateModel. See modelJSON.OutputModalities.
+	OutputModalities []string `json:"output_modalities"`
 	// Visibility is visible (Models gallery) or hidden (Settings only).
 	// Empty on create means "visible". Validated in validateModel.
 	Visibility string `json:"visibility"`
@@ -251,8 +256,11 @@ func (s *Server) validateModel(ctx context.Context, b modelBody, excludeID int64
 	} else if len(b.Name) > 256 {
 		fields["name"] = "must be ≤256 characters"
 	}
-	if msg := validateModalityList(b.Modalities); msg != "" {
+	if msg := store.ValidateModalityList(b.Modalities); msg != "" {
 		fields["modalities"] = msg
+	}
+	if msg := store.ValidateOutputModalityList(b.OutputModalities); msg != "" {
+		fields["output_modalities"] = msg
 	}
 	switch b.Visibility {
 	case "", "visible", "hidden":

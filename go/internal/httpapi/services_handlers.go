@@ -84,32 +84,44 @@ func (s *Server) handleInfraServices(w http.ResponseWriter, r *http.Request) {
 	// STT + Embedding (always-on systemd services, declared via [ports]).
 	if cfg != nil {
 		if p, ok := cfg.Ports["stt"]; ok {
-			services = append(services, infraService{
+			row := infraService{
 				Name: "STT", Unit: ptrString("forge-stt"),
 				Port: &p, Active: unitActive(snap, "forge-stt"),
 				Kind: "systemd", ModeKey: nil,
 				Logo: serviceVendorLogo(cfg, "STT"),
-			})
+			}
+			if b, ok := s.poolBackingFor(r.Context(), fixedInfraFunction["stt"]); ok {
+				row = poolInfraRow("STT", row.Logo, b)
+			}
+			services = append(services, row)
 		}
 		if p, ok := cfg.Ports["embedding"]; ok {
-			services = append(services, infraService{
+			row := infraService{
 				Name: "Embedding", Unit: ptrString("forge-embedding"),
 				Port: &p, Active: unitActive(snap, "forge-embedding"),
 				Kind: "systemd", ModeKey: nil,
 				Logo: serviceVendorLogo(cfg, "Embedding"),
-			})
+			}
+			if b, ok := s.poolBackingFor(r.Context(), fixedInfraFunction["embedding"]); ok {
+				row = poolInfraRow("Embedding", row.Logo, b)
+			}
+			services = append(services, row)
 		}
 		// Aligner (Qwen3 aligner, pre-existing on ForgeHost, unrelated to slots —
 		// port 8086). Previously a
 		// frontend-hardcoded stub (ServicesBar.tsx's ALIGNER_STUB) because no
 		// backend row ever existed for it.
 		if p, ok := cfg.Ports["aligner"]; ok {
-			services = append(services, infraService{
+			row := infraService{
 				Name: "Aligner", Unit: ptrString("forge-aligner"),
 				Port: &p, Active: unitActive(snap, "forge-aligner"),
 				Kind: "systemd", ModeKey: nil,
 				Logo: serviceVendorLogo(cfg, "Aligner"),
-			})
+			}
+			if b, ok := s.poolBackingFor(r.Context(), fixedInfraFunction["aligner"]); ok {
+				row = poolInfraRow("Aligner", row.Logo, b)
+			}
+			services = append(services, row)
 		}
 	}
 
@@ -176,6 +188,20 @@ func (s *Server) handleInfraServices(w http.ResponseWriter, r *http.Request) {
 				Logo:    logo,
 			})
 		}
+	}
+
+	// External tools (infra.external_tools): link-only rows for tools that run elsewhere. They have no unit, port or state here, so Active is false and
+	// the Console draws them as plain links, not as something that could be started or stopped.
+	for _, tool := range s.resolvedExternalTools(r.Context()) {
+		link := tool.URL
+		row := infraService{Name: tool.Name, Kind: "external", URL: &link}
+		if tool.Icon != "" {
+			row.Logo = ptrString(tool.Icon)
+		}
+		if tool.Description != "" {
+			row.Detail = ptrString(tool.Description)
+		}
+		services = append(services, row)
 	}
 
 	// Apply any operator-set ↗ link override (infra.service_links), keyed by

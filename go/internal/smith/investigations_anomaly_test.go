@@ -160,3 +160,18 @@ func TestRelevantWarnCritCheckIDs_ManualTriggerFallsBackToFullSet(t *testing.T) 
 		t.Errorf("relevantWarnCritCheckIDs for a manual trigger = %v, want the full unnarrowed set of 2", got)
 	}
 }
+
+// An anomaly with a curated check list whose sweep recorded no warn on any of those checks must still check them: an empty set used to read as
+// "all clean" and proposed closure without ever looking (SPECIALIST_FAILED investigation #13 opened before the specialist_pool check existed).
+func TestRelevantWarnCritCheckIDs_CuratedAnomalyWithNoRecordedRelevantWarnStillChecksTheCuratedSet(t *testing.T) {
+	findings := []StoredFinding{{CheckID: "brain_resolvable", Severity: SeverityWarn}}
+	got := relevantWarnCritCheckIDs("anomaly:SPECIALIST_FAILED", findings)
+	if len(got) != 1 || got[0] != "specialist_pool" {
+		t.Fatalf("relevantWarnCritCheckIDs = %v, want [specialist_pool]", got)
+	}
+	// The returned slice must be a copy: callers must not be able to edit the curated list.
+	got[0] = "x"
+	if anomalyRelevantChecks["SPECIALIST_FAILED"][0] != "specialist_pool" {
+		t.Fatal("the curated list was aliased and modified")
+	}
+}

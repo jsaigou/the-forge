@@ -1,20 +1,34 @@
-// settings/panels/ProviderKeys.tsx — Sprint 12 (was H) Phase 5. Moved out of
-// pages/Settings.tsx verbatim (zero logic edits — see the sprint plan's
+// settings/panels/ProviderKeys.tsx — Sprint 12 (was H) Phase 5 origin:
+// moved out of pages/Settings.tsx verbatim at the time (see the sprint plan's
 // panel-adaptation table). CRUD via /api/v1/providers; the list shows the
 // masked `api_key_masked` form, the API key itself is write-only
 // (PUT /api/v1/providers/{name}/key) and never echoed back by the server.
+//
+// Sprint 2 Stream 2D (docs/ui-remediation-plan-2026-11.md; review §A2 "Two
+// draft/save patterns"): the per-provider edit form and the set-key form now
+// draft/save through useRowEditor (below) — this file's per-entity shape of
+// useSettingsGroup's semantics, which that shared hook can't express (a
+// keyed {id, req} mutation and a PATCH draft seeded on open, not
+// draft-??-data over a singleton). The peak-windows builder stays JSON
+// (3B's work); the row's immediate actions (enable/disable, discover,
+// create, delete) keep their direct-mutate + shared-banner shape.
+import type { UseMutationResult } from "@tanstack/react-query";
 import { useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { Icon } from "../../components/Icon";
 import { SaveButton } from "../../components/SaveButton";
+import { newWindowRow, parseWindowRows, serializeWindowRows, toggleDay, type PeakWindowRow } from "../../lib/peakWindows";
+import { StepUpModal } from "../../components/StepUpModal";
 import { apiErrorMessage } from "../../lib/api";
 import { countryFlag } from "../../lib/format";
 import { translatedDataResidencyGroup, translatedProviderNote } from "../../lib/providerPresetI18n";
 import { PROVIDER_PRESETS, providerIconSlug } from "../../lib/providerPresets";
 import { useCreateProvider, useDeleteProvider, useDiscoverProviderBilling, useProviders, useSetProviderKey, useUpdateProvider } from "../../lib/queries";
-import type { ProviderCreateRequest, ProviderUpdateRequest } from "../../lib/types";
+import type { ProviderCreateRequest, ProviderKeyRequest, ProviderUpdateRequest } from "../../lib/types";
+import { useStepUpGate } from "../../lib/useStepUpGate";
 import { CURRENCIES } from "../constants";
+import { SAVE_FLASH_MS, noteSaveSuccess } from "../useSettingsGroup";
 
 const EMPTY_CREATE: ProviderCreateRequest = {
   name: "",
@@ -25,6 +39,69 @@ const EMPTY_CREATE: ProviderCreateRequest = {
   org_id: "",
   billing_console_url: "",
 };
+
+// useRowEditor — Sprint 2 Stream 2D. This panel's counterpart of
+// useSettingsGroup for per-entity CRUD rows, which that shared hook can't
+// express: its contract is draft-??-data over a singleton group with a
+// whole-object PUT, while a provider row edits a PATCH seeded when the
+// editor opens — merging live row data would PUT untouched fields, and
+// peak_windows rides exactly that omission — through a keyed mutation
+// ({id, req}). The phases match useSettingsGroup step-for-step: error
+// cleared on attempt, step-up gate with automatic retry (PUT /api/v1/
+// providers/* is requireAssurance-gated, httpapi.go; the panel renders the
+// gate's <StepUpModal>), noteSaveSuccess + the same SAVE_FLASH_MS delayed
+// close on success (the editor stays mounted through SaveButton's ✓ flash),
+// and errors flow through the panel's one shared banner via the setError
+// prop (apiErrorMessage applied here, single slot, latest wins — the
+// pre-2D behavior). S3-C/3B can hoist this next to useSettingsGroup if a
+// second per-entity surface ever appears.
+function useRowEditor<D extends object, V>({
+  mutation,
+  makeVars,
+  setError,
+}: {
+  mutation: UseMutationResult<unknown, unknown, V>;
+  makeVars: (id: number, draft: D) => V;
+  setError: (message: string | null) => void;
+}) {
+  const [rowId, setRowId] = useState<number | null>(null);
+  const [draft, setDraft] = useState<D | null>(null);
+  const gate = useStepUpGate();
+
+  function open(id: number, seed: D) {
+    setRowId(id);
+    setDraft(seed);
+  }
+
+  // Cancel/dismiss: immediate, and no error touch — the pre-2D cancel
+  // buttons never cleared the shared banner either.
+  function close() {
+    setRowId(null);
+    setDraft(null);
+  }
+
+  function patch(p: Partial<D>) {
+    setDraft((d) => (d === null ? d : { ...d, ...p }));
+  }
+
+  function save(id: number) {
+    if (rowId !== id || draft === null) return;
+    setError(null);
+    const attempt = () =>
+      mutation.mutate(makeVars(id, draft), {
+        onSuccess: () => {
+          noteSaveSuccess();
+          setTimeout(close, SAVE_FLASH_MS);
+        },
+        onError: (e) => {
+          if (!gate.handle(e, attempt)) setError(apiErrorMessage(e));
+        },
+      });
+    attempt();
+  }
+
+  return { rowId, draft, open, close, patch, save, gate, pending: mutation.isPending, isError: mutation.isError };
+}
 
 export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
   const { t } = useTranslation("settings");
@@ -44,13 +121,23 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
   const [createProxy, setCreateProxy] = useState(true);
   // Sprint E preset dropdown: "" = Custom (today's blank-form behavior).
   const [presetId, setPresetId] = useState("");
-  // Phase 7: keyed by id, not name — a rename must not invalidate whichever
-  // row is mid-edit.
-  const [editing, setEditing] = useState<number | null>(null);
-  const [editDraft, setEditDraft] = useState<ProviderUpdateRequest>({});
-  const [keyFor, setKeyFor] = useState<number | null>(null);
-  const [newKey, setNewKey] = useState("");
+  // The one shared error banner for every action on this card — single
+  // slot, latest error wins; useRowEditor routes its save errors here too.
   const [error, setError] = useState<string | null>(null);
+
+  // Phase 7's id-keying lives on in the row editors: keyed by id, not name,
+  // so a rename must not invalidate whichever row is mid-edit. The two
+  // editors are mutually exclusive — each open() closes the other.
+  const edit = useRowEditor<ProviderUpdateRequest, { id: number; req: ProviderUpdateRequest }>({
+    mutation: update,
+    makeVars: (id, draft) => ({ id, req: draft }),
+    setError,
+  });
+  const keyEditor = useRowEditor<ProviderKeyRequest, { id: number; req: ProviderKeyRequest }>({
+    mutation: setKey,
+    makeVars: (id, draft) => ({ id, req: draft }),
+    setError,
+  });
   const [discoverResult, setDiscoverResult] = useState<{ id: number; name: string; found: boolean; url: string; saved: boolean } | null>(null);
   // Provided-models list (Phase 7): which provider's list is expanded.
   const [expandedModels, setExpandedModels] = useState<number | null>(null);
@@ -118,44 +205,6 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
     update.mutate({ id, req: { enabled } }, { onError: showError });
   }
 
-  function submitEdit(id: number) {
-    setError(null);
-    update.mutate(
-      { id, req: editDraft },
-      {
-        // Sprint K: SaveButton's "✓ Saved" flash needs a moment to actually
-        // render before the form it lives on unmounts — closing
-        // synchronously in the same onSuccess (the old behavior) meant
-        // update.isPending flips false and the component unmounts in the
-        // same React commit, so the flash would never paint. 700ms is long
-        // enough to register, short of the 1400ms the flash itself holds.
-        onSuccess: () => {
-          setTimeout(() => {
-            setEditing(null);
-            setEditDraft({});
-          }, 700);
-        },
-        onError: showError,
-      },
-    );
-  }
-
-  function submitKey(id: number) {
-    setError(null);
-    setKey.mutate(
-      { id, req: { api_key: newKey } },
-      {
-        onSuccess: () => {
-          setTimeout(() => {
-            setKeyFor(null);
-            setNewKey("");
-          }, 700);
-        },
-        onError: showError,
-      },
-    );
-  }
-
   // Sprint K: confirm() gate moved into ConfirmButton at the call site.
   function submitDelete(id: number) {
     setError(null);
@@ -183,13 +232,13 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
 
         <div className="hoom">
           {list.map((p) => {
-            const isEditing = editing === p.id;
-            const isKeying = keyFor === p.id;
+            const isEditing = edit.rowId === p.id;
+            const isKeying = keyEditor.rowId === p.id;
             const modelsShown = expandedModels === p.id;
             // Rename preview: the provider icon is resolved from the name
             // slug, so a live preview here shows the consequence before
             // saving (renaming off a known vendor slug drops the mark).
-            const previewName = isEditing ? (editDraft.name ?? p.name) : p.name;
+            const previewName = isEditing ? (edit.draft?.name ?? p.name) : p.name;
             const healthColor = p.health.state === "reachable" ? "var(--ok)" : p.health.state === "degraded" ? "var(--warn)" : p.health.state === "down" ? "var(--crit)" : "var(--text-mute)";
             return (
               <div className="prox" key={p.id} style={{ flexDirection: "column", alignItems: "stretch", gap: 10, opacity: p.enabled ? undefined : 0.55 }}>
@@ -245,8 +294,7 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                       <button
                         disabled={isEditing || update.isPending}
                         onClick={() => {
-                          setEditing(p.id);
-                          setEditDraft({
+                          edit.open(p.id, {
                             name: p.name,
                             bill_currency: p.bill_currency,
                             billing_enabled: p.billing_enabled,
@@ -256,12 +304,12 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                             credits_url: p.credits_url ?? "",
                             org_id: p.org_id ?? "",
                           });
-                          setKeyFor(null);
+                          keyEditor.close();
                         }}
                       >
                         {t("provider_keys.edit_button")}
                       </button>
-                      <button disabled={isKeying || setKey.isPending} onClick={() => { setKeyFor(p.id); setNewKey(""); setEditing(null); }}>{t("provider_keys.set_key_button")}</button>
+                      <button disabled={isKeying || setKey.isPending} onClick={() => { keyEditor.open(p.id, { api_key: "" }); edit.close(); }}>{t("provider_keys.set_key_button")}</button>
                       <button
                         disabled={discoverBilling.isPending}
                         title={t("provider_keys.discover_billing_title")}
@@ -315,53 +363,53 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                 {isEditing && (
                   <div className="form-grid" style={{ marginTop: 4 }}>
                     <label className="form-row">{t("provider_keys.name_label")}
-                      <input value={editDraft.name ?? ""} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
+                      <input value={edit.draft?.name ?? ""} onChange={(e) => edit.patch({ name: e.target.value })} />
                       <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
                         {t("provider_keys.name_hint")}
                       </span>
-                      {editDraft.name && /[^\p{L}\p{N} &_.-]/u.test(editDraft.name) && (
+                      {edit.draft?.name && /[^\p{L}\p{N} &_.-]/u.test(edit.draft.name) && (
                         <span style={{ fontSize: 11, color: "var(--warn)" }}>
                           {t("provider_keys.name_invalid_chars")}
                         </span>
                       )}
                     </label>
                     <label className="form-row">{t("provider_keys.bill_currency_label")}
-                      <select value={editDraft.bill_currency ?? ""} onChange={(e) => setEditDraft({ ...editDraft, bill_currency: e.target.value })}>
+                      <select value={edit.draft?.bill_currency ?? ""} onChange={(e) => edit.patch({ bill_currency: e.target.value })}>
                         {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
                       </select>
                     </label>
                     <label className="form-row">{t("compression.target_url_label")}
-                      <input value={editDraft.target_url ?? ""} placeholder="https://api.example.com/v1" onChange={(e) => setEditDraft({ ...editDraft, target_url: e.target.value })} />
+                      <input value={edit.draft?.target_url ?? ""} placeholder="https://api.example.com/v1" onChange={(e) => edit.patch({ target_url: e.target.value })} />
                     </label>
                     <label className="form-row">{t("provider_keys.status_url_label")}
-                      <input value={editDraft.status_url ?? ""} placeholder="https://deepseek.statuspage.io/api/v2/summary.json" onChange={(e) => setEditDraft({ ...editDraft, status_url: e.target.value })} />
+                      <input value={edit.draft?.status_url ?? ""} placeholder="https://deepseek.statuspage.io/api/v2/summary.json" onChange={(e) => edit.patch({ status_url: e.target.value })} />
                       <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{t("provider_keys.status_url_hint_edit")}</span>
                     </label>
                     <label className="form-row">{t("provider_keys.credits_url_label")}
-                      <input value={editDraft.credits_url ?? ""} placeholder="https://api.example.com/user/balance" onChange={(e) => setEditDraft({ ...editDraft, credits_url: e.target.value })} />
+                      <input value={edit.draft?.credits_url ?? ""} placeholder="https://api.example.com/user/balance" onChange={(e) => edit.patch({ credits_url: e.target.value })} />
                     </label>
                     <label className="form-row">{t("provider_keys.org_id_label")}
-                      <input value={editDraft.org_id ?? ""} placeholder="required by some providers' credits/analytics APIs (e.g. AI&)" onChange={(e) => setEditDraft({ ...editDraft, org_id: e.target.value })} />
+                      <input value={edit.draft?.org_id ?? ""} placeholder="required by some providers' credits/analytics APIs (e.g. AI&)" onChange={(e) => edit.patch({ org_id: e.target.value })} />
                     </label>
                     <label className="form-row">{t("provider_keys.billing_console_url_label")}
-                      <input value={editDraft.billing_console_url ?? ""} placeholder="https://platform.example.com/usage" onChange={(e) => setEditDraft({ ...editDraft, billing_console_url: e.target.value })} />
+                      <input value={edit.draft?.billing_console_url ?? ""} placeholder="https://platform.example.com/usage" onChange={(e) => edit.patch({ billing_console_url: e.target.value })} />
                     </label>
                     <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                       <input
                         type="checkbox"
-                        checked={editDraft.billing_enabled ?? true}
-                        onChange={(e) => setEditDraft({ ...editDraft, billing_enabled: e.target.checked })}
+                        checked={edit.draft?.billing_enabled ?? true}
+                        onChange={(e) => edit.patch({ billing_enabled: e.target.checked })}
                       />
                       {t("provider_keys.billing_api_enabled")}
                     </label>
                     <PeakWindowsEditor
-                      value={editDraft.peak_windows ?? p.peak_windows ?? ""}
+                      value={edit.draft?.peak_windows ?? p.peak_windows ?? ""}
                       peakActiveNow={p.peak_active_now}
-                      onChange={(v) => setEditDraft({ ...editDraft, peak_windows: v })}
+                      onChange={(v) => edit.patch({ peak_windows: v })}
                     />
                     <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
-                      <button className="btn" onClick={() => { setEditing(null); setEditDraft({}); }}>{t("provider_keys.cancel")}</button>
-                      <SaveButton pending={update.isPending} isError={update.isError} onClick={() => submitEdit(p.id)} />
+                      <button className="btn" onClick={edit.close}>{t("provider_keys.cancel")}</button>
+                      <SaveButton pending={edit.pending} isError={edit.isError} onClick={() => edit.save(p.id)} />
                     </div>
                   </div>
                 )}
@@ -371,20 +419,20 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
                     <label className="form-row" style={{ flex: "1 1 320px" }}>{t("provider_keys.new_api_key_label")}
                       <input
                         type="password"
-                        value={newKey}
+                        value={keyEditor.draft?.api_key ?? ""}
                         placeholder="sk-…"
-                        onChange={(e) => setNewKey(e.target.value)}
+                        onChange={(e) => keyEditor.patch({ api_key: e.target.value })}
                         autoComplete="off"
                         spellCheck={false}
                       />
                     </label>
                     <div className="form-actions">
-                      <button className="btn" onClick={() => { setKeyFor(null); setNewKey(""); }}>{t("provider_keys.cancel")}</button>
+                      <button className="btn" onClick={keyEditor.close}>{t("provider_keys.cancel")}</button>
                       <SaveButton
-                        pending={setKey.isPending}
-                        isError={setKey.isError}
-                        disabled={setKey.isPending || !newKey}
-                        onClick={() => submitKey(p.id)}
+                        pending={keyEditor.pending}
+                        isError={keyEditor.isError}
+                        disabled={keyEditor.pending || !keyEditor.draft?.api_key}
+                        onClick={() => keyEditor.save(p.id)}
                         label={t("provider_keys.save_key")}
                       />
                     </div>
@@ -460,6 +508,11 @@ export function ProviderKeys({ canAdmin }: { canAdmin: boolean }) {
           )
         )}
       </div>
+      {/* 2D: one modal per row-editor gate (the editors are mutually
+          exclusive, so at most one is ever open — a closed StepUpModal
+          renders null). */}
+      <StepUpModal open={edit.gate.open} requiredFactor={edit.gate.factor} onSuccess={edit.gate.onSuccess} onClose={edit.gate.onClose} />
+      <StepUpModal open={keyEditor.gate.open} requiredFactor={keyEditor.gate.factor} onSuccess={keyEditor.gate.onSuccess} onClose={keyEditor.gate.onClose} />
     </>
   );
 }
@@ -494,7 +547,6 @@ const COMMON_TIMEZONES = [
   "Pacific/Auckland",
 ];
 
-type PeakWindowRow = { days: number[]; start: string; end: string };
 type PeakSchedule = { tz?: string; windows?: PeakWindowRow[] };
 
 // splitStored parses the full stored peak_windows JSON (as PUT to the API)
@@ -535,20 +587,21 @@ function composeStored(tz: string, windowsJson: string): string {
 }
 
 // PeakWindowsEditor (peak pricing sprint, 2026-09-12; timezone input added
-// 2026-09-13) — a labeled Timezone picker plus a validated JSON textarea
-// for a provider's recurring peak-hours windows (e.g. DeepSeek's weekday
-// 01:00-04:00 + 06:00-10:00 UTC). The windows LIST stays JSON — there's no
-// precedent anywhere in this codebase for a bespoke hour-range picker (the
-// closest is SchedulerJobs' raw cron text input) and it's edited rarely —
-// but the timezone is a single flat value a provider almost always quotes
-// in one local zone ("9am-5pm Pacific"), and typing "tz":"..." correctly
-// inside hand-written JSON is exactly the kind of error a labeled field
-// with a curated dropdown avoids. The server converts using the real IANA
-// database (internal/pricing), so entering local hours + a zone here is
-// enough — no manual UTC math, and it stays correct across DST automatically.
-// The summary below only reformats the parsed JSON for readability — it
-// never evaluates whether a window is currently active; that's
-// peakActiveNow, computed server-side and passed in, never re-derived here.
+// 2026-09-13; structured builder Sprint 3 / 3B, 2026-11) — a Timezone picker
+// plus a day-chip + time-range builder for a provider's recurring peak-hours
+// windows (e.g. DeepSeek's weekday 01:00-04:00 + 06:00-10:00 UTC). The stored
+// value is still the backend's JSON; the builder edits the `windows` array as
+// rows (lib/peakWindows.ts) and the raw JSON textarea lives behind an "Edit as
+// raw JSON" disclosure for anything the builder can't express — if the stored
+// text doesn't parse into rows the raw editor stays open (and the builder is
+// hidden) so nothing is silently rewritten. The timezone is a single flat
+// value a provider almost always quotes in one local zone ("9am-5pm
+// Pacific"); the server converts using the real IANA database
+// (internal/pricing), so entering local hours + a zone here is enough — no
+// manual UTC math, correct across DST. The summary below only reformats the
+// parsed JSON for readability — it never evaluates whether a window is
+// currently active; that's peakActiveNow, computed server-side and passed in,
+// never re-derived here.
 function PeakWindowsEditor({
   value,
   peakActiveNow,
@@ -564,11 +617,19 @@ function PeakWindowsEditor({
   const [tzMode, setTzMode] = useState<"select" | "custom">(() =>
     COMMON_TIMEZONES.includes(splitStored(value).tz) || splitStored(value).tz === "" ? "select" : "custom",
   );
+  const [rawOpen, setRawOpen] = useState(false);
 
   function update(nextTz: string, nextWindowsJson: string) {
     setTz(nextTz);
     setWindowsJson(nextWindowsJson);
     onChange(composeStored(nextTz, nextWindowsJson));
+  }
+
+  const rows = parseWindowRows(windowsJson);
+  // Not representable as rows → the raw editor is the only honest view.
+  const showRaw = rawOpen || rows === null;
+  function updateRows(next: PeakWindowRow[]) {
+    update(tz, serializeWindowRows(next));
   }
 
   let summary: string | null = null;
@@ -586,7 +647,7 @@ function PeakWindowsEditor({
   }
 
   return (
-    <div style={{ gridColumn: "1 / -1", display: "grid", gap: 10 }}>
+    <div className="pw-editor">
       <label className="form-row">
         {t("provider_keys.peak_windows.timezone_label")}
         {tzMode === "select" ? (
@@ -607,34 +668,100 @@ function PeakWindowsEditor({
           <input
             value={tz}
             placeholder={t("provider_keys.peak_windows.timezone_placeholder")}
-            style={{ fontFamily: "var(--mono)" }}
+            className="pw-mono"
             onChange={(e) => update(e.target.value, windowsJson)}
           />
         )}
-        <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
+        <span className="pw-hint">
           {t("provider_keys.peak_windows.timezone_hint")}
         </span>
       </label>
-      <label className="form-row">
-        {t("provider_keys.peak_windows.windows_label")}
-        <textarea
-          rows={2}
-          value={windowsJson}
-          placeholder={PEAK_WINDOWS_JSON_PLACEHOLDER}
-          style={{ fontFamily: "var(--mono)", fontSize: 11 }}
-          onChange={(e) => update(tz, e.target.value)}
-        />
-        <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
-          {t("provider_keys.peak_windows.windows_hint", { format: `[{"days":[0-6, 0=Sun],"start":"HH:MM","end":"HH:MM"}]` })}
-        </span>
-        {localParseError && <span style={{ fontSize: 11, color: "var(--warn)" }}>{localParseError}</span>}
+
+      <div className="form-row">
+        <span id="pw-windows-label">{t("provider_keys.peak_windows.windows_label")}</span>
+        {!showRaw && rows && (
+          <div className="pw-rows" role="group" aria-labelledby="pw-windows-label">
+            {rows.length === 0 && <span className="pw-hint">{t("provider_keys.peak_windows.empty_hint")}</span>}
+            {rows.map((row, i) => (
+              <div key={i} className="pw-row" role="group" aria-label={t("provider_keys.peak_windows.window_n", { n: i + 1 })}>
+                <span className="pw-days">
+                  {WEEKDAY_SHORT_KEYS.map((k, d) => (
+                    <button
+                      key={k}
+                      type="button"
+                      className="chip pw-day"
+                      aria-pressed={row.days.includes(d)}
+                      onClick={() => updateRows(rows.map((r, j) => (j === i ? { ...r, days: toggleDay(r.days, d) } : r)))}
+                    >
+                      {t(`provider_keys.peak_windows.weekday_${k}`)}
+                    </button>
+                  ))}
+                </span>
+                <input
+                  type="time"
+                  value={row.start}
+                  aria-label={t("provider_keys.peak_windows.start_n", { n: i + 1 })}
+                  onChange={(e) => e.target.value && updateRows(rows.map((r, j) => (j === i ? { ...r, start: e.target.value } : r)))}
+                />
+                <span aria-hidden="true">–</span>
+                <input
+                  type="time"
+                  value={row.end}
+                  aria-label={t("provider_keys.peak_windows.end_n", { n: i + 1 })}
+                  onChange={(e) => e.target.value && updateRows(rows.map((r, j) => (j === i ? { ...r, end: e.target.value } : r)))}
+                />
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label={t("provider_keys.peak_windows.remove_window", { n: i + 1 })}
+                  title={t("provider_keys.peak_windows.remove_window", { n: i + 1 })}
+                  onClick={() => updateRows(rows.filter((_, j) => j !== i))}
+                >
+                  ✕
+                </button>
+                {row.days.length === 0 && <span className="pw-warn">{t("provider_keys.peak_windows.no_days_warn")}</span>}
+              </div>
+            ))}
+            <div>
+              <button type="button" className="btn" onClick={() => updateRows([...rows, newWindowRow()])}>
+                {t("provider_keys.peak_windows.add_window")}
+              </button>
+            </div>
+          </div>
+        )}
+        {showRaw && (
+          <>
+            <textarea
+              rows={2}
+              value={windowsJson}
+              aria-labelledby="pw-windows-label"
+              placeholder={PEAK_WINDOWS_JSON_PLACEHOLDER}
+              className="pw-mono pw-raw"
+              onChange={(e) => update(tz, e.target.value)}
+            />
+            <span className="pw-hint">
+              {t("provider_keys.peak_windows.windows_hint", { format: `[{"days":[0-6, 0=Sun],"start":"HH:MM","end":"HH:MM"}]` })}
+            </span>
+          </>
+        )}
+        {localParseError && <span className="pw-warn">{localParseError}</span>}
+        {rows === null && !localParseError && <span className="pw-hint">{t("provider_keys.peak_windows.raw_only_hint")}</span>}
         {summary && !localParseError && (
-          <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          <span className="pw-hint">
             {summary}
-            {peakActiveNow && <span className="chip" style={{ marginLeft: 6, color: "var(--warn)" }}>{t("provider_keys.peak_windows.peak_now_chip")}</span>}
+            {peakActiveNow && <span className="chip pw-peak-chip">{t("provider_keys.peak_windows.peak_now_chip")}</span>}
           </span>
         )}
-      </label>
+        <button
+          type="button"
+          className="btn pw-raw-toggle"
+          aria-expanded={showRaw}
+          disabled={rows === null}
+          onClick={() => setRawOpen(!rawOpen)}
+        >
+          {showRaw ? t("provider_keys.peak_windows.back_to_builder") : t("provider_keys.peak_windows.edit_raw")}
+        </button>
+      </div>
     </div>
   );
 }

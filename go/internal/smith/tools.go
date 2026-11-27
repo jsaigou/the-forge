@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -100,11 +102,15 @@ type ToolEnv struct {
 	RunSelected  func(ctx context.Context, checkIDs []string) ([]Finding, error)
 	KBSearch     func(ctx context.Context, q string, limit int) ([]KBResult, error)
 	ListFindings func(ctx context.Context, since time.Time, sev string, limit int) ([]StoredFinding, error)
-	Catalog      catalogReader   // nil-tolerant
-	Web          webReader       // nil-tolerant
-	HF           hfReader        // nil-tolerant
-	HFDownload   hfDownloadTool  // nil-tolerant; see hfDownloadTool's doc comment re: ProposeJob
+	Catalog      catalogReader  // nil-tolerant
+	Web          webReader      // nil-tolerant
+	HF           hfReader       // nil-tolerant
+	HFDownload   hfDownloadTool // nil-tolerant; see hfDownloadTool's doc comment re: ProposeJob
 	Now          func() time.Time
+	// OperatorURLs are the URLs the operator wrote in this turn's message; web_fetch may fetch them. fetchable collects the URLs web_search returned
+	// this turn. web_fetch refuses any other URL: a URL the model composes itself is how an injected instruction would smuggle data out in a query string.
+	OperatorURLs map[string]bool
+	fetchable    map[string]bool
 }
 
 // toolEnv builds the per-turn tool environment. Catalog/Web/HF/HFDownload
@@ -310,7 +316,7 @@ var toolRegistry = []Tool{
 		Run: downloadStatusTool,
 	},
 	{
-		ID: "download_start",
+		ID:          "download_start",
 		Description: "Propose downloading a HuggingFace model file into the models directory. This does NOT start a download — it creates a job awaiting operator approval, exactly like every other smith proposal. The operator sees it and approves or ignores it through the ordinary UI.",
 		Params: objectSchema(map[string]any{
 			"repo":        strProp("HF repo id, e.g. org/name"),
@@ -530,7 +536,6 @@ func kbSearchTool(ctx context.Context, env *ToolEnv, args json.RawMessage) (any,
 type toolConfigView struct {
 	Name       string `json:"name"`
 	NCtx       int    `json:"n_ctx"`
-	Parallel   int    `json:"parallel"`
 	Status     string `json:"status"`
 	Visibility string `json:"visibility"`
 }
@@ -570,7 +575,7 @@ func catalogLookupTool(ctx context.Context, env *ToolEnv, args json.RawMessage) 
 			if err != nil {
 				return nil, fmt.Errorf("catalog_lookup: config %q: %w", a.Name, err)
 			}
-			return map[string]any{"configs": []toolConfigView{{Name: c.Name, NCtx: c.NCtx, Parallel: c.Parallel, Status: c.Status, Visibility: c.Visibility}}}, nil
+			return map[string]any{"configs": []toolConfigView{{Name: c.Name, NCtx: c.NCtx, Status: c.Status, Visibility: c.Visibility}}}, nil
 		}
 		cfgs, err := env.Catalog.ListConfigs(ctx)
 		if err != nil {
@@ -581,7 +586,7 @@ func catalogLookupTool(ctx context.Context, env *ToolEnv, args json.RawMessage) 
 			if c.Visibility == "hidden" {
 				continue
 			}
-			out = append(out, toolConfigView{Name: c.Name, NCtx: c.NCtx, Parallel: c.Parallel, Status: c.Status, Visibility: c.Visibility})
+			out = append(out, toolConfigView{Name: c.Name, NCtx: c.NCtx, Status: c.Status, Visibility: c.Visibility})
 		}
 		return map[string]any{"configs": out}, nil
 	case "offerings":
@@ -645,8 +650,12 @@ func webSearchTool(ctx context.Context, env *ToolEnv, args json.RawMessage) (any
 	if env.Now != nil {
 		now = env.Now()
 	}
+	if env.fetchable == nil {
+		env.fetchable = map[string]bool{}
+	}
 	for i, r := range results {
-		hits[i] = hit{Title: r.Title, URL: r.URL, Snippet: r.Snippet}
+		env.fetchable[canonicalURL(r.URL)] = true
+		hits[i] = hit{Title: scrubSecretPatterns(r.Title), URL: r.URL, Snippet: scrubSecretPatterns(r.Snippet)}
 		sources[i] = MessageSource{Provider: r.Engine, URL: r.URL, Title: r.Title, Snippet: truncateForContext(r.Snippet, webSourceSnippetChars), FetchedAt: now.Unix()}
 	}
 	return webToolResult{Payload: map[string]any{"results": hits}, Sources: sources}, nil
@@ -665,14 +674,17 @@ func webFetchTool(ctx context.Context, env *ToolEnv, args json.RawMessage) (any,
 	if strings.TrimSpace(a.URL) == "" {
 		return nil, fmt.Errorf("web_fetch: url must not be empty")
 	}
+	if key := canonicalURL(a.URL); !env.fetchable[key] && !env.OperatorURLs[key] {
+		return nil, fmt.Errorf("web_fetch: only a URL returned by web_search in this turn, or one the operator wrote in their message, can be fetched; run web_search first")
+	}
 	doc, err := env.Web.Fetch(ctx, a.URL)
 	if err != nil {
 		return nil, fmt.Errorf("web_fetch: %w", err)
 	}
-	text := truncateForContext(doc.Text, webDocContextChars)
+	text := scrubSecretPatterns(truncateForContext(doc.Text, webDocContextChars))
 	source := MessageSource{Provider: doc.Provider, URL: doc.URL, Title: doc.Title, Snippet: truncateForContext(doc.Text, webSourceSnippetChars), FetchedAt: doc.FetchedAt.Unix(), Cached: doc.Cached}
 	return webToolResult{
-		Payload: map[string]any{"title": doc.Title, "url": doc.URL, "text": text, "truncated": doc.Truncated || len(doc.Text) > webDocContextChars},
+		Payload: map[string]any{"title": scrubSecretPatterns(doc.Title), "url": doc.URL, "text": text, "truncated": doc.Truncated || len(doc.Text) > webDocContextChars},
 		Sources: []MessageSource{source},
 	}, nil
 }
@@ -801,6 +813,16 @@ func downloadStartTool(ctx context.Context, env *ToolEnv, args json.RawMessage) 
 	if strings.TrimSpace(a.Repo) == "" || strings.TrimSpace(a.Filename) == "" || a.SizeBytes <= 0 {
 		return nil, fmt.Errorf("download_start: repo, filename, and a positive size_bytes are required")
 	}
+	// config_name repoints an EXISTING config's weight file once an operator approves the job. Refuse a name that is not a real config now, rather than
+	// leave the approver a job that can only fail; the approval itself stays the human gate.
+	if strings.TrimSpace(a.ConfigName) != "" {
+		if env.Catalog == nil {
+			return nil, fmt.Errorf("download_start: config_name cannot be verified (catalog not wired)")
+		}
+		if _, err := env.Catalog.ConfigByName(ctx, a.ConfigName); err != nil {
+			return nil, fmt.Errorf("download_start: config_name %q is not an existing config", a.ConfigName)
+		}
+	}
 	id, err := env.HFDownload.ProposeJob(ctx, hfdownload.CreateJobRequest{
 		Repo: a.Repo, Revision: a.Revision, DestDir: a.DestDir, ConfigName: a.ConfigName,
 		Files:      []hfdownload.PreflightFile{{Filename: a.Filename, SizeBytes: a.SizeBytes}},
@@ -813,4 +835,29 @@ func downloadStartTool(ctx context.Context, env *ToolEnv, args json.RawMessage) 
 		"job_id": id, "status": "proposed",
 		"note": "created in pending_approval — nothing downloads until an operator approves this job",
 	}, nil
+}
+
+// canonicalURL is the form web_fetch compares URLs in: lower-case scheme and host, no fragment, no trailing slash on the path. Everything else, the
+// query string included, must match exactly, so a URL the model edits is a different URL.
+func canonicalURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	u.Scheme, u.Host, u.Fragment = strings.ToLower(u.Scheme), strings.ToLower(u.Host), ""
+	u.Path, u.RawPath = strings.TrimRight(u.Path, "/"), strings.TrimRight(u.RawPath, "/")
+	return u.String()
+}
+
+var urlInTextRe = regexp.MustCompile(`https?://[^\s<>"')\]]+`)
+
+// urlsInText lists the URLs written in s, canonicalized, for OperatorURLs.
+func urlsInText(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, m := range urlInTextRe.FindAllString(s, 20) {
+		if c := canonicalURL(strings.TrimRight(m, ".,;:")); c != "" {
+			out[c] = true
+		}
+	}
+	return out
 }

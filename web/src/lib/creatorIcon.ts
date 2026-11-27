@@ -5,6 +5,7 @@
 // creators with no vendored mark — callers should render no icon in that case
 // (a letter-badge next to the name would be clutter, not identity).
 import { ICON_MANIFEST } from "../assets/icons/manifest";
+import { own } from "./own.ts";
 
 const CREATOR_ALIASES: Record<string, string> = {
   deepseek: "deepseek",
@@ -34,6 +35,10 @@ const CREATOR_ALIASES: Record<string, string> = {
   openrouter: "openrouter",
   qwen: "qwen",
   glm: "zhipu",
+  // "ibm-granite" is the Hugging Face org name the registrar records as creator.
+  ibm: "ibm",
+  "ibm-granite": "ibm",
+  ibmgranite: "ibm",
 };
 
 export function creatorIconSlug(creator: string | null | undefined): string {
@@ -43,8 +48,8 @@ export function creatorIconSlug(creator: string | null | undefined): string {
   // "HuggingFaceBio" → "huggingfacebio"), then a punctuation-stripped form.
   const candidates = [s, s.split(/[\s.]+/)[0], s.replace(/[^a-z0-9]/g, "")];
   for (const c of candidates) {
-    const slug = CREATOR_ALIASES[c];
-    if (slug && ICON_MANIFEST[slug]) return slug;
+    const slug = own(CREATOR_ALIASES, c);
+    if (slug && own(ICON_MANIFEST, slug)) return slug;
   }
   return "";
 }

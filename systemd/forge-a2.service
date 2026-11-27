@@ -9,10 +9,12 @@ After=network.target
 Type=simple
 User=testuser
 Group=testuser
-EnvironmentFile=/etc/sysconfig/forge-a2-env
+# The launcher is the generic shim (ADR-0026): `forge slot-exec a2` reads this slot's launch from the database, so there is no EnvironmentFile.
 ExecStart=/usr/local/lib/forge/start-a2.sh
 Restart=on-failure
 RestartSec=10
+# Exit codes slot-exec uses for failures a retry cannot fix (66 no row, 73 bad executable, 75 disarmed, 78 malformed row); 69 (database unreadable) is retried.
+RestartPreventExitStatus=66 73 75 78
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=forge-a2

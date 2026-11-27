@@ -17,7 +17,13 @@ export function sortModelCardsByUsage(cards: ModelCard[]): ModelCard[] {
 // sort toggle for ConfigCard. Primary key is the selected mode; ties (and,
 // per Q4c, sibling configs of the same model regardless of tie) put the
 // is_default config first, then fall back to alpha for stability.
-export type ConfigSortMode = "alpha" | "use" | "new";
+// "favorites" (design/QA 2026-11-26) shows ONLY starred configs, A-Z; it needs starredIds, and with none supplied it is empty.
+export type ConfigSortMode = "favorites" | "alpha" | "use" | "new";
+
+/** The view the gallery opens on: the favorites when at least one config is starred, otherwise every config, so a new install shows what it has. */
+export function defaultConfigSort(cards: ConfigCard[], starredIds: Set<number>): ConfigSortMode {
+  return cards.some((c) => starredIds.has(c.id)) ? "favorites" : "alpha";
+}
 
 // starredIds (product/QA sprint, 2026-07-29): when supplied, starred
 // configs sort before everything else, ahead of the selected mode's own
@@ -25,7 +31,8 @@ export type ConfigSortMode = "alpha" | "use" | "new";
 // of which sort mode is active.
 export function sortConfigCards(cards: ConfigCard[], mode: ConfigSortMode, starredIds?: Set<number>): ConfigCard[] {
   const byName = (a: ConfigCard, b: ConfigCard) => a.name.toLowerCase().localeCompare(b.name.toLowerCase());
-  return [...cards].sort((a, b) => {
+  const pool = mode === "favorites" ? cards.filter((c) => starredIds?.has(c.id)) : cards;
+  return [...pool].sort((a, b) => {
     if (starredIds) {
       const aStar = starredIds.has(a.id);
       const bStar = starredIds.has(b.id);
@@ -39,6 +46,7 @@ export function sortConfigCards(cards: ConfigCard[], mode: ConfigSortMode, starr
       case "new":
         primary = b.created_at - a.created_at;
         break;
+      case "favorites":
       case "alpha":
       default:
         primary = byName(a, b);

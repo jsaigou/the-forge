@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/jsaigou/the-forge/internal/compressorctl"
+	"github.com/jsaigou/the-forge/internal/netguard"
 	"github.com/jsaigou/the-forge/internal/pricing"
 	"github.com/jsaigou/the-forge/internal/providers"
 	"github.com/jsaigou/the-forge/internal/store"
@@ -124,6 +125,13 @@ func (s *Server) handleBillingSettingsPut(w http.ResponseWriter, r *http.Request
 	}
 	if b.FxRefreshMin != nil && *b.FxRefreshMin < 1 {
 		fields["fx_refresh_min"] = "must be ≥ 1"
+	}
+	// The daemon fetches this URL itself; a private, loopback or credentialed target is refused at save time (and again at dial time).
+	if b.FxSourceURL != nil && *b.FxSourceURL != "" {
+		if err := netguard.CheckURL(*b.FxSourceURL); err != nil {
+			fields["fx_source_url"] = "must be a public http(s) URL without credentials"
+			codes["fx_source_url"] = "invalid_url"
+		}
 	}
 	if len(fields) > 0 {
 		writeValidationErrorCodes(w, fields, codes)
@@ -824,15 +832,15 @@ func (b providerCreateBody) validate() map[string]string {
 type providerUpdateBody struct {
 	// Name, when present, renames the provider (0042 — name is no longer
 	// the primary key, so this is now a plain field update like any other).
-	Name          *string `json:"name"`
-	BillCurrency  *string `json:"bill_currency"`
-	TargetURL     *string `json:"target_url"`
-	StatusURL     *string `json:"status_url"`
-	CreditsURL    *string `json:"credits_url"`
-	OrgID         *string `json:"org_id"`
+	Name            *string `json:"name"`
+	BillCurrency    *string `json:"bill_currency"`
+	TargetURL       *string `json:"target_url"`
+	StatusURL       *string `json:"status_url"`
+	CreditsURL      *string `json:"credits_url"`
+	OrgID           *string `json:"org_id"`
 	CompressorProxy *string `json:"compressor_proxy"`
-	Model         *string `json:"model"`
-	Model2        *string `json:"model2"`
+	Model           *string `json:"model"`
+	Model2          *string `json:"model2"`
 	// BillingEnabled/BillingConsoleURL (product/QA sprint, 2026-07-29).
 	BillingEnabled    *bool   `json:"billing_enabled"`
 	BillingConsoleURL *string `json:"billing_console_url"`

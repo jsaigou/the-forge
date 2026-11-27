@@ -30,6 +30,10 @@ export interface RuntimeComponent {
   projectUrl: string;
 }
 
+export interface FontAsset extends RuntimeComponent {
+  copyright: string;
+}
+
 export const NPM_DEPS: NpmDep[] = [
   {
     "name": "@tanstack/react-query",
@@ -190,21 +194,21 @@ export const GO_DEPS: GoDep[] = [
   },
   {
     "path": "golang.org/x/crypto",
-    "version": "v0.54.0",
+    "version": "v0.58.0",
     "indirect": false,
     "license": "BSD-3-Clause",
     "projectUrl": "https://golang.org/x/crypto"
   },
   {
     "path": "golang.org/x/net",
-    "version": "v0.57.0",
+    "version": "v0.62.0",
     "indirect": false,
     "license": "BSD-3-Clause",
     "projectUrl": "https://golang.org/x/net"
   },
   {
     "path": "golang.org/x/sync",
-    "version": "v0.22.0",
+    "version": "v0.24.0",
     "indirect": false,
     "license": "BSD-3-Clause",
     "projectUrl": "https://golang.org/x/sync"
@@ -442,14 +446,14 @@ export const GO_DEPS: GoDep[] = [
   },
   {
     "path": "golang.org/x/sys",
-    "version": "v0.47.0",
+    "version": "v0.49.0",
     "indirect": true,
     "license": "BSD-3-Clause",
     "projectUrl": "https://golang.org/x/sys"
   },
   {
     "path": "golang.org/x/text",
-    "version": "v0.40.0",
+    "version": "v0.43.0",
     "indirect": true,
     "license": "BSD-3-Clause",
     "projectUrl": "https://golang.org/x/text"
@@ -515,5 +519,16 @@ export const RUNTIME_STACK: RuntimeComponent[] = [
     "role": "Inference engine backing the vLLM-style configs (Carbon 8B, Hy-MT2)",
     "license": "Apache-2.0",
     "projectUrl": "https://github.com/vllm-project/vllm"
+  }
+];
+
+// Curated — see gen-attributions.mjs's FONTS. Font files this app serves itself.
+export const FONTS: FontAsset[] = [
+  {
+    "name": "Archivo Black",
+    "role": "Title typeface for the \"THE FORGE\" header, bundled with the app (v1.006, designed by Hector Gatti)",
+    "license": "SIL OFL 1.1",
+    "projectUrl": "https://github.com/Omnibus-Type/ArchivoBlack",
+    "copyright": "Copyright 2017 The Archivo Black Project Authors (https://github.com/Omnibus-Type/ArchivoBlack)"
   }
 ];

@@ -62,7 +62,7 @@ func seedFullCatalog(t *testing.T, ctx context.Context, cat store.Catalog) (conf
 	configID, _ = cat.CreateConfig(ctx, store.Config{
 		Name: "gemma4-31b-mtp", VariantID: varID, WeightArtifactID: weightID,
 		EngineID: eng.ID, BuildID: buildID, MMProjArtifactID: mmprojID,
-		NCtx: 262144, Parallel: 2, ExtraArgs: []string{"--no-mmap", "--parallel", "2"},
+		NCtx: 262144, ExtraArgs: []string{"--no-mmap", "--parallel", "2"},
 		Status: "unverified", Visibility: "visible", IsDefault: true,
 	})
 
@@ -1099,4 +1099,91 @@ func floatsClose(a, b float64) bool {
 		d = -d
 	}
 	return d < 1e-9
+}
+
+// engine_kind is derived server-side: the engine row's kind, with the legacy backend "vllm" still reading as vLLM.
+func TestCards_EngineKind(t *testing.T) {
+	db := openStore(t)
+	ctx := context.Background()
+	cat := db.Catalog()
+	configID := seedFullCatalog(t, ctx, cat)
+	base, err := cat.GetConfig(ctx, configID)
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
+	eng, _ := cat.EngineByName(ctx, "llama.cpp")
+	vb, err := cat.CreateBuild(ctx, store.Build{EngineID: eng.ID, Name: "legacy-vllm", Backend: "vllm", BinaryPath: "/opt/vllm/bin/vllm"})
+	if err != nil {
+		t.Fatalf("CreateBuild: %v", err)
+	}
+	if _, err := cat.CreateConfig(ctx, store.Config{
+		Name: "legacy-vllm-cfg", VariantID: base.VariantID, WeightArtifactID: base.WeightArtifactID,
+		EngineID: eng.ID, BuildID: vb, NCtx: 4096, Status: "unverified", Visibility: "visible",
+	}); err != nil {
+		t.Fatalf("CreateConfig: %v", err)
+	}
+	cards, err := registry.New(cat, nil, nil).Cards(ctx, time.Time{})
+	if err != nil {
+		t.Fatalf("Cards: %v", err)
+	}
+	got := map[string]string{}
+	for _, c := range cards {
+		got[c.Name] = c.EngineKind
+	}
+	if got["gemma4-31b-mtp"] != "llamacpp" {
+		t.Errorf("llama.cpp config engine_kind = %q, want llamacpp", got["gemma4-31b-mtp"])
+	}
+	if got["legacy-vllm-cfg"] != "vllm" {
+		t.Errorf("legacy vllm-backend config engine_kind = %q, want vllm", got["legacy-vllm-cfg"])
+	}
+}
+
+// "Recommended" is a verified, visible config on the Radiance engine; an unverified or hidden one, and any llama.cpp config, is not marked.
+func TestCards_RecommendedIsVerifiedVisibleRadiance(t *testing.T) {
+	db := openStore(t)
+	ctx := context.Background()
+	cat := db.Catalog()
+	configID := seedFullCatalog(t, ctx, cat)
+	base, err := cat.GetConfig(ctx, configID)
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
+	rad, err := cat.EngineByName(ctx, "Radiance")
+	if err != nil {
+		t.Fatalf("the Radiance engine row is seeded by migration 0106: %v", err)
+	}
+	rb, err := cat.CreateBuild(ctx, store.Build{EngineID: rad.ID, Name: "rad-build", Backend: "rocm", BinaryPath: "/opt/radiance/build/bin/radiance"})
+	if err != nil {
+		t.Fatalf("CreateBuild: %v", err)
+	}
+	for _, c := range []struct{ name, status, vis string }{
+		{"rad-verified", "verified", "visible"},
+		{"rad-unverified", "unverified", "visible"},
+		{"rad-hidden", "verified", "hidden"},
+	} {
+		if _, err := cat.CreateConfig(ctx, store.Config{
+			Name: c.name, VariantID: base.VariantID, WeightArtifactID: base.WeightArtifactID,
+			EngineID: rad.ID, BuildID: rb, NCtx: 4096, Status: c.status, Visibility: c.vis,
+		}); err != nil {
+			t.Fatalf("CreateConfig %s: %v", c.name, err)
+		}
+	}
+	cards, err := registry.New(cat, nil, nil).Cards(ctx, time.Time{})
+	if err != nil {
+		t.Fatalf("Cards: %v", err)
+	}
+	got := map[string]bool{}
+	for _, c := range cards {
+		got[c.Name] = c.Recommended
+	}
+	want := map[string]bool{"rad-verified": true, "rad-unverified": false, "gemma4-31b-mtp": false}
+	for name, w := range want {
+		if g, ok := got[name]; !ok || g != w {
+			t.Errorf("config %s: recommended = %v (present %v), want %v", name, g, ok, w)
+		}
+	}
+	// A hidden config is not on the cards at all, so it cannot carry the mark; the derivation still refuses it if it ever is.
+	if g, ok := got["rad-hidden"]; ok && g {
+		t.Errorf("a hidden Radiance config is marked recommended")
+	}
 }

@@ -15,7 +15,8 @@ for qwen38-27b (no fork needed) and nemotron-puzzle (fork still required).
   find it near the start of the file header (search for `general.architecture`
   in the first KB of the GGUF).
 - Determine whether that architecture is supported in current upstream. The
-  local kintsugi tree tracks upstream — check whether the arch name appears
+  local llama.cpp tree tracks upstream (the kintsugi patch set was retired,
+  docs/adr/0019) — check whether the arch name appears
   in `src/llama-arch.h` and has a model implementation in `src/llama-model.cpp`
   at HEAD:
   ```bash
@@ -35,7 +36,8 @@ run a completion? If yes, the model does NOT need the fork — it only *benefits
 from fork features (see step 4). The 2026-08-16 qwen38-27b conclusion was
 exactly this: arch `qwen35` was mainline, so the kintsugi fork wasn't
 required to run it — the fork only added cross-turn KV cache reuse for
-hybrid/recurrent models.
+hybrid/recurrent models, and as of 2026-11-01 plain upstream measured
+equivalent (docs/adr/0019).
 
 ## 3. Model-format compatibility can still force a fork even when arch is mainline
 
@@ -58,11 +60,11 @@ A fork can be *valuable* without being *required*:
 
 - Required: model won't load / crashes without it (metadata incompatibility,
   missing arch, the Poolside laguna fork's `GGML_HIP_ROCWMMA_FATTN=ON` need).
-- Optional (performance): the kintsugi fork's cross-turn KV cache reuse for
-  hybrid/recurrent models (avoids full-conversation reprocessing every turn —
-  big win on long agentic sessions, no difference on single-shot). qwen38-27b
-  is arch `qwen35` (hybrid SSM+attention): it runs on stock llama.cpp but runs
-  *better* on kintsugi for multi-turn workloads.
+- Historical (retired 2026-11-01): the kintsugi fork's cross-turn KV cache
+  reuse for hybrid/recurrent models. It avoided full-conversation reprocessing
+  every turn, but current upstream does the same (measured on Qwen3.6 MTP,
+  Ornith and Flash-Next, up to a 187K-token prompt), so stock llama.cpp is
+  enough. See docs/adr/0019.
 
 ## 5. Check whether the fork's unique patches have been upstreamed
 

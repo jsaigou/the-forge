@@ -90,5 +90,6 @@ func (s SettingsAdapter) Set(ctx context.Context, key string, value []byte) erro
 // implements this; the HTTP routes for list/mint/revoke use it.
 type KeyManager interface {
 	MintKey(ctx context.Context, kind KeyKind, name, displayName string, role Role, boundIP string, expiresAt time.Time) (string, error)
+	MintScopedKey(ctx context.Context, name, displayName string, role Role, boundIP string, expiresAt time.Time, scope string) (string, error)
 	RevokeKey(ctx context.Context, keyid string) error
 }

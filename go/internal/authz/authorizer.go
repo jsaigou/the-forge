@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -305,7 +306,11 @@ func (a *Authorizer) verifyBearer(ctx context.Context, ip, token string, want Ke
 	if kind == KindForge {
 		role = Role(k.Role)
 	}
-	return Identity{Name: k.Name, Role: role, KeyID: keyid, Kind: kind, DisplayName: k.DisplayName}, nil
+	scope := ""
+	if kind == KindForge {
+		scope = k.Scope
+	}
+	return Identity{Name: k.Name, Role: role, KeyID: keyid, Kind: kind, DisplayName: k.DisplayName, Scope: scope}, nil
 }
 
 // MintKey creates a bearer key and returns the full token — shown exactly
@@ -317,6 +322,80 @@ func (a *Authorizer) verifyBearer(ctx context.Context, ip, token string, want Ke
 // (security sprint 3, #34/#36). Callers choose the defaults for their own
 // surface — MintKey itself applies none.
 func (a *Authorizer) MintKey(ctx context.Context, kind KeyKind, name, displayName string, role Role, boundIP string, expiresAt time.Time) (string, error) {
+	return a.mintKey(ctx, kind, name, displayName, role, boundIP, expiresAt, "")
+}
+
+// Key scopes (ADR-0020 F11). A scoped key can only be a forge key, must expire, and may live at most the scope's limit: it exists so a caller can be
+// handed just enough access for one job instead of an admin key.
+const (
+	ScopeCatalog = "catalog"
+	// ScopeSpeech is for the speech front door (forge-tts): it may only ask the daemon for a speech engine and give it back (docs/speech-routing-plan.md).
+	// Unlike a short-lived agent key it belongs to a service that must run continuously, so it may live a year, and so it must be bound to loopback.
+	ScopeSpeech = "speech"
+	// ScopeDuplex is for the duplex transport (forge-duplex, ADR-0029): it may only ask the daemon for a duplex engine, keep the lease alive and give it
+	// back. Like the speech scope it belongs to a service that runs continuously, so it may live a year and must be bound to loopback.
+	ScopeDuplex = "duplex"
+	// ScopeSpeechSetup is for the `forge speech` commands run on the server: it may list the speech engine recipes, register one, and read speech
+	// readiness and the external tool links
+	// (docs/speech-setup-plan.md section 2.3). Short-lived like the catalog scope.
+	ScopeSpeechSetup = "speech-setup"
+
+	// MaxScopedKeyTTL is the longest a catalog-scoped key may live; see MaxScopedKeyTTLFor for the others.
+	MaxScopedKeyTTL = 24 * time.Hour
+	// MaxSpeechKeyTTL is the longest a speech-scoped key may live; MaxDuplexKeyTTL the same for a duplex-scoped key.
+	MaxSpeechKeyTTL = 365 * 24 * time.Hour
+	MaxDuplexKeyTTL = 365 * 24 * time.Hour
+)
+
+// ValidScope reports whether s is a scope a key may carry ("" is unscoped).
+func ValidScope(s string) bool {
+	switch s {
+	case "", ScopeCatalog, ScopeSpeech, ScopeDuplex, ScopeSpeechSetup:
+		return true
+	}
+	return false
+}
+
+// MaxScopedKeyTTLFor is the longest a key of the given scope may live.
+func MaxScopedKeyTTLFor(scope string) time.Duration {
+	switch scope {
+	case ScopeSpeech:
+		return MaxSpeechKeyTTL
+	case ScopeDuplex:
+		return MaxDuplexKeyTTL
+	}
+	return MaxScopedKeyTTL
+}
+
+// loopbackBinding reports whether boundIP is exactly a loopback address (a key bound to it verifies only for a caller that is itself on the host:
+// the client address is the effective one, so a tailnet caller arriving through `tailscale serve` carries its own address and does not match).
+func loopbackBinding(boundIP string) bool {
+	a, err := netip.ParseAddr(boundIP)
+	return err == nil && a.IsLoopback()
+}
+
+// MintScopedKey is MintKey for a scoped forge key: scope must be a real scope and expiresAt must be set and within the scope's limit of now. A
+// speech-scoped key must also be bound to a loopback address. Re-minting the same name still rotates it, exactly as MintKey does.
+func (a *Authorizer) MintScopedKey(ctx context.Context, name, displayName string, role Role, boundIP string, expiresAt time.Time, scope string) (string, error) {
+	if scope == "" || !ValidScope(scope) {
+		return "", fmt.Errorf("authz: mint: scope must be %q, %q, %q or %q", ScopeCatalog, ScopeSpeech, ScopeDuplex, ScopeSpeechSetup)
+	}
+	if expiresAt.IsZero() {
+		return "", fmt.Errorf("authz: mint: a scoped key must expire (at most %s)", MaxScopedKeyTTLFor(scope))
+	}
+	if expiresAt.After(a.now().Add(MaxScopedKeyTTLFor(scope))) {
+		return "", fmt.Errorf("authz: mint: a %s-scoped key may live at most %s", scope, MaxScopedKeyTTLFor(scope))
+	}
+	if (scope == ScopeSpeech || scope == ScopeDuplex) && !loopbackBinding(boundIP) {
+		return "", fmt.Errorf("authz: mint: a %s-scoped key must be bound to a loopback address (for example 127.0.0.1)", scope)
+	}
+	return a.mintKey(ctx, KindForge, name, displayName, role, boundIP, expiresAt, scope)
+}
+
+func (a *Authorizer) mintKey(ctx context.Context, kind KeyKind, name, displayName string, role Role, boundIP string, expiresAt time.Time, scope string) (string, error) {
+	if scope != "" && kind != KindForge {
+		return "", fmt.Errorf("authz: mint: only forge keys can be scoped")
+	}
 	switch kind {
 	case KindForge:
 		if !validRole(role) {
@@ -361,7 +440,7 @@ func (a *Authorizer) MintKey(ctx context.Context, kind KeyKind, name, displayNam
 	if err := a.st.Keys().Create(ctx, store.APIKey{
 		KeyID: keyid, Kind: string(kind), Name: name, SecretHash: hash,
 		Role: string(role), DisplayName: displayName, BoundIP: boundIP,
-		CreatedAt: a.now(), ExpiresAt: expiresAt,
+		CreatedAt: a.now(), ExpiresAt: expiresAt, Scope: scope,
 	}); err != nil {
 		return "", err
 	}

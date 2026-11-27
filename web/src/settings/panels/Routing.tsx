@@ -28,10 +28,17 @@
 // to components/RoutingTree.tsx (shared with the Dashboard's read-only copy)
 // and grew the real compressor state × health link matrix; this panel keeps
 // the admin-only long-press enable/disable interaction.
+//
+// Sprint 2 Stream 2D (docs/ui-remediation-plan-2026-11.md): ConfigCard's
+// restart footer + health poll moved out of the card body into the local
+// RestartFooter component below (behavior-preserving extraction — the one
+// "pending restart changes" summary pattern's prototype for S3; see its
+// doc comment for the one wiring fix it carries).
 import { useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
+import { useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Icon } from "../../components/Icon";
+import { RestartOverlay } from "../../components/RestartOverlay";
 import { RoutingTree } from "../../components/RoutingTree";
 import { SaveButton } from "../../components/SaveButton";
 import { StepUpModal } from "../../components/StepUpModal";
@@ -94,8 +101,6 @@ function Behavior({ canAdmin }: { canAdmin: boolean }) {
             onChange={(v) => g.setField("busy_mode", String(v))} />
           <Field rec={F["routing.inject_stream_usage"]} value={g.active.inject_stream_usage} disabled={!canAdmin}
             onChange={(v) => g.setField("inject_stream_usage", Boolean(v))} />
-          <Field rec={F["routing.compressor_local_enabled"]} value={g.active.compressor_local_enabled} disabled={!canAdmin}
-            onChange={(v) => g.setField("compressor_local_enabled", Boolean(v))} />
           <Field rec={F["routing.provider_failover"]} value={g.active.provider_failover} disabled={!canAdmin}
             onChange={(v) => g.setField("provider_failover", Boolean(v))} />
           <Field rec={F["routing.capability_substitution"]} value={g.active.capability_substitution} disabled={!canAdmin}
@@ -113,33 +118,44 @@ function Behavior({ canAdmin }: { canAdmin: boolean }) {
   );
 }
 
-function RestartOverlay({ onDone }: { onDone: () => void }) {
+// RestartFooter — Sprint 2 Stream 2D: the router-config card's restart-aware
+// save frame, extracted from ConfigCard where it lived inline (the one
+// "pending restart changes" summary pattern's prototype, review §A3 "Restart
+// UX varies per section"). Owns everything restart-shaped in the card:
+// restartRequired (useStatus), the restart mutation + health poll (the same
+// pollToken guard idiom as Danger.tsx's RestartAction), the Save /
+// Save-and-Restart / Restart footer, and the restart gate's StepUpModal.
+// The card's fields ride as children so the restart error note keeps its
+// pre-extraction position above them; per-field apply badges stay
+// suppressed on those fields (hideApplyBadge) — this footer is the card's
+// one restart surface. One deliberate wiring fix carried by the extraction,
+// flagged here so it's not silent: the pre-extraction ConfigCard called
+// gate.handle on restart errors but never rendered that gate's modal, so a
+// step-up-required 403 (POST /system/restart is
+// requireAssurance(action.system.restart)-gated) silently no-oped; this
+// follows RestartAction's working idiom instead — modal shows, retry runs.
+function RestartFooter({
+  canAdmin,
+  dirty,
+  pending,
+  isError,
+  save,
+  reset,
+  children,
+}: {
+  canAdmin: boolean;
+  dirty: boolean;
+  pending: boolean;
+  isError: boolean;
+  save: () => Promise<void>;
+  reset: () => void;
+  children: ReactNode;
+}) {
   const { t } = useTranslation("settings");
-  return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <h3>{t("danger.restart_overlay_title")}</h3>
-        <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.6, marginBottom: 14 }}>
-          <Trans i18nKey="danger.restart_overlay_body" ns="settings" components={{ b0: <b />, b1: <b /> }} />
-        </div>
-        <div className="dot-busy" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--warn)", boxShadow: "0 0 7px var(--warn)", margin: "0 auto" }} />
-        <div className="form-actions" style={{ marginTop: 16 }}>
-          <button className="btn" onClick={onDone}>{t("danger.give_up")}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ConfigCard({ canAdmin }: { canAdmin: boolean }) {
-  const { t } = useTranslation("settings");
-  const cfg = useRouterConfig();
-  const update = useUpdateRouterConfig();
   const restart = useSystemRestart();
   const status = useStatus();
   const qc = useQueryClient();
   const gate = useStepUpGate();
-  const g = useSettingsGroup(cfg.data, update);
   const [restarting, setRestarting] = useState(false);
   const [restartError, setRestartError] = useState<string | null>(null);
   const pollToken = useRef(0);
@@ -189,12 +205,45 @@ function ConfigCard({ canAdmin }: { canAdmin: boolean }) {
 
   async function saveAndRestart() {
     try {
-      await g.save();
+      await save();
       triggerRestart();
     } catch {
-      // g.save already set g.error via useSettingsGroup
+      // save already surfaced its error via useSettingsGroup (g.error)
     }
   }
+
+  return (
+    <>
+      {restartError && <div className="error-note" style={{ marginBottom: 12 }}>{restartError}</div>}
+      {children}
+      {canAdmin && (
+        <div className="form-actions" style={{ marginTop: 12, gap: 8 }}>
+          {dirty ? (
+            <>
+              <button className="btn" onClick={reset} title={t("routing.discard_title")}>{t("routing.discard")}</button>
+              <SaveButton pending={pending} isError={isError} onClick={save} />
+              <button className="btn primary" disabled={pending || restarting} onClick={saveAndRestart}>
+                {pending ? t("routing.saving") : t("routing.save_and_restart")}
+              </button>
+            </>
+          ) : restartRequired ? (
+            <button className="btn primary" disabled={restart.isPending || restarting} onClick={triggerRestart}>
+              {restart.isPending ? t("danger.requesting") : t("routing.restart_button")}
+            </button>
+          ) : null}
+        </div>
+      )}
+      {restarting && <RestartOverlay onDone={dismissRestart} />}
+      <StepUpModal open={gate.open} requiredFactor={gate.factor} onSuccess={gate.onSuccess} onClose={gate.onClose} />
+    </>
+  );
+}
+
+function ConfigCard({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("settings");
+  const cfg = useRouterConfig();
+  const update = useUpdateRouterConfig();
+  const g = useSettingsGroup(cfg.data, update);
 
   if (cfg.isError) {
     return (
@@ -221,44 +270,27 @@ function ConfigCard({ canAdmin }: { canAdmin: boolean }) {
           {t("routing.config_note")}
         </div>
         {g.error && <div className="error-note" style={{ marginBottom: 12 }}>{g.error}</div>}
-        {restartError && <div className="error-note" style={{ marginBottom: 12 }}>{restartError}</div>}
-        <div className="form-grid">
-          <Field rec={F["routing.connect_timeout_s"]} value={g.active.connect_timeout_s} disabled={!canAdmin} hideApplyBadge
-            onChange={(v) => g.setField("connect_timeout_s", Number(v))} />
-          <Field rec={F["routing.request_timeout_s"]} value={g.active.request_timeout_s} disabled={!canAdmin} hideApplyBadge
-            onChange={(v) => g.setField("request_timeout_s", Number(v))} />
-          <Field rec={F["routing.health_ttl_s"]} value={g.active.health_ttl_s} disabled={!canAdmin} hideApplyBadge
-            onChange={(v) => g.setField("health_ttl_s", Number(v))} />
-          <Field rec={F["routing.max_retries_per_backend"]} value={g.active.max_retries_per_backend} disabled={!canAdmin} hideApplyBadge
-            onChange={(v) => g.setField("max_retries_per_backend", Number(v))} />
-          <Field rec={F["routing.ensure_loaded_timeout_s"]} value={g.active.ensure_loaded_timeout_s} disabled={!canAdmin} hideApplyBadge
-            onChange={(v) => g.setField("ensure_loaded_timeout_s", Number(v))} />
-        </div>
-        <div className="form-grid wide">
-          <Field rec={F["routing.embedding_url"]} value={g.active.embedding_url} disabled={!canAdmin} hideApplyBadge
-            onChange={(v) => g.setField("embedding_url", String(v))} />
-          <Field rec={F["routing.tts_url"]} value={g.active.tts_url} disabled={!canAdmin} hideApplyBadge
-            onChange={(v) => g.setField("tts_url", String(v))} />
-        </div>
-        {canAdmin && (
-          <div className="form-actions" style={{ marginTop: 12, gap: 8 }}>
-            {g.dirty ? (
-              <>
-                <button className="btn" onClick={g.reset} title={t("routing.discard_title")}>{t("routing.discard")}</button>
-                <SaveButton pending={g.pending} isError={g.isError} onClick={g.save} />
-                <button className="btn primary" disabled={g.pending || restarting} onClick={saveAndRestart}>
-                  {g.pending ? t("routing.saving") : t("routing.save_and_restart")}
-                </button>
-              </>
-            ) : restartRequired ? (
-              <button className="btn primary" disabled={restart.isPending || restarting} onClick={triggerRestart}>
-                {restart.isPending ? t("danger.requesting") : t("routing.restart_button")}
-              </button>
-            ) : null}
+        <RestartFooter canAdmin={canAdmin} dirty={g.dirty} pending={g.pending} isError={g.isError} save={g.save} reset={g.reset}>
+          <div className="form-grid">
+            <Field rec={F["routing.connect_timeout_s"]} value={g.active.connect_timeout_s} disabled={!canAdmin} hideApplyBadge
+              onChange={(v) => g.setField("connect_timeout_s", Number(v))} />
+            <Field rec={F["routing.request_timeout_s"]} value={g.active.request_timeout_s} disabled={!canAdmin} hideApplyBadge
+              onChange={(v) => g.setField("request_timeout_s", Number(v))} />
+            <Field rec={F["routing.health_ttl_s"]} value={g.active.health_ttl_s} disabled={!canAdmin} hideApplyBadge
+              onChange={(v) => g.setField("health_ttl_s", Number(v))} />
+            <Field rec={F["routing.max_retries_per_backend"]} value={g.active.max_retries_per_backend} disabled={!canAdmin} hideApplyBadge
+              onChange={(v) => g.setField("max_retries_per_backend", Number(v))} />
+            <Field rec={F["routing.ensure_loaded_timeout_s"]} value={g.active.ensure_loaded_timeout_s} disabled={!canAdmin} hideApplyBadge
+              onChange={(v) => g.setField("ensure_loaded_timeout_s", Number(v))} />
           </div>
-        )}
+          <div className="form-grid wide">
+            <Field rec={F["routing.embedding_url"]} value={g.active.embedding_url} disabled={!canAdmin} hideApplyBadge
+              onChange={(v) => g.setField("embedding_url", String(v))} />
+            <Field rec={F["routing.tts_url"]} value={g.active.tts_url} disabled={!canAdmin} hideApplyBadge
+              onChange={(v) => g.setField("tts_url", String(v))} />
+          </div>
+        </RestartFooter>
       </div>
-      {restarting && <RestartOverlay onDone={dismissRestart} />}
       <StepUpModal open={g.gate.open} requiredFactor={g.gate.factor} onSuccess={g.gate.onSuccess} onClose={g.gate.onClose} />
     </>
   );

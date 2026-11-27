@@ -124,6 +124,10 @@ type Deps struct {
 	// wrapped engine is still the real gate.
 	MaintenanceBlocked func(ctx context.Context) (bool, string)
 
+	// PooledConfig reports whether the named catalog config is hosted by the specialist pool, which owns it exclusively (ADR-0022). A request to
+	// load one into an LLM slot fails at once with a clear message, BEFORE anything is evicted for it. Nil = nothing is pooled.
+	PooledConfig func(ctx context.Context, config string) bool
+
 	// Fallback seeds Config when the settings store has no value yet —
 	// Phase 9 passes the config file's [scheduler] defaults. Zero value
 	// means DefaultConfig().
@@ -267,6 +271,11 @@ func (c *Core) EnsureLoaded(ctx context.Context, req EnsureRequest) (Ticket, err
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, c.d.DefaultTimeout)
 		defer cancel()
+	}
+
+	if c.d.PooledConfig != nil && c.d.PooledConfig(ctx, req.Model) {
+		return Ticket{TicketID: newTicketID(), Model: req.Model, RequestedBy: req.RequestedBy, Status: StatusFailed},
+			fmt.Errorf("sched: %s is a specialist kept loaded by the specialist pool, so it is not loaded into an LLM slot", req.Model)
 	}
 
 	if slot := c.findLoaded(req.Model, req.TargetSlot); slot != "" {
@@ -447,6 +456,11 @@ func (c *Core) attemptLoad(ctx context.Context, req EnsureRequest, cfg Config, r
 	if slot := c.findLoaded(req.Model, req.TargetSlot); slot != "" {
 		return loadOutcome{terminal: true, success: true, slot: slot}
 	}
+	// A load the scheduler did not start (dashboard, MCP, CLI) is running: wait for it. Placing now would be refused by the engine
+	// (the config is already active) or start a second copy.
+	if slot := c.findLoading(req.Model, req.TargetSlot); slot != "" {
+		return loadOutcome{message: fmt.Sprintf("%s is already loading on %s", req.Model, slot)}
+	}
 
 	pl := c.place(ctx, req.Model, req.TargetSlot, cfg, reservations, horizon)
 	if pl.slot == "" && !pl.evictComfy {
@@ -467,6 +481,18 @@ func (c *Core) attemptLoad(ctx context.Context, req EnsureRequest, cfg Config, r
 	if pl.evictComfy {
 		if err := c.stopComfyForMemory(ctx, req.Model); err != nil {
 			return loadOutcome{message: err.Error()}
+		}
+	}
+
+	// The plan rested on an estimate of what each eviction gives back. Admit the load on a fresh measurement, so a short estimate cannot put
+	// a model on top of memory that is still held; the next poll plans again from what is true now.
+	if len(pl.evict) > 0 || pl.evictComfy {
+		fit, err := c.d.Engine.FitPlan(req.Model)
+		if err != nil {
+			return loadOutcome{message: fmt.Sprintf("fit check after eviction failed: %v", err), reason: ReasonFitProbeFailed}
+		}
+		if !fit.Fits {
+			return loadOutcome{message: fmt.Sprintf("still short of memory for %s after eviction: %s", req.Model, fit.Message)}
 		}
 	}
 
@@ -581,6 +607,11 @@ func (c *Core) Status() Status {
 	}
 	if free := st.MemoryBudget.TotalBytes - st.MemoryBudget.UsedBytes; free > 0 {
 		st.MemoryBudget.FreeBytes = free
+	}
+	// The host-memory ledger supersedes the GTT-ceiling figure: on this machine GTT pages are system RAM, so the ceiling overstates what is free.
+	if l := snap.Metrics.Ledger; l.HostTotal > 0 || l.ModelBudget > 0 {
+		st.MemoryBudget.Ledger = l
+		st.MemoryBudget.FreeBytes = l.Free
 	}
 
 	c.mu.Lock()

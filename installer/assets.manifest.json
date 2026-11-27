@@ -50,7 +50,7 @@
         { "filename": "qwen-talker-1.7b-base-Q8_0.gguf", "sha256": null, "size_bytes": null },
         { "filename": "qwen-tokenizer-12hz-Q8_0.gguf", "sha256": null, "size_bytes": null }
       ],
-      "notes": "Qwen3-TTS talker + codec pair (forge-tts-base.service). Reference host keeps these under qwentts.cpp/models; mirrored into the models/ layout here."
+      "notes": "Qwen3-TTS talker + codec pair (the base/clone speech engine, a Forge specialist-pool occupant). Reference host keeps these under qwentts.cpp/models; mirrored into the models/ layout here."
     },
     {
       "id": "qwen3-forced-aligner",
@@ -93,6 +93,39 @@
         { "filename": null, "sha256": null, "size_bytes": null }
       ],
       "notes": "Placeholder entry — exact upstream identity TBD."
+    },
+    {
+      "id": "qwen36-35b-a3b-w4w5-rtn-rad",
+      "role": "optional",
+      "hf_repo": "jsaigou/Qwen3.6-35B-A3B-W4W5-RTN-radiance",
+      "gguf": false,
+      "dest_rel_path": "models/Qwen3.6-35B-A3B-W4W5-RTN",
+      "files": [
+        { "filename": "qwen3.6-35b-a3b-w4w5-rtn.rad", "sha256": "617a51f4cfe0e6b7d09b411d3892cd5e9f598aa4ad99a4c4d1bbbf4acb36a5b8", "size_bytes": 22564196352 }
+      ],
+      "notes": "Qwen3.6-35B-A3B as a 21 GiB Radiance container (W4 gate/up, W5 down experts, round-to-nearest). Needs the Radiance engine fork (installed by install.sh as 'radiance-unofficial/...'); a .rad is not a GGUF and llama.cpp cannot load it. After the download, add a config for the file in Settings → Catalog (Add Model). Licence: see the repository's LICENSE (Qwen Community License 1.0 for the Qwen weights; Unsloth credited for the quantisation map)."
+    },
+    {
+      "id": "qwen36-35b-a3b-w4w5-gptq-rad",
+      "role": "optional",
+      "hf_repo": "jsaigou/Qwen3.6-35B-A3B-W4W5-GPTQ-radiance",
+      "gguf": false,
+      "dest_rel_path": "models/Qwen3.6-35B-A3B-W4W5-GPTQ",
+      "files": [
+        { "filename": "qwen3.6-35b-a3b-w4w5-gptq.rad", "sha256": "86a820e904650a552e18cfffbf411792d2d4fcd22876f9b95266e6cb030fd955", "size_bytes": 22564196352 }
+      ],
+      "notes": "The same layout as the RTN container with GPTQ-calibrated experts (slightly closer to FP8 at the same size and speed). Needs the Radiance engine fork (installed by install.sh as 'radiance-unofficial/...'); a .rad is not a GGUF and llama.cpp cannot load it. After the download, add a config for the file in Settings → Catalog (Add Model). Licence: see the repository's LICENSE (Qwen Community License 1.0 for the Qwen weights; Unsloth credited for the quantisation map)."
+    },
+    {
+      "id": "qwen38-flash-next-ud-size-rad",
+      "role": "optional",
+      "hf_repo": "jsaigou/Qwen3.8-Flash-Next-UD-Size-radiance",
+      "gguf": false,
+      "dest_rel_path": "models/Qwen3.8-Flash-Next-UD-Size",
+      "files": [
+        { "filename": "flash-size.rad", "sha256": "27fadd11f5fd77b8cb19ed307f4f661f8ec439c2630c215cdfaaacb5513eabd8", "size_bytes": 90593767424 }
+      ],
+      "notes": "Qwen3.8-Flash-Next as an 84 GiB Radiance container (Unsloth Dynamic v3.1 map, size policy), revision 2 of 2026-11-18. Needs about 94 GiB of host memory with a 3 x 131K context. Needs the Radiance engine fork (installed by install.sh as 'radiance-unofficial/...'); a .rad is not a GGUF and llama.cpp cannot load it. After the download, add a config for the file in Settings → Catalog (Add Model). Licence: see the repository's LICENSE (Qwen Community License 1.0 for the Qwen weights; Unsloth credited for the quantisation map)."
     },
     {
       "id": "comfyui",

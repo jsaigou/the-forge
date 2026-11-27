@@ -2,6 +2,7 @@ package tts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 )
@@ -27,9 +28,6 @@ type dualEngine struct {
 }
 
 func NewDualEngine(qwen *QwenTTS, kokoro *kokoroBackend, defaultVoice, defaultFastVoice string) *dualEngine {
-	if defaultVoice == "" {
-		defaultVoice = "billie"
-	}
 	if defaultFastVoice == "" {
 		defaultFastVoice = "af_heart"
 	}
@@ -54,11 +52,31 @@ func (d *dualEngine) routeKokoro(req SpeechRequest) bool {
 	return IsKokoroVoice(req.Voice)
 }
 
-func (d *dualEngine) Speech(ctx context.Context, req SpeechRequest) (*SpeechResult, error) {
-	if req.Voice == "" {
-		// Default to premium; the UI's quality toggle sends an explicit id.
+// ErrNoVoice: the request names no voice and this node has no default. There is no built-in one: which voices exist is the node's own.
+var ErrNoVoice = errors.New("no voice was given and no default voice is configured (FORGE_TTS_DEFAULT_VOICE)")
+
+// withVoice fills in the voice of a request that names none: the fast default for a request that asks for the fast engine, else the configured default.
+func (d *dualEngine) withVoice(req SpeechRequest) (SpeechRequest, error) {
+	if req.Voice != "" {
+		return req, nil
+	}
+	if d.kokoro != nil && req.Model == "kokoro" {
+		req.Voice = d.defaultFastVoice
+	} else {
 		req.Voice = d.defaultVoice
 	}
+	if req.Voice == "" {
+		return req, ErrNoVoice
+	}
+	return req, nil
+}
+
+func (d *dualEngine) Speech(ctx context.Context, req SpeechRequest) (*SpeechResult, error) {
+	req, err := d.withVoice(req)
+	if err != nil {
+		return nil, err
+	}
+	req = applyTags(req) // no engine reads a style tag aloud: they are taken out here, and only an engine that can steer is told about them
 	if d.routeKokoro(req) {
 		spec := SynthSpec{
 			Mode:     ModeKokoro,
@@ -68,9 +86,26 @@ func (d *dualEngine) Speech(ctx context.Context, req SpeechRequest) (*SpeechResu
 			Speed:    req.Speed,
 			Tier:     "fast",
 		}
-		return d.kokoro.Speech(ctx, spec, req.Input)
+		res, err := d.kokoro.Speech(ctx, spec, req.Input)
+		if err == nil && res != nil {
+			res.Notes = req.styled.ignoredNotes("Kokoro voices cannot be steered")
+		}
+		return res, err
 	}
 	return d.qwen.Speech(ctx, req)
+}
+
+// SpeechStream streams a premium (Qwen) voice. A fast-tier voice is not streamed: its engine answers a whole utterance in well under a second.
+func (d *dualEngine) SpeechStream(ctx context.Context, req SpeechRequest) (*SpeechStream, error) {
+	req, err := d.withVoice(req)
+	if err != nil {
+		return nil, err
+	}
+	req = applyTags(req)
+	if d.routeKokoro(req) {
+		return nil, ErrNoStream
+	}
+	return d.qwen.SpeechStream(ctx, req)
 }
 
 func (d *dualEngine) Preview(ctx context.Context, p PreviewRequest) (*SpeechResult, error) {
@@ -149,6 +184,9 @@ func (d *dualEngine) Health(ctx context.Context) (map[string]any, error) {
 		out["qwen"] = map[string]any{"status": "error", "detail": err.Error()}
 	} else {
 		out["qwen"] = h
+		if h["status"] == "degraded" {
+			out["status"] = "degraded"
+		}
 	}
 	return out, nil
 }

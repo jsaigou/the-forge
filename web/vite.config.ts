@@ -12,7 +12,9 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt', not 'autoUpdate': a new worker waits until PWAUpdateBanner's "reload now" tells it to take over.
+      // With 'autoUpdate' and manual registration (below) the plugin neither skips waiting nor raises the prompt.
+      registerType: 'prompt',
       // Manual registration (src/components/PWAUpdateBanner.tsx, via
       // virtual:pwa-register/react) instead of the auto-injected bare
       // <script> — the default script just calls
@@ -40,13 +42,23 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // The worker answers one page, "/", from the network first, so a reload always shows the deployed version and
+        // the cached copy serves only when the server is unreachable. Every other page (/login, /setup) is rendered by
+        // the server and must reach it: answering them with the app shell loops on "Loading…" for anyone signed out.
+        // So: no navigation fallback, and index.html is not precached.
+        navigateFallback: null,
+        globPatterns: ['**/*.{js,css}'],
         // Never cache API responses — the SSE/Query layer is the source of
         // truth for live data; only the app shell should work offline.
-        navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
             urlPattern: /^\/api\//,
             handler: 'NetworkOnly',
+          },
+          {
+            urlPattern: ({ request, url }) => request.mode === 'navigate' && url.pathname === '/',
+            handler: 'NetworkFirst',
+            options: { cacheName: 'forge-shell' },
           },
         ],
         // clientsClaim (found live, 2026-09-14, chasing the same stale-tab
@@ -57,8 +69,7 @@ export default defineConfig({
         // never fires and PWAUpdateBanner's "reload now" click silently did
         // nothing. Confirmed by hand: sent {type:'SKIP_WAITING'} directly to
         // a waiting worker with clientsClaim absent — no controllerchange
-        // within 3s. registerType:'autoUpdate' does NOT imply this; it's a
-        // separate opt-in.
+        // within 3s. It's a separate opt-in.
         clientsClaim: true,
       },
     }),

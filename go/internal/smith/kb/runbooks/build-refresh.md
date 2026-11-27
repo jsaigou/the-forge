@@ -159,10 +159,13 @@ the build for it.
    technical paragraph) with `max_tokens: 8`. It must return 200 and
    eventually complete — for 1M-context canaries "eventually" means tens
    of minutes, so use a matching client timeout.
-3. **Multi-turn cache reuse:** for kintsugi/hybrid models, a second turn in
-   the same slot must show a small `prompt eval time` (tens of tokens, NOT a
-   full reprocess of the conversation) and log `Kintsugi: saved generation
-   checkpoint`.
+3. **Multi-turn cache reuse:** for hybrid/recurrent models, a second turn in
+   the same slot must re-evaluate only tens of tokens, NOT the whole
+   conversation. Send a long prompt, then resend it plus the assistant's reply
+   and a short follow-up, and read `timings.prompt_n` (tens) and
+   `timings.cache_n` (about the whole prefix) from the response. The old log
+   line `Kintsugi: saved generation checkpoint` no longer exists: the Kintsugi
+   patches were retired once plain upstream matched them (docs/adr/0019).
 4. **Unload/reload cycling:** unload and reload the slot 3×, confirming
    `/health` + a tiny completion each time.
 5. Check for the failure signatures:

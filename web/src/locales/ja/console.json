@@ -1,4 +1,8 @@
 {
+  "smith_tray": {
+    "title": "SMITH",
+    "expand_hint": "（クリックで展開）"
+  },
   "provider": {
     "source": "ソース: {{source}}",
     "no_api": "APIなし",
@@ -23,9 +27,11 @@
   },
   "gallery": {
     "title": "コンフィグを選択",
+    "sort_favorites": "お気に入り",
     "sort_alpha": "A–Z",
     "sort_most_used": "利用頻度順",
     "sort_newest": "新着順",
+    "no_favorites": "お気に入りはまだありません。設定をお気に入りに追加するか、別の並び順ですべて表示してください。",
     "loading": "コンフィグカタログを読み込み中…"
   },
   "bay": {
@@ -46,7 +52,10 @@
     "active": "実行中",
     "footprint": "使用量",
     "context": "コンテキスト",
-    "badges": "バッジ"
+    "badges": "バッジ",
+    "load_failed_mode": "{{mode}} を読み込めませんでした",
+    "load_failed_logs": "直近のログ",
+    "dismiss": "閉じる"
   },
   "services": {
     "loading": "サービスを読み込み中…",

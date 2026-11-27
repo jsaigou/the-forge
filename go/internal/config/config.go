@@ -19,17 +19,20 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 
+	"github.com/jsaigou/the-forge/internal/enginekind"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
 // Config is the root of forge's infra config, built by LoadFromStore.
 type Config struct {
-	Server       Server
-	Paths        Paths
-	Slots        map[string]Slot
-	Ports        map[string]int // auxiliary services: embedding, stt, ...
-	ServiceIcons map[string]string
+	Server          Server
+	Paths           Paths
+	Slots           map[string]Slot // LLM pool (store.PoolLLM) only
+	SpecialistSlots map[string]Slot // specialist pool (store.PoolSpecialist, ADR-0022); empty until slots with that pool exist
+	Ports           map[string]int  // auxiliary services: embedding, stt, ...
+	ServiceIcons    map[string]string
 	// ServiceLinks overrides the Console services strip's ↗ "open in a new
 	// window" link (web/src/components/ServicesBar.tsx's ServiceChip) for a
 	// service by its display Name. Empty/absent by default — the frontend
@@ -42,11 +45,30 @@ type Config struct {
 	// feedback 2026-09-22: the ComfyUI link was wrong and there was no way
 	// to fix it without a source edit.
 	ServiceLinks map[string]string
-	Modes        map[string]Mode
-	Scheduler    SchedulerDefault
-	Monitor      Monitor
-	Tailscale    Tailscale
-	Cost         Cost
+	// ExternalTools are link-only Console entries for tools that run elsewhere (voice-studio and talk-studio on Core): no unit, no port, no state
+	// here, just a name, an icon and a link. Store-backed (infra.external_tools) and SIGHUP-reloadable like ServiceLinks. Added 2026-11-20.
+	ExternalTools []ExternalTool
+	Modes         map[string]Mode
+	Scheduler     SchedulerDefault
+	Monitor       Monitor
+	Memory        Memory
+	Tailscale     Tailscale
+	Cost          Cost
+}
+
+// ExternalTool is one link-only Console entry.
+type ExternalTool struct {
+	Name        string `json:"name"`
+	URL         string `json:"url"`
+	Icon        string `json:"icon,omitempty"` // an Icon manifest slug (web/src/assets/icons/manifest.ts); empty shows none
+	Description string `json:"description,omitempty"`
+}
+
+var voiceStudioName = regexp.MustCompile(`(?i)voice[\s_-]?studio`)
+
+// IsVoiceStudio reports whether an external tool is a Voice Studio, by its name or address (the web page uses the same rule).
+func IsVoiceStudio(t ExternalTool) bool {
+	return voiceStudioName.MatchString(t.Name) || voiceStudioName.MatchString(t.URL)
 }
 
 // defaultServiceIcons are the fallback vendor-icon manifest slugs (see
@@ -140,6 +162,9 @@ type Slot struct {
 	Order int    // display/placement order
 }
 
+// Slots is the LLM pool only, on purpose: about forty readers (collector, Smith, status API, TUI, profiler) iterate it and
+// treat every entry as an LLM slot. The specialist pool (ADR-0022) is Config.SpecialistSlots.
+
 // Mode mirrors the V4 [modes.<name>] block (docs/design.md), minus anything
 // app-mutated.
 type Mode struct {
@@ -165,15 +190,31 @@ type Mode struct {
 
 // Service is one llama-server (or vllm) launch spec inside a mode.
 type Service struct {
-	Model           string
-	Alias           string
-	Context         int
-	PortRole        string // a1 | a2 | a3 | a4 | none
-	Backend         string // vulkan | rocm | vllm (default vulkan)
+	Model    string
+	Alias    string
+	Context  int
+	PortRole string // a1 | a2 | a3 | a4 | none
+	Backend  string // GPU path: vulkan | rocm (default vulkan); the legacy value vllm is still read as the vLLM engine
+	// EngineKind is the engine's kind from the catalog engines row (enginekind.LlamaCpp | VLLM). Empty means llama.cpp, unless
+	// Backend is the legacy "vllm"; read it through Engine().
+	EngineKind      string
 	LlamaBin        string // optional per-service llama-server override (custom builds ahead of upstream); empty → launcher picks by backend
 	MMProj          string
 	ExtraArgs       []string
 	StartupTimeoutS int
+	// LaunchEnv is the build's launch_env (catalog builds.launch_env): environment variables the engine process is started with, for the kinds that
+	// take one (enginekind.Spec.UsesLaunchEnv). Empty for file-config services and kinds that do not.
+	LaunchEnv map[string]string
+	// BuildID, VariantID and WeightArtifactID identify what the catalog config runs; with NCtx (Context) and ExtraArgs they form the memory tuple a
+	// curated figure must have been measured at (launch.MemoryTuple). Zero for file-config services.
+	BuildID          int64
+	VariantID        int64
+	WeightArtifactID int64
+}
+
+// Engine is the engine Spec for this service (internal/enginekind). An unknown kind is an error: callers must refuse to launch.
+func (s Service) Engine() (enginekind.Spec, error) {
+	return enginekind.Resolve(s.EngineKind, s.Backend)
 }
 
 // SchedulerDefault seeds scheduler tunables; runtime changes persist to the
@@ -193,6 +234,16 @@ type Monitor struct {
 	HangSustainS    int `json:"hang_sustain_s"`      // default 90
 	SwitchCooldownS int `json:"switch_cooldown_s"`   // default 120
 	GTTWarnPct      int `json:"gtt_warn_pct"`        // default 85
+}
+
+// Memory is the host-memory policy behind the fit gate and the dashboard meter (internal/memledger). On Strix Halo GTT pages are system RAM,
+// so host RAM is partitioned ahead of time: OS floor + declared always-on specialists + growth margin are reserved and the rest is the model
+// budget. HostFloorBytes is the separate dynamic guard on MemAvailable. All values are bytes; zero means "use the default".
+type Memory struct {
+	OSFloorBytes      int64 `json:"os_floor_bytes"`      // default 2 GiB: kernel, slab, sshd, tailscale, the forge daemon
+	GrowthMarginBytes int64 `json:"growth_margin_bytes"` // default 4 GiB: specialist growth, load-time spikes, page-cache churn
+	HostFloorBytes    int64 `json:"host_floor_bytes"`    // default 8 GiB: MemAvailable the dynamic guard will not plan below
+	SwapWarnBytes     int64 `json:"swap_warn_bytes"`     // default 1 GiB: swap in use above this raises the swap_pressure check
 }
 
 // Tailscale holds mesh facts.
@@ -359,6 +410,12 @@ func New(cfg Config) (*Config, error) {
 	return &cfg, nil
 }
 
+// StoreReader is the part of the store LoadFromStore reads; store.Store and *store.ReadOnlyDB both satisfy it.
+type StoreReader interface {
+	Settings() store.Settings
+	Catalog() store.Catalog
+}
+
 // LoadFromStore builds a *Config from store-backed infra settings plus the
 // `slots` table, instead of parsing forge.toml (TOML decommission Phase 1,
 // docs/v5-toml-decommission.md §4). It returns the identical *Config shape
@@ -376,20 +433,22 @@ func New(cfg Config) (*Config, error) {
 //
 // Not wired into main.go yet (Phase 3 wires this in as part of the actual
 // cutover) — building and testing it standalone here touches nothing live.
-func LoadFromStore(ctx context.Context, st store.Store) (*Config, error) {
+func LoadFromStore(ctx context.Context, st StoreReader) (*Config, error) {
 	cfg := &Config{Modes: map[string]Mode{}}
 	settings := st.Settings()
 
 	for key, dst := range map[string]any{
-		"infra.server":        &cfg.Server,
-		"infra.paths":         &cfg.Paths,
-		"infra.ports":         &cfg.Ports,
-		"infra.service_icons": &cfg.ServiceIcons,
-		"infra.service_links": &cfg.ServiceLinks,
-		"infra.scheduler":     &cfg.Scheduler,
-		"infra.monitor":       &cfg.Monitor,
-		"infra.tailscale":     &cfg.Tailscale,
-		"infra.cost":          &cfg.Cost,
+		"infra.server":         &cfg.Server,
+		"infra.paths":          &cfg.Paths,
+		"infra.ports":          &cfg.Ports,
+		"infra.service_icons":  &cfg.ServiceIcons,
+		"infra.service_links":  &cfg.ServiceLinks,
+		"infra.external_tools": &cfg.ExternalTools,
+		"infra.scheduler":      &cfg.Scheduler,
+		"infra.monitor":        &cfg.Monitor,
+		"infra.memory":         &cfg.Memory,
+		"infra.tailscale":      &cfg.Tailscale,
+		"infra.cost":           &cfg.Cost,
 	} {
 		if err := getSetting(ctx, settings, key, dst); err != nil {
 			return nil, err
@@ -401,8 +460,14 @@ func LoadFromStore(ctx context.Context, st store.Store) (*Config, error) {
 		return nil, fmt.Errorf("config: load slots: %w", err)
 	}
 	cfg.Slots = make(map[string]Slot, len(slots))
+	cfg.SpecialistSlots = map[string]Slot{}
 	for _, s := range slots {
-		cfg.Slots[s.Name] = Slot{Unit: s.Unit, Port: s.Port, Label: s.Label, Order: s.SortOrder}
+		slot := Slot{Unit: s.Unit, Port: s.Port, Label: s.Label, Order: s.SortOrder}
+		if s.Pool == store.PoolSpecialist {
+			cfg.SpecialistSlots[s.Name] = slot
+			continue
+		}
+		cfg.Slots[s.Name] = slot
 	}
 
 	cfg.applyDefaults()
@@ -460,6 +525,18 @@ func (c *Config) applyDefaults() {
 	if c.Monitor.SwitchCooldownS == 0 {
 		c.Monitor.SwitchCooldownS = 120
 	}
+	if c.Memory.OSFloorBytes == 0 {
+		c.Memory.OSFloorBytes = 2 << 30
+	}
+	if c.Memory.GrowthMarginBytes == 0 {
+		c.Memory.GrowthMarginBytes = 4 << 30
+	}
+	if c.Memory.HostFloorBytes == 0 {
+		c.Memory.HostFloorBytes = 8 << 30
+	}
+	if c.Memory.SwapWarnBytes == 0 {
+		c.Memory.SwapWarnBytes = 1 << 30
+	}
 	if c.Monitor.GTTWarnPct == 0 {
 		c.Monitor.GTTWarnPct = 85
 	}
@@ -504,6 +581,9 @@ func (c *Config) applyDefaults() {
 	if c.ServiceLinks == nil {
 		c.ServiceLinks = map[string]string{}
 	}
+	if c.ExternalTools == nil {
+		c.ExternalTools = []ExternalTool{}
+	}
 	for name, svc := range c.allServices() {
 		if svc.Backend == "" {
 			svc.Backend = "vulkan"
@@ -540,15 +620,18 @@ func (c *Config) validate() error {
 	if c.Cost.MaxPowerW <= 0 || c.Cost.MaxPowerW > 2000 {
 		return fmt.Errorf("cost: max_power_w must be in (0, 2000], got %v", c.Cost.MaxPowerW)
 	}
+	// One port space across both pools: a specialist slot must not collide with an LLM slot or another specialist.
 	seen := map[int]string{}
-	for name, slot := range c.Slots {
-		if slot.Unit == "" || slot.Port == 0 {
-			return fmt.Errorf("slot %s: unit and port are required", name)
+	for _, pool := range []map[string]Slot{c.Slots, c.SpecialistSlots} {
+		for name, slot := range pool {
+			if slot.Unit == "" || slot.Port == 0 {
+				return fmt.Errorf("slot %s: unit and port are required", name)
+			}
+			if other, dup := seen[slot.Port]; dup {
+				return fmt.Errorf("slots %s and %s share port %d", other, name, slot.Port)
+			}
+			seen[slot.Port] = name
 		}
-		if other, dup := seen[slot.Port]; dup {
-			return fmt.Errorf("slots %s and %s share port %d", other, name, slot.Port)
-		}
-		seen[slot.Port] = name
 	}
 	for name, mode := range c.Modes {
 		if mode.Type == "service" {
@@ -559,6 +642,9 @@ func (c *Config) validate() error {
 			case "vulkan", "rocm", "vllm":
 			default:
 				return fmt.Errorf("mode %s: unknown backend %q", name, svc.Backend)
+			}
+			if _, err := svc.Engine(); err != nil {
+				return fmt.Errorf("mode %s: %w", name, err)
 			}
 		}
 	}

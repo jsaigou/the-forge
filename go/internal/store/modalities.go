@@ -28,9 +28,10 @@ type ModalityResolution struct {
 //  4. mmprojMissing → text only, reason ModalityReasonMMProjMissing.
 //  5. Otherwise inherit mdl.Modalities.
 //
-// mmprojMissing means "the linked mmproj artifact row exists AND is
-// flagged Missing". An unknown/zero artifact id must be passed as false,
-// which preserves the pre-extraction `ok && a.Missing` behavior exactly.
+// mmprojMissing means "the linked mmproj file is not available": the
+// artifact row is flagged Missing, or (see ResolveConfig, which does the
+// lookup for every caller) the row is gone. A Config with no mmproj
+// (MMProjArtifactID == 0) is handled by rule 3 whatever is passed here.
 func ResolveModalities(c Config, mdl Model, mmprojMissing bool) ModalityResolution {
 	nonText := func(mods []string) []string {
 		out := make([]string, 0, len(mods))

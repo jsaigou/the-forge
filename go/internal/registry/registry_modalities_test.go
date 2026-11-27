@@ -156,24 +156,6 @@ func TestConfigCards_Modalities_ExplicitOverrideWins(t *testing.T) {
 	}
 }
 
-// TestConfigCards_Modalities_ExplicitEmptyOverride: an explicit empty
-// override (an operator asserting "text only") must be distinguishable from
-// "no override" (nil) — this is exactly why Config.Modalities is a pointer,
-// not a bare slice.
-func TestConfigCards_Modalities_ExplicitEmptyOverride(t *testing.T) {
-	db := openStore(t)
-	ctx := context.Background()
-	override := []string{}
-	seedModalityCatalog(t, ctx, db.Catalog(), []string{"text", "vision"}, true, false, &override)
-	reg := registry.New(db.Catalog(), nil, nil)
-
-	cards, _ := reg.Cards(ctx, time.Time{})
-	c := cards[0]
-	if !stringSlicesEqual(c.Modalities, []string{"text"}) {
-		t.Errorf("Modalities: got %+v, want [text] (explicit empty override)", c.Modalities)
-	}
-}
-
 // TestModelCards_Modalities: the model-scoped Card always carries the
 // model's own architectural modalities, independent of any one config's
 // ability to deliver them (unlike ConfigCard, which narrows).

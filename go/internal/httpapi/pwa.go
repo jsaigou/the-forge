@@ -31,6 +31,7 @@ import (
 	"context"
 	"embed"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
 	"html"
@@ -76,6 +77,15 @@ func (s *Server) registerPWARoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /manifest.webmanifest", s.handlePWAFile("manifest.webmanifest", "application/manifest+json", "public, max-age=3600"))
 	mux.HandleFunc("GET /registerSW.js", s.handlePWAFile("registerSW.js", "application/javascript", "no-cache"))
 	mux.HandleFunc("GET /sw.js", s.handlePWAFile("sw.js", "application/javascript", "no-cache"))
+	// sw.js imports the Workbox runtime, whose name carries a content hash. A mux wildcard cannot match part of a
+	// segment, so each file in the build gets its own route. Without it the worker installs with nothing in it.
+	libs, err := fs.Glob(webDistRoot, "workbox-*.js")
+	if err != nil {
+		log.Printf("httpapi: pwa: cannot list the service worker's runtime: %v", err)
+	}
+	for _, name := range libs {
+		mux.HandleFunc("GET /"+name, s.handlePWAFile(name, "application/javascript", cacheImmutable))
+	}
 	mux.HandleFunc("GET /pwa-192.png", s.handlePWAFile("pwa-192.png", "image/png", cacheImmutable))
 	mux.HandleFunc("GET /pwa-512.png", s.handlePWAFile("pwa-512.png", "image/png", cacheImmutable))
 	mux.HandleFunc("GET /apple-touch-icon.png", s.handlePWAFile("apple-touch-icon.png", "image/png", cacheImmutable))
@@ -92,15 +102,8 @@ func (s *Server) registerPWARoutes(mux *http.ServeMux) {
 }
 
 // handleSPAIndex serves web_dist/index.html when present. Falls back to a
-// minimal "PWA not built" 503 if the build hasn't been run. Also serves
-// /workbox-<hash>.js (vite-plugin-pwa content-hashed filename).
+// minimal "PWA not built" 503 if the build hasn't been run.
 func (s *Server) handleSPAIndex(w http.ResponseWriter, r *http.Request) {
-	// Vite-plugin-pwa emits /workbox-<hash>.js with a content hash. Match
-	// the prefix and serve from web_dist root.
-	if strings.HasPrefix(r.URL.Path, "/workbox-") && strings.HasSuffix(r.URL.Path, ".js") {
-		s.handleWorkbox(w, r)
-		return
-	}
 	if r.URL.Path != "/" {
 		// Unknown non-API route — let the SPA's own router handle it.
 		// Serve index.html so client-side routes (/console, /scheduling,
@@ -157,24 +160,6 @@ func (s *Server) handlePWAFile(name, ctype, cacheControl string) http.HandlerFun
 	}
 }
 
-// handleWorkbox serves /workbox-<hash>.js. The hash is per-build (vite-
-// plugin-pwa), so we pattern-match the request path.
-func (s *Server) handleWorkbox(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/")
-	if name == "" || strings.Contains(name, "..") {
-		http.NotFound(w, r)
-		return
-	}
-	data, err := fs.ReadFile(webDistRoot, name)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "application/javascript")
-	w.Header().Set("Cache-Control", cacheImmutable)
-	_, _ = w.Write(data)
-}
-
 // loginPageStyle is shared by the login and setup HTML stubs. Input
 // font-size must stay ≥ 16px: iOS Safari auto-zooms on focus of smaller
 // inputs, which pinned the visual viewport on a blank region (mobile F1).
@@ -223,6 +208,17 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 // can't drift between them.
 func sanitizeNextPath(next string) string {
 	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
+		return "/"
+	}
+	// Browsers treat "\" as "/" ("/\evil.com" navigates to //evil.com) and strip tab/CR/LF from URLs before parsing, so a value that looks
+	// like a plain path to a string check can still be off-site. Refuse backslashes and control characters outright.
+	for _, r := range next {
+		if r == '\\' || r < ' ' || r == 0x7f {
+			return "/"
+		}
+	}
+	// Belt and braces: whatever survives must parse as a bare path with no scheme or host.
+	if u, err := url.Parse(next); err != nil || u.Scheme != "" || u.Host != "" || u.User != nil {
 		return "/"
 	}
 	return next
@@ -415,6 +411,8 @@ func contentTypeFor(name string) string {
 		return "font/woff2"
 	case strings.HasSuffix(name, ".woff"):
 		return "font/woff"
+	case strings.HasSuffix(name, ".ttf"):
+		return "font/ttf"
 	case strings.HasSuffix(name, ".ico"):
 		return "image/x-icon"
 	}

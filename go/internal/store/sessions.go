@@ -17,6 +17,10 @@ type sessionsView struct{ d *DB }
 func (d *DB) Sessions() Sessions { return sessionsView{d} }
 
 func (v sessionsView) Create(ctx context.Context, s Session) error {
+	// A zero ExpiresAt would be stored as -62135596800 (year 1), an already-expired session that every reader silently treats as unknown.
+	if s.ExpiresAt.IsZero() {
+		return fmt.Errorf("store: sessions.create: ExpiresAt is required")
+	}
 	assurance := s.Assurance
 	if assurance == "" {
 		assurance = "password"

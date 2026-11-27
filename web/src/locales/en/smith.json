@@ -36,6 +36,23 @@
       "down_more": "service \"{{name}}\" not listening on port {{port}} (+{{extra}} more)",
       "ok": "all {{count}} always-on service port(s) listening"
     },
+    "specialist_pool": {
+      "down": "engine \"{{name}}\" in {{slot}} is {{state}}{{error}}",
+      "down_more": "engine \"{{name}}\" in {{slot}} is {{state}}{{error}} (+{{extra}} more)",
+      "ok": "all always-on engines are running"
+    },
+    "speech_readiness": {
+      "ok": "speech works as set up",
+      "unused": "speech is not set up on this host",
+      "files_missing": "speech engine \"{{engine}}\" has lost files it needs{{more}}",
+      "failed": "speech engine \"{{engine}}\" failed to start{{more}}",
+      "no_slot": "speech engine \"{{engine}}\" has no dedicated slot to run in{{more}}",
+      "no_engine": "the speech service is set up but no speech engine is{{more}}",
+      "front_door_unset": "the speech service's address is not set (Routing){{more}}",
+      "front_door_down": "the speech service (forge-tts) is not answering{{more}}",
+      "key_expired": "the speech service's key has expired{{more}}",
+      "key_expiring": "the speech service's key expires in {{days}} day(s){{more}}"
+    },
     "forge_self": {
       "quick_check_failed": "DB integrity: PRAGMA quick_check reported {{detail}}",
       "fk_unavailable": "DB integrity ok (foreign_key_check unavailable)",
@@ -100,11 +117,40 @@
     "slot_model_identity": {
       "ok": "engine-configured alias matches the actually-running process on {{count}} loaded slot(s)"
     },
+    "slot_launch_matches_process": {
+      "mismatch": "slot {{slot}}: the running process's command line differs from its armed launch row at argument index {{arg_index}} (row has {{row_count}}, process has {{process_count}}) — it was probably started outside the scheduler (+{{more_count}} more)",
+      "ok": "{{count}} active slot(s) run exactly the command line of their armed launch row"
+    },
+    "slot_launch_matches_catalog": {
+      "differs": "slot {{slot}}: the launch the catalog would build for \"{{config}}\" differs from the armed row ({{reason}}) — expected after a catalog edit; reload the slot to apply it (+{{more_count}} more)",
+      "ok": "the catalog rebuilds the same launch as {{count}} armed row(s)"
+    },
+    "launcher_matches_embedded": {
+      "differs": "installed launcher {{path}} differs from the shim embedded in this forge binary — it will not be overwritten; compare and reinstall deliberately (+{{more_count}} more)",
+      "ok": "{{count}} installed slot launcher(s) match the embedded shim"
+    },
+    "radiance_host_prereqs": {
+      "catalog_error": "could not read the catalog to find Radiance builds: {{error}}",
+      "problem": "Radiance host prerequisite not met: {{first}} (+{{more_count}} more)",
+      "unverified": "no Radiance host prerequisite failed; {{count}} could not be verified: {{items}}",
+      "ok": "Radiance host prerequisites hold (cwsr_enable, launch environment paths, plugin directory permissions)"
+    },
     "tailscale_peers": {
       "not_configured": "no watched tailscale peers configured (smith.tailscale.watch_peers is empty)",
       "unreachable": "could not reach tailscaled's LocalAPI to check peer status",
       "offline": "{{offline_count}} of {{watch_count}} watched tailscale peer(s) offline or unreachable: {{names}}",
       "online": "all {{count}} watched tailscale peer(s) online"
+    },
+    "host_memory": {
+      "crit": "only {{avail_gib}} GiB of host memory available, below the {{floor_gib}} GiB floor",
+      "warn": "{{avail_gib}} GiB of host memory available, within the growth margin above the {{floor_gib}} GiB floor",
+      "ok": "{{avail_gib}} GiB of host memory available"
+    },
+    "swap_pressure": {
+      "none": "no swap configured",
+      "crit": "swap is exhausted ({{used_gib}} of {{total_gib}} GiB); it is compressed RAM, so this is memory pressure",
+      "warn": "{{used_gib}} GiB of swap in use (warn at {{warn_gib}} GiB); it is compressed RAM",
+      "ok": "{{used_gib}} GiB of swap in use"
     }
   },
   "status": {

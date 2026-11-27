@@ -333,7 +333,7 @@ func jobIDOf(w http.ResponseWriter, r *http.Request) (int64, bool) {
 
 func writeJobStoreError(w http.ResponseWriter, err error) {
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, err.Error())
+		writeErrorCode(w, http.StatusNotFound, "not_found_detail", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	writeInternalError(w, err)

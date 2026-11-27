@@ -10,12 +10,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	url2 "net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/jsaigou/the-forge/internal/gguf"
+	"github.com/jsaigou/the-forge/internal/hf"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -71,6 +73,18 @@ func (s *Service) createJob(ctx context.Context, req CreateJobRequest, initialSt
 	}
 	if len(req.Files) == 0 {
 		return 0, errors.New("hfdownload: at least one file is required")
+	}
+	// repo, revision and file names are concatenated into the download URL and (file names) into a path under ModelsDir.
+	if !hf.ValidRepo(repo) {
+		return 0, fmt.Errorf("hfdownload: %w: repo %q", hf.ErrInvalidRepo, repo)
+	}
+	if req.Revision != "" && !hf.ValidRevision(req.Revision) {
+		return 0, fmt.Errorf("hfdownload: %w: revision %q", hf.ErrInvalidRepo, req.Revision)
+	}
+	for _, f := range req.Files {
+		if !ValidFilename(f.Filename) {
+			return 0, fmt.Errorf("hfdownload: file name %q is not a plain relative path", f.Filename)
+		}
 	}
 	report, err := s.Preflight(ctx, repo, req.Files, req.DestDir)
 	if err != nil {
@@ -323,7 +337,7 @@ func (s *Service) downloadAndVerifyFile(ctx context.Context, job store.ModelDown
 	if url == "" {
 		url = "https://huggingface.co"
 	}
-	url += "/" + job.Repo + "/resolve/" + job.Revision + "/" + f.Filename
+	url += "/" + job.Repo + "/resolve/" + url2.PathEscape(job.Revision) + "/" + escapePath(f.Filename)
 
 	onProgress := func(written int64) {
 		completedBytes := int64(0)
@@ -557,4 +571,13 @@ func sha256File(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// escapePath percent-encodes each segment of a repo file path, keeping the "/" separators, so a name with '?', '#' or '%' cannot end the path.
+func escapePath(p string) string {
+	parts := strings.Split(p, "/")
+	for i, s := range parts {
+		parts[i] = url2.PathEscape(s)
+	}
+	return strings.Join(parts, "/")
 }

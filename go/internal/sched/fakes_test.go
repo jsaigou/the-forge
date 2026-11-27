@@ -3,7 +3,9 @@
 package sched
 
 import (
+	"slices"
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,6 +27,9 @@ type fakeEngine struct {
 	unloadFn    func(slot string) engine.Result
 	loadDelay   time.Duration
 	loadCalls   []string
+	ready       []string // loads that finished successfully
+	// memoryStaysHeld keeps FitPlan refusing after the planned evictions, as when they free less than estimated.
+	memoryStaysHeld bool
 	unloadCalls []string
 	inFlight    int
 	maxInFlight int
@@ -51,6 +56,35 @@ func (f *fakeEngine) setOcc(slot, mode string) {
 	f.occ[slot] = collector.SlotAssignment{Mode: mode}
 }
 
+// evicted reports whether every one of the slots has been unloaded. Callers hold f.mu.
+func (f *fakeEngine) evicted(slots []string) bool {
+	for _, s := range slots {
+		if !slices.Contains(f.unloadCalls, s) {
+			return false
+		}
+	}
+	return true
+}
+
+// isReady reports whether a load of mode into some slot has finished successfully.
+func (f *fakeEngine) isReady(mode string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, r := range f.ready {
+		if strings.HasPrefix(r, mode+"->") {
+			return true
+		}
+	}
+	return false
+}
+
+// setLoading puts a slot in the state the real manager reports mid-load: the model's name with Loading set.
+func (f *fakeEngine) setLoading(slot, mode string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.occ[slot] = collector.SlotAssignment{Mode: mode, Loading: &collector.Transition{Mode: mode}}
+}
+
 func (f *fakeEngine) Slots() []string { return f.slots }
 
 func (f *fakeEngine) SlotStates(map[string]collector.UnitState) map[string]collector.SlotAssignment {
@@ -69,6 +103,10 @@ func (f *fakeEngine) FitPlan(model string) (engine.Plan, error) {
 	if f.planFn != nil {
 		return f.planFn(model)
 	}
+	// Like the real engine, which probes live: once the planned evictions have happened the model fits, unless the test says memory stays held.
+	if !f.memoryStaysHeld && !f.plan.Fits && len(f.plan.Evict) > 0 && f.evicted(f.plan.Evict) {
+		return engine.Plan{Fits: true, Message: "Fits now"}, f.planErr
+	}
 	return f.plan, f.planErr
 }
 
@@ -80,6 +118,9 @@ func (f *fakeEngine) Load(_ context.Context, mode, slot string) engine.Result {
 	}
 	delay := f.loadDelay
 	fn := f.loadFn
+	// The real manager reports the model's name for the slot while the load is still running (it infers it from the armed launch row as
+	// soon as the unit is active), with Loading set. A fake that publishes the slot only when Load returns hides that.
+	f.occ[slot] = collector.SlotAssignment{Mode: mode, Loading: &collector.Transition{Mode: mode}}
 	f.mu.Unlock()
 
 	if delay > 0 {
@@ -95,6 +136,9 @@ func (f *fakeEngine) Load(_ context.Context, mode, slot string) engine.Result {
 	f.loadCalls = append(f.loadCalls, mode+"->"+slot)
 	if res.Success {
 		f.occ[slot] = collector.SlotAssignment{Mode: mode}
+		f.ready = append(f.ready, mode+"->"+slot)
+	} else {
+		delete(f.occ, slot)
 	}
 	f.mu.Unlock()
 	return res
