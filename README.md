@@ -1,211 +1,131 @@
 <div align="center">
 
-<img src="docs/assets/hero.svg" width="100%" alt="The Forge: a self-hosted, multi-model LLM inference daemon. One Go binary that schedules and routes local LLMs across your GPU's memory budget." />
+<img src="docs/assets/hero.svg" width="100%" alt="The Forge: language models, the Radiance engine and live speech-to-speech on your own AMD Strix Halo machine">
 
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
-![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)
-![React](https://img.shields.io/badge/web-React%20%2B%20Vite-61DAFB?logo=react&logoColor=black)
-![Platform](https://img.shields.io/badge/platform-Linux%20%2F%20ROCm-red)
+![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-Linux%20%2F%20AMD-red)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/jsaigou)
+
+**[Radiance](#radiance)** · **[Speech-to-speech](#speech-to-speech)** · **[Everything else](#everything-else)** · **[Install](#install)** · **[Docs](#documentation)**
 
 </div>
 
-**Intelligent orchestration for multi-model inference.**
+The Forge turns one machine into a private AI server. You choose models in a web page; it loads them into GPU memory when they are needed,
+makes room when memory runs short, and serves them to your apps through one OpenAI-compatible address.
 
-The Forge is a single Go binary for running several local LLMs on one machine: a scheduler that
-loads models on demand and evicts by memory budget, a router with cloud failover, a live model
-catalog, and an in-process agent (Smith) that watches the host and can act on what it finds.
+It is built for AMD Strix Halo machines, where the CPU and GPU share one large pool of memory.
 
-<p align="center">
-  <img src="docs/assets/console-light-dark.png" alt="The Forge console, light and dark theme" width="100%">
-</p>
+## Radiance
 
-## See it in action
+Run [Radiance](https://codeberg.org/StillDeadcode/radiance) models next to llama.cpp, in the same console and behind the same API.
 
-<table>
-<tr>
-<td width="33%" align="center">
-<img src="docs/assets/routing-dark.png" alt="Live routing diagram: local slots and remote providers, colored by real link health" width="100%"><br>
-<sub><b>Multi-provider routing</b> — real, live link state</sub>
-</td>
-<td width="33%" align="center">
-<img src="docs/assets/smith-chat-dark.png" alt="Asking Smith a live question about GPU health" width="100%"><br>
-<sub><b>Smith</b> — grounded in live checks, not a chatbot wrapper</sub>
-</td>
-<td width="33%" align="center">
-<img src="docs/assets/actioncard-dark.png" alt="Smith proposing a build-refresh procedure with per-step verification" width="100%"><br>
-<sub><b>Autonomous remediation</b> — coded procedures, not free-form plans</sub>
-</td>
-</tr>
-<tr>
-<td width="33%" align="center">
-<img src="docs/assets/smith-ask-demo.gif" alt="Live demo: asking Smith a question and getting a grounded answer back in real time" width="100%"><br>
-<sub><b>Ask Smith anything</b> — a grounded answer, live, with evidence</sub>
-</td>
-<td width="67%" align="center" colspan="2">
-<img src="docs/assets/add-model-demo.gif" alt="Live demo: searching Hugging Face for a model, picking a quant, and passing pre-flight checks" width="100%"><br>
-<sub><b>Add a model from Hugging Face</b> — search, rank by memory fit, pre-flight, download</sub>
-</td>
-</tr>
-</table>
+Radiance runs `.rad` files, which can keep different parts of a model at different precisions. On Strix Halo the installer builds our
+[unofficial fork](https://github.com/jsaigou/radiance-strix) of the engine and adds it to the catalog, and ready-made models are on Hugging Face:
 
----
+| Model | File | Memory in use | Measured speed |
+|---|---:|---|---|
+| [Qwen3.8-Flash-Next](https://huggingface.co/jsaigou/Qwen3.8-Flash-Next-UD-Size-radiance) | 84 GiB | about 93 GiB | 91 tokens/s across 3 requests |
+| [Qwen3.6-35B-A3B](https://huggingface.co/jsaigou/Qwen3.6-35B-A3B-W4W5-RTN-radiance) | 21 GiB | about 34 GiB | 64 tokens/s, one request (early test) |
 
-## What it does
+<sub>Measured by us on one Ryzen AI Max+ 395 with 128 GB, with the settings on each model card. Needs ROCm 10.x and `amdgpu.cwsr_enable=1`.</sub>
 
-| | |
+**[Set up Radiance →](docs/radiance.md)**
+
+## Speech-to-speech
+
+Talk to a model that **listens and speaks at the same time**. Interrupt it, talk over it, or let it fill a pause. This is not speech-to-text
+followed by a reply: audio goes in and audio comes out, one 133 ms frame at a time.
+
+<img src="docs/assets/talk-studio.png" width="100%" alt="talk-studio: name the character, pick a language, voice and scene, then start a conversation">
+
+- **talk-studio** is the page you talk in: set a character and a scene, pick a voice, and replay recorded conversations.
+- **forge-duplex** carries the live audio session. Its engine protocol is not tied to one model.
+- **[Haru-4B](https://huggingface.co/jsaigou/Haru-4B-bf16-radiance)** is the first model, running on Radiance. On our test machine each step takes
+  68 to 78 ms (median), within the 133 ms available. We have listened to English and Japanese.
+
+You can try the whole audio path on any computer, with no GPU, using a stand-in that echoes your voice:
+
+```bash
+git clone https://github.com/jsaigou/the-forge.git && cd the-forge/go
+go run ./cmd/forge-duplex
+# second terminal, same folder:
+TALK_STUDIO_LISTEN=127.0.0.1:8092 TALK_STUDIO_DUPLEX_URL=http://127.0.0.1:8086 \
+  go run ./cmd/talk-studio
+# open http://localhost:8092 and wear headphones
+```
+
+> Speech-to-speech is early. The installer does not set it up yet; the guide takes you through it by hand.
+
+**[Set up speech-to-speech →](docs/speech-to-speech.md)**
+
+## Everything else
+
+| Feature | What you get |
 |---|---|
-| Scheduler | Four inference slots share the memory pool. Models load on first request and evict on idle, against a byte-level budget rather than a fixed model-per-process assignment. |
-| `a0` router | One OpenAI-compatible endpoint in front of local slots and remote providers, with per-provider failover, usage tracking, and cost accounting. |
-| Smith | An in-process agent running deterministic health checks (GPU hangs, silent context reduction, drifted builds, orphaned services). It can propose a fix, walk you through a runbook, or run the safe ones itself under an explicit autonomy policy. |
-| `forge-compress` | A native Go/ONNX context-compression proxy for local and cloud-routed traffic. |
-| Catalog | Models, quantizations, pricing, and benchmarks live in SQLite, editable through the UI or a CRUD API. |
-| One binary | Dashboard, router, MCP server, and scheduler run as one Go process — no separate services to keep in sync. |
-
-## How it works
-
-<img src="docs/assets/architecture.svg" width="100%" alt="Architecture: OpenAI SDKs, agents and MCP clients call the forge daemon's router, dashboard and MCP surfaces, which share one scheduler over a SQLite catalog store and load models onto llama.cpp slots a1 through a4." />
-
-Reference hardware: an AMD Ryzen AI Max+ 395-class APU (gfx1151), 128 GB unified RAM, ~120 GB
-addressable GTT, Linux with SELinux enforcing. Other Strix Halo-class unified-memory APUs should
-work the same way.
-
-### Smith
-
-Smith answers from the same deterministic checks, scheduler state, and system journals an
-operator would otherwise read by hand — see the demos above. When it finds something worth
-fixing, it can propose a concrete, coded remediation (not a free-form LLM plan) with a verify
-command after every step and a checkpoint before anything risky.
-
-## Repository layout
-
-```
-go/
-  cmd/forge/           — the `forge` binary: daemon (dashboard :5000, a0 :8085, MCP :8095)
-                         + client CLI/TUI (status/models/load/unload/tui)
-  cmd/forge-compress/  — context-compression proxy
-  cmd/forge-tts/       — TTS launcher
-  internal/engine/     — llama-server slot lifecycle (systemd + dbus)
-  internal/sched/      — scheduler: placement, eviction, reservations
-  internal/router/     — a0: routing, provider failover, streaming proxy
-  internal/httpapi/    — dashboard REST API + SSE bus
-  internal/smith/      — the ops agent: deterministic checks + LLM reasoning + procedures
-  internal/store/      — SQLite catalog/settings/auth store + migrations
-  internal/compress/   — context-compression engine (ONNX scorer)
-web/                   — React PWA dashboard (Vite; built into the Go binary)
-systemd/               — forge-daemon, forge-a1..a4 slots, always-on service units
-polkit/                — passwordless unit-management grants
-scripts/               — deploy tooling, install/upgrade script
-docs/                  — architecture, runbooks, ADRs
-```
-
-## Configuration
-
-Everything is store-backed — no TOML/YAML files to hand-edit and redeploy.
-
-- **Model catalog** (models, variants, configs, offerings, benchmarks): SQLite, edited live via
-  Settings → Catalog or `POST/PUT /api/v1/catalog/*`.
-- **Infra config** (ports, slots, scheduler, cost, router timeouts): a settings KV, edited via
-  `forge config get/set` or the Settings API.
-- **Auth** (users, API keys, WebAuthn, recovery codes): the auth store (Settings → Security).
-
-### Adding a model
-
-Models → **Add Model** searches Hugging Face, ranks a repo's GGUF files against the current
-memory budget, and runs pre-flight checks (disk headroom, required backend, file conflicts)
-before you commit. Downloads are resumable and a sharded repo downloads as one job. Once
-verified, the model registers itself into the catalog (Model, Variant, Artifact, Config); the
-new Config lands `unverified`/`hidden` until you promote it. Gated repos need a token first
-(Settings → Security → Hugging Face access token).
+| **Load on demand** | Four model slots share the memory. A request loads its model; idle models are unloaded when space is needed. |
+| **One API** | An OpenAI-compatible router (`a0`) in front of your local models and cloud providers, with failover, usage and cost tracking. |
+| **Add models** | Search Hugging Face, see which files fit your memory, check, download. llama.cpp is built for you with Vulkan, and with ROCm (needed above about 63 GB) where its development files are installed. |
+| **Text-to-speech** | The installer sets up preset voices. Voice cloning and voice design need engines you set up yourself. [Voice Studio](https://github.com/jsaigou/forge-voice-studio) is the app for making voices. |
+| **Measure** | Profile llama.cpp models on your hardware and compare them side by side. |
+| **Look after itself** | Smith, a built-in agent, runs health checks and proposes fixes you can approve. |
+| **For agents** | An MCP server to load, unload and reserve models. |
+| **Two languages** | Web console and command line in English and Japanese. |
 
 <p align="center">
-  <img src="docs/assets/add-model-demo.gif" alt="Live demo: searching Hugging Face for a model, picking a quant, and passing pre-flight checks" width="80%">
+  <img src="docs/assets/add-model-demo.gif" alt="Searching Hugging Face for a model, picking a file that fits in memory, and running the checks before download" width="80%">
 </p>
 
-The same flow is exposed as smith tools (`hf_search`, `hf_preflight`, `download_status`, and a
-`download_start` that only proposes a job — nothing downloads until you approve it). See
-[docs/adding-a-model.md](docs/adding-a-model.md).
+## How it fits together
 
-## Installation
+<img src="docs/assets/architecture.svg" width="100%" alt="Apps, the web console and your voice connect to The Forge, which runs llama.cpp, Radiance and speech engines on the GPU">
 
-> Targets Linux + AMD ROCm (tested on Strix Halo-class APUs with unified memory). Builds are
-> plain Go; other GPUs work wherever llama.cpp does.
+## Install
+
+**You need** Linux with systemd, at least 64 GB of memory, and an AMD GPU. Tested on one Strix Halo machine; other setups may work with
+llama.cpp but are untested. Install Git, Go 1.26+, and Node.js 22+ first; the installer names anything else that is missing.
 
 ```bash
 git clone https://github.com/jsaigou/the-forge.git && cd the-forge
-go build ./go/cmd/forge        # build the daemon
-cd web && npm ci && npm run build && cd ..   # build the dashboard assets
-
-sudo ./install.sh              # fresh install, dependency checks on
-sudo ./install.sh --upgrade    # in-place upgrade
-sudo ./install.sh --dry-run    # show every check, make no changes
+sudo ./install.sh --target=public --dry-run    # see what it would do
+sudo ./install.sh --target=public
 ```
 
-`install.sh` checks the platform (kernel, GPU, ROCm, Vulkan) and installs units and application
-files — there's no config file to write. See [docs/deployment.md](docs/deployment.md) for the
-full step list.
+| Option | Adds or changes |
+|---|---|
+| `--speech=kokoro` | Text-to-speech with preset voices, and Voice Studio |
+| `--no-radiance` | Skips the Radiance engine |
+| `--no-llama` | Skips building llama.cpp |
 
-## Usage
+If ROCm is not in a standard place, add it in front: `sudo ROCM_ROOT=/path/to/rocm ./install.sh --target=public`.
+
+Then open the web console at <http://localhost:5000> to create your account, add a model, and make an API key. Point any OpenAI-compatible app at
+`http://localhost:8085/v1`.
 
 ```bash
-forge status                     # slots, memory budget, GTT
-forge models                     # list loadable catalog configs
-forge load <config-name> [slot]  # default slot if omitted
-forge unload a3
-forge tui                        # full-screen console: Overview/Slots/Services/Compressor/Keys/Smith
+forge status                   # slots and memory
+forge models                   # what you can load
+forge load <name>              # load a model
+forge tui                      # full-screen terminal console
 ```
-
-The router loads whatever's requested on first use and evicts idle slots when memory is needed.
-Point any OpenAI-compatible client at `http://localhost:8085/v1`.
-
-Verify a config loaded at its intended context:
-
-```bash
-curl -sf http://localhost:8080/props | jq .default_generation_settings.n_ctx
-```
-
-See [docs/pitfalls.md](docs/pitfalls.md) for why this is worth checking after every switch.
-
-## Notable behavior
-
-- `GGML_CUDA_ENABLE_UNIFIED_MEMORY=ON` is required for models above ~63 GB on the ROCm backend.
-- `--parallel` should always be set explicitly — above 1, it *splits* configured context across
-  workers rather than adding capacity.
-- `TimeoutStopSec` should be ≥ 300; large models can take minutes to unload.
-- `n_ctx` can silently drop below what's configured; check it after every switch.
-
-Full list in [docs/pitfalls.md](docs/pitfalls.md).
-
-## Features
-
-- OpenAI-compatible `/v1` chat/completions routing across up to four slots
-- On-demand loading with blocking hold (~150 s) instead of hard failures
-- Fit checks and read-only capacity planning (`can_fit`)
-- Time-boxed reservations with per-agent attribution
-- Store-backed model catalog with live CRUD APIs
-- Tailscale-aware auth (conditional bypass, per-policy), API keys, TOTP/passkeys
-- Always-on sidecars: embeddings, speech-to-text, text-to-speech
-- Bilingual UI/CLI (English/Japanese) — web dashboard, error messages, Smith's chat + knowledge
-  base, and the `forge` TUI/CLI all switch languages independently per surface; see
-  [docs/adr/0016-localization.md](docs/adr/0016-localization.md)
 
 ## Documentation
 
-| Doc | Contents |
+| Guide | |
 |---|---|
-| [docs/scheduler.md](docs/scheduler.md) | slot scheduling, reservations, MCP role |
-| [docs/llm-router.md](docs/llm-router.md) | router design and failover |
-| [docs/deployment.md](docs/deployment.md) | install, units, operations |
-| [docs/modes.md](docs/modes.md) | model configuration concepts |
-| [docs/adding-a-model.md](docs/adding-a-model.md) | cataloging a new model |
-| [docs/pitfalls.md](docs/pitfalls.md) | operational sharp edges |
-| [docs/adr/](docs/adr/) | architecture decision records |
+| [Radiance](docs/radiance.md) | engine, models and settings |
+| [Speech-to-speech](docs/speech-to-speech.md) | talk to a full-duplex model |
+| [Adding a model](docs/adding-a-model.md) | from Hugging Face to a working config |
+| [Router](docs/llm-router.md) | the API, providers and failover |
+| [Scheduler](docs/scheduler.md) | slots, memory and reservations |
+| [Deployment](docs/deployment.md) | services and operations |
+| [Pitfalls](docs/pitfalls.md) | hardware problems worth knowing about |
+| [Design records](docs/adr/) | why it works the way it does |
 
 ## Status
 
-Early public release: source and installer are published for review. Binaries and model weights
-aren't distributed — build from source against your own llama.cpp. Expect churn in the scheduler
-and auth surfaces while the v0.6 line stabilizes.
+An early release, built and tested on one machine. Expect changes. No binaries or model weights are included: the installer builds from source,
+and you download the models you choose.
 
 ## Support
 
@@ -213,4 +133,4 @@ If this saved you some GPU-memory headaches, [buymeacoffee.com/jsaigou](https://
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE).
+Apache-2.0, see [LICENSE](LICENSE). Radiance is by Deadcode (Apache-2.0). Models have their own licences.
