@@ -6,13 +6,9 @@ A unified-memory APU host (e.g. AMD Strix Halo) has no discrete GPU or PCIe bus 
 share the same DRAM pool. Model weights live in **GTT** (GPU-addressable system RAM), not a
 separate VRAM pool.
 
-- **Unified Memory flag:** `GGML_CUDA_ENABLE_UNIFIED_MEMORY=ON` must be in **every** per-slot
-  sysconfig env file (`/etc/sysconfig/forge-a{1,2,3,4}-env`), not just whichever slot a large
-  config usually lands on - the scheduler places any config on whichever slot is free, never
-  pinned to one physical slot. Without it, ROCm is capped at ~63 GB. This is easy to lose
-  silently: a rewritten sysconfig file or a fresh per-slot env file that doesn't preserve
-  hand-set variables will drop it, and the ceiling won't be reached again until you notice
-  `n_ctx` or memory use looking wrong for a large ROCm-backed config.
+- **Do not set `GGML_CUDA_ENABLE_UNIFIED_MEMORY` by habit.** Older advice (including earlier versions of this page) said ROCm needed it to go
+  above about 63 GB. On current builds, on this kind of shared-memory chip, it was not needed, and together with MTP speculative decoding it
+  caused GPU memory faults. Set it only if you have verified that your build needs it.
 - **All layers to GPU:** Always pass `--gpu-layers 99` (or equivalent). CPU-resident layers run
   at roughly half memory bandwidth. This is the single biggest performance lever.
 - **GART vs GTT:** GART is a fixed BIOS aperture - keep it small (e.g. 512 MB). GTT is the
@@ -31,7 +27,7 @@ separate VRAM pool.
   flash-attention kernels are the exception and *require* rocWMMA to run at all on this
   hardware, because their kernel has no device code for the standard path - check a given
   fork's own build docs rather than assuming either default.
-- **GTT counter blind spot with Unified Memory:** `GGML_CUDA_ENABLE_UNIFIED_MEMORY=ON` backs
+- **GTT counter blind spot with unified memory:** a build that uses unified memory backs
   allocations with HMM-mapped host RAM, not classic GTT BOs, so a raw GTT-usage reading (e.g.
   `rocm-smi --showmeminfo gtt`) does not see them - it can report near-baseline usage while real
   process RSS is tens of GB. Vulkan and non-unified-memory ROCm configs still report correctly
@@ -48,8 +44,7 @@ wins by a wide margin - expect them to be close, and pick per-config based on th
 below rather than assuming one is always faster.
 
 **Hard ceiling:** Vulkan cannot load models above roughly **63 GB**
-(`radv: Not enough memory for command submission`). ROCm with
-`GGML_CUDA_ENABLE_UNIFIED_MEMORY=ON` reaches the full unified-memory GTT pool (~120 GB on a
+(`radv: Not enough memory for command submission`). ROCm reaches the full shared-memory GTT pool (~120 GB on a
 128 GB unified-memory host).
 
 Backend is set per-config and can be changed live via the catalog without a restart.
