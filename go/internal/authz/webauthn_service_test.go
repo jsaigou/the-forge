@@ -270,7 +270,7 @@ func TestWebAuthnUserIDEncoding(t *testing.T) {
 
 func TestToWebAuthnCredential(t *testing.T) {
 	c := WebAuthnCredentialRecord{
-		ID:         "cred-id",
+		ID:         credentialIDString([]byte("cred-id")),
 		PublicKey:  []byte{0x04, 0x05},
 		SignCount:  10,
 		Transports: `["usb","nfc"]`,
@@ -284,5 +284,43 @@ func TestToWebAuthnCredential(t *testing.T) {
 	}
 	if len(wa.Transport) != 2 {
 		t.Errorf("Transport len = %d, want 2", len(wa.Transport))
+	}
+}
+
+// Authenticator credential ids are arbitrary bytes; they must survive storage as text and come back byte-for-byte.
+func TestCredentialIDRoundTripsBinaryBytes(t *testing.T) {
+	raw := []byte{0xff, 0xfe, 0x80, 0x00, 0x01, 0xc3, 0x28, 0x7f, 0xa5}
+	enc := credentialIDString(raw)
+	for _, r := range enc {
+		if !(r == '-' || r == '_' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
+			t.Fatalf("encoded id %q contains %q", enc, r)
+		}
+	}
+	if got := credentialIDBytes(enc); string(got) != string(raw) {
+		t.Errorf("round trip = %x, want %x", got, raw)
+	}
+}
+
+// A credential row written before ids were encoded (key = the raw bytes as a string) must still be found after an assertion, so its sign count
+// keeps updating; a new row is found under the encoded id.
+func TestStoredCredentialIDFindsLegacyAndEncodedRows(t *testing.T) {
+	raw := []byte{0x93, 0x01, 0xfe, 0x7a, 0x00, 0x42}
+	svc := &WebAuthnService{creds: newFakeCredStore()}
+	ctx := context.Background()
+
+	_ = svc.creds.Save(ctx, WebAuthnCredentialRecord{ID: string(raw), UserID: 1})
+	if got := svc.storedCredentialID(ctx, raw); got != string(raw) {
+		t.Errorf("legacy row: got %q, want the raw-byte id", got)
+	}
+
+	svc2 := &WebAuthnService{creds: newFakeCredStore()}
+	enc := credentialIDString(raw)
+	_ = svc2.creds.Save(ctx, WebAuthnCredentialRecord{ID: enc, UserID: 1})
+	if got := svc2.storedCredentialID(ctx, raw); got != enc {
+		t.Errorf("encoded row: got %q, want %q", got, enc)
+	}
+
+	if got := (&WebAuthnService{creds: newFakeCredStore()}).storedCredentialID(ctx, raw); got != enc {
+		t.Errorf("no row: got %q, want the encoded form", got)
 	}
 }

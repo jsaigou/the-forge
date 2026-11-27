@@ -542,9 +542,15 @@ func TestChatCompletions_4xxDoesNotRecordUsage(t *testing.T) {
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
-	events, _ := usage.Usage().Events(context.Background(), time.Now().Add(-time.Minute), 10)
-	if len(events) != 0 {
-		t.Fatalf("events = %d, want 0 (4xx must not record usage)", len(events))
+	// No spend row for a 4xx; the request itself is still timed, as an a0_request with outcome error.
+	events := awaitEvents(t, usage.Usage(), 1)
+	for _, e := range events {
+		if e.Kind == "external_request" {
+			t.Fatalf("external_request recorded for a 4xx: %+v", e)
+		}
+	}
+	if len(events) != 1 || events[0].Kind != "a0_request" {
+		t.Fatalf("events = %+v, want exactly one a0_request", events)
 	}
 }
 
@@ -616,7 +622,10 @@ func TestChatCompletions_StreamingRemoteRecordsUsageWithoutBuffering(t *testing.
 	}
 
 	events := awaitEvents(t, usage.Usage(), 1)
-	if events[0].PromptTokens != 300 || events[0].CompletionTokens != 40 {
+	if len(events) != 1 {
+		t.Errorf("events = %d, want exactly 1 (the billing row carries the timing, no second row)", len(events))
+	}
+	if events[0].PromptTokens != 300|| events[0].CompletionTokens != 40 {
 		t.Errorf("streaming-parsed tokens = (%d,%d), want (300,40)", events[0].PromptTokens, events[0].CompletionTokens)
 	}
 }

@@ -6,12 +6,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/jsaigou/the-forge/internal/authz"
@@ -656,6 +660,55 @@ func TestPWAShellServesIndex(t *testing.T) {
 		if !strings.Contains(w.Body.String(), "<html") && !strings.Contains(w.Body.String(), "<!doctype") {
 			t.Error("/ must serve an HTML document when built")
 		}
+	}
+}
+
+// A worker whose runtime is not served installs with nothing in it: no cache, no update prompt, and no error anyone sees.
+func TestPWAServesServiceWorkerRuntime(t *testing.T) {
+	built := webDistRoot
+	webDistRoot = fstest.MapFS{"workbox-0a1b2c3d.js": {Data: []byte("runtime")}}
+	defer func() { webDistRoot = built }()
+	s := newTestServer(t)
+	w := do(t, s, httptest.NewRequest("GET", "/workbox-0a1b2c3d.js", nil))
+	if w.Code != 200 || w.Body.String() != "runtime" {
+		t.Fatalf("runtime = %d %q", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/javascript" {
+		t.Errorf("content-type = %q", ct)
+	}
+}
+
+// Checks the real build when there is one.
+func TestPWAServiceWorkerBuild(t *testing.T) {
+	raw, err := fs.ReadFile(webDistRoot, "sw.js")
+	if errors.Is(err, fs.ErrNotExist) {
+		t.Skip("the web app is not built in this tree")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	sw := string(raw)
+	var wanted []string
+	for _, m := range regexp.MustCompile(`url:"([^"]+)"`).FindAllStringSubmatch(sw, -1) {
+		wanted = append(wanted, m[1])
+	}
+	runtimes := regexp.MustCompile(`"\./(workbox-[0-9a-f]+)"`).FindAllStringSubmatch(sw, -1)
+	for _, m := range runtimes {
+		wanted = append(wanted, m[1]+".js")
+	}
+	if len(runtimes) == 0 || len(wanted) < 2 {
+		t.Fatalf("cannot read what sw.js loads (%d runtimes, %d files): has its format changed?", len(runtimes), len(wanted))
+	}
+	s := newTestServer(t)
+	// One failed fetch fails the whole install.
+	for _, name := range wanted {
+		if w := do(t, s, httptest.NewRequest("GET", "/"+name, nil)); w.Code != 200 {
+			t.Errorf("sw.js loads /%s, which answers %d", name, w.Code)
+		}
+	}
+	// /login and /setup are server-rendered; a navigation fallback would answer them with the app shell.
+	if strings.Contains(sw, "NavigationRoute") {
+		t.Error("sw.js has a navigation fallback")
 	}
 }
 

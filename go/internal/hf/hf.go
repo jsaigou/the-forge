@@ -329,6 +329,9 @@ func (c *Client) addOfficialFallback(ctx context.Context, results []Model) []Mod
 // repoInfo fetches one repo's own metadata (unfiltered — works for a
 // safetensors-only repo just as well as a GGUF one).
 func (c *Client) repoInfo(ctx context.Context, repo string) (Model, error) {
+	if !ValidRepo(repo) {
+		return Model{}, fmt.Errorf("%w: %q", ErrInvalidRepo, repo)
+	}
 	body, _, err := c.doGet(ctx, c.baseURL()+"/api/models/"+repo)
 	if err != nil {
 		return Model{}, err
@@ -361,6 +364,9 @@ func (c *Client) Tree(ctx context.Context, repo, revision string) ([]File, error
 	if revision == "" {
 		revision = "main"
 	}
+	if !ValidRepo(repo) || !ValidRevision(revision) {
+		return nil, fmt.Errorf("%w: repo %q revision %q", ErrInvalidRepo, repo, revision)
+	}
 	u := c.baseURL() + "/api/models/" + repo + "/tree/" + revision + "?recursive=1"
 	body, _, err := c.doGet(ctx, u)
 	if err != nil {
@@ -384,6 +390,9 @@ func (c *Client) Card(ctx context.Context, repo string) (Card, error) {
 	repo = strings.Trim(strings.TrimSpace(repo), "/")
 	if repo == "" {
 		return Card{}, errors.New("hf: card requires a non-empty repo")
+	}
+	if !ValidRepo(repo) {
+		return Card{}, fmt.Errorf("%w: %q", ErrInvalidRepo, repo)
 	}
 	u := c.baseURL() + "/api/models/" + repo
 	body, _, err := c.doGet(ctx, u)

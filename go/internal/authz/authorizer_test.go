@@ -448,3 +448,143 @@ func TestNoSecretsInErrors(t *testing.T) {
 		t.Error("bearer error leaks the token")
 	}
 }
+
+// ADR-0020 F11: the rules for a scoped key are enforced where it is minted, whichever surface asks, and the scope comes
+// back on the verified identity.
+// The speech-setup scope is short-lived like the catalog one, and the store accepts it (its column has a CHECK constraint).
+func TestMintScopedKey_SpeechSetup(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if _, err := f.a.MintScopedKey(ctx, "setup", "", RoleAdmin, "", f.now.Add(MaxScopedKeyTTL+time.Hour), ScopeSpeechSetup); err == nil {
+		t.Error("a speech-setup key may live at most a day")
+	}
+	token, err := f.a.MintScopedKey(ctx, "setup", "", RoleAdmin, "", f.now.Add(10*time.Minute), ScopeSpeechSetup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := f.a.VerifyBearer(token, KindForge)
+	if err != nil || id.Scope != ScopeSpeechSetup || id.Role != RoleAdmin {
+		t.Fatalf("identity: %+v %v", id, err)
+	}
+}
+
+func TestMintScopedKeyRulesAndIdentity(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	soon := f.now.Add(time.Hour)
+
+	bad := map[string]func() error{
+		"no scope":      func() error { _, e := f.a.MintScopedKey(ctx, "a", "", RoleAdmin, "", soon, ""); return e },
+		"unknown scope": func() error { _, e := f.a.MintScopedKey(ctx, "a", "", RoleAdmin, "", soon, "everything"); return e },
+		"never expires": func() error {
+			_, e := f.a.MintScopedKey(ctx, "a", "", RoleAdmin, "", time.Time{}, ScopeCatalog)
+			return e
+		},
+		"over a day": func() error {
+			_, e := f.a.MintScopedKey(ctx, "a", "", RoleAdmin, "", f.now.Add(25*time.Hour), ScopeCatalog)
+			return e
+		},
+		"no valid role":  func() error { _, e := f.a.MintScopedKey(ctx, "a", "", "superuser", "", soon, ScopeCatalog); return e },
+		"router + scope": func() error { _, e := f.a.mintKey(ctx, KindRouter, "a", "", "", "", soon, ScopeCatalog); return e },
+	}
+	for name, fn := range bad {
+		if fn() == nil {
+			t.Errorf("%s: mint accepted it", name)
+		}
+	}
+	token, err := f.a.MintScopedKey(ctx, "agent", "", RoleAdmin, "", f.now.Add(MaxScopedKeyTTL), ScopeCatalog)
+	if err != nil {
+		t.Fatalf("a scoped key at exactly the cap: %v", err)
+	}
+	ident, err := f.a.VerifyBearer(token, KindForge)
+	if err != nil || ident.Scope != ScopeCatalog || ident.Role != RoleAdmin {
+		t.Fatalf("identity = %+v err=%v, want admin scoped to catalog", ident, err)
+	}
+	plain, _ := f.a.MintKey(ctx, KindForge, "plain", "", RoleAdmin, "", time.Time{})
+	if pi, err := f.a.VerifyBearer(plain, KindForge); err != nil || pi.Scope != "" {
+		t.Errorf("an ordinary key carries scope %q (err %v)", pi.Scope, err)
+	}
+}
+
+// The duplex scope (ADR-0029) follows the speech scope: a service that runs continuously, so a year, expiring, bound to loopback.
+func TestMintDuplexScopedKeyRules(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	year := f.now.Add(MaxDuplexKeyTTL)
+	bad := map[string]func() error{
+		"unbound":       func() error { _, e := f.a.MintScopedKey(ctx, "dx", "", RoleOperator, "", year, ScopeDuplex); return e },
+		"tailnet bound": func() error { _, e := f.a.MintScopedKey(ctx, "dx", "", RoleOperator, "100.64.0.9", year, ScopeDuplex); return e },
+		"never expires": func() error { _, e := f.a.MintScopedKey(ctx, "dx", "", RoleOperator, "127.0.0.1", time.Time{}, ScopeDuplex); return e },
+		"over a year": func() error {
+			_, e := f.a.MintScopedKey(ctx, "dx", "", RoleOperator, "127.0.0.1", f.now.Add(MaxDuplexKeyTTL+time.Hour), ScopeDuplex)
+			return e
+		},
+	}
+	for name, fn := range bad {
+		if fn() == nil {
+			t.Errorf("%s: mint accepted it", name)
+		}
+	}
+	token, err := f.a.MintScopedKey(ctx, "forge-duplex", "", RoleOperator, "127.0.0.1", year, ScopeDuplex)
+	if err != nil {
+		t.Fatalf("a loopback-bound duplex key at the cap: %v", err)
+	}
+	if ident, err := f.a.VerifyBearerFrom(ctx, "127.0.0.1", token, KindForge); err != nil || ident.Scope != ScopeDuplex || ident.Role != RoleOperator {
+		t.Fatalf("identity = %+v err=%v, want operator scoped to %q", ident, err, ScopeDuplex)
+	}
+	// The binding keeps the key on the host: the same key from a tailnet address is refused.
+	if _, err := f.a.VerifyBearerFrom(ctx, "100.64.0.9", token, KindForge); err == nil {
+		t.Error("a loopback-bound duplex key was accepted from a tailnet address")
+	}
+}
+
+// The speech scope is for a service that must run continuously: it may live a year (the catalog scope stays at a day), but it must expire and it
+// must be bound to a loopback address so only a caller on the host can use it.
+func TestMintSpeechScopedKeyRules(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	year := f.now.Add(MaxSpeechKeyTTL)
+
+	bad := map[string]func() error{
+		"unbound": func() error { _, e := f.a.MintScopedKey(ctx, "tts", "", RoleOperator, "", year, ScopeSpeech); return e },
+		"bound to a tailnet ip": func() error {
+			_, e := f.a.MintScopedKey(ctx, "tts", "", RoleOperator, "100.64.0.9", year, ScopeSpeech)
+			return e
+		},
+		"bound to garbage": func() error {
+			_, e := f.a.MintScopedKey(ctx, "tts", "", RoleOperator, "localhost", year, ScopeSpeech)
+			return e
+		},
+		"never expires": func() error {
+			_, e := f.a.MintScopedKey(ctx, "tts", "", RoleOperator, "127.0.0.1", time.Time{}, ScopeSpeech)
+			return e
+		},
+		"over a year": func() error {
+			_, e := f.a.MintScopedKey(ctx, "tts", "", RoleOperator, "127.0.0.1", f.now.Add(MaxSpeechKeyTTL+time.Hour), ScopeSpeech)
+			return e
+		},
+		// The longer limit belongs to the speech scope alone.
+		"catalog over a day": func() error {
+			_, e := f.a.MintScopedKey(ctx, "a", "", RoleAdmin, "", f.now.Add(48*time.Hour), ScopeCatalog)
+			return e
+		},
+	}
+	for name, fn := range bad {
+		if fn() == nil {
+			t.Errorf("%s: mint accepted it", name)
+		}
+	}
+	for _, ip := range []string{"127.0.0.1", "::1"} {
+		token, err := f.a.MintScopedKey(ctx, "tts-"+ip, "", RoleOperator, ip, year, ScopeSpeech)
+		if err != nil {
+			t.Fatalf("a speech key bound to %s at exactly a year: %v", ip, err)
+		}
+		if id, err := f.a.VerifyBearerFrom(ctx, ip, token, KindForge); err != nil || id.Scope != ScopeSpeech || id.Role != RoleOperator {
+			t.Fatalf("identity from %s = %+v err=%v, want operator scoped to speech", ip, id, err)
+		}
+		// The binding is what keeps the key on the host: the same key from a tailnet address is refused.
+		if _, err := f.a.VerifyBearerFrom(ctx, "100.64.0.9", token, KindForge); err == nil {
+			t.Errorf("a key bound to %s was accepted from a tailnet address", ip)
+		}
+	}
+}

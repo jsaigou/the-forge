@@ -85,7 +85,7 @@ func (s *Server) handleCatalogServiceCreate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var b serviceBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
@@ -121,7 +121,7 @@ func (s *Server) handleCatalogServiceUpdate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var b serviceBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}

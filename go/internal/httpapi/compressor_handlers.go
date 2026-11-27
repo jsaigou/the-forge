@@ -182,7 +182,7 @@ func (s *Server) handleCompressorPassthrough(w http.ResponseWriter, r *http.Requ
 	// that amendment is the CLI: `forge config set compressor.passthrough_all
 	// false`.)
 	if compressorctl.Retired() && !*b.Enabled {
-		writeError(w, http.StatusConflict, errCompressorRetired)
+		writeErrorCode(w, http.StatusConflict, "compressor_retired", nil, errCompressorRetired)
 		return
 	}
 
@@ -331,7 +331,7 @@ func (s *Server) provisionerFor(unit string) *compressorctl.Provisioner {
 
 func (s *Server) handleCompressorRestart(ctx context.Context, w http.ResponseWriter, r *http.Request, row store.ProxyRow) {
 	if !row.OrphanedAt.IsZero() {
-		writeError(w, http.StatusConflict, "proxy is torn down — link/provision it again before restarting")
+		writeErrorCode(w, http.StatusConflict, "proxy_torn_down", nil, "proxy is torn down — link/provision it again before restarting")
 		return
 	}
 	if err := s.provisionerFor(row.Unit).Restart(ctx, row.Unit); err != nil {
@@ -385,7 +385,7 @@ func (s *Server) handleCompressorTeardown(ctx context.Context, w http.ResponseWr
 func (s *Server) handleCompressorProxyCreate(w http.ResponseWriter, r *http.Request) {
 	if compressorctl.Retired() {
 		// C7: no new compressor proxies are provisioned.
-		writeError(w, http.StatusGone, errCompressorRetired)
+		writeErrorCode(w, http.StatusGone, "compressor_retired", nil, errCompressorRetired)
 		return
 	}
 	if s.deps.Routing == nil || s.deps.CompressorProvisioner == nil {
@@ -495,7 +495,7 @@ func (s *Server) handleCompressorProxyCreate(w http.ResponseWriter, r *http.Requ
 func (s *Server) handleCompressorMigrate(w http.ResponseWriter, r *http.Request) {
 	if compressorctl.Retired() {
 		// C7: migrating onto forge-compress@ would provision a new unit.
-		writeError(w, http.StatusGone, errCompressorRetired)
+		writeErrorCode(w, http.StatusGone, "compressor_retired", nil, errCompressorRetired)
 		return
 	}
 	if s.deps.Routing == nil || s.deps.CompressorProvisioner == nil {
@@ -538,11 +538,11 @@ func (s *Server) handleCompressorMigrate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if !row.OrphanedAt.IsZero() {
-		writeError(w, http.StatusConflict, "proxy is torn down — link/provision it again before migrating")
+		writeErrorCode(w, http.StatusConflict, "proxy_torn_down", nil, "proxy is torn down — link/provision it again before migrating")
 		return
 	}
 	if strings.HasPrefix(row.Unit, s.deps.CompressorProvisioner.TemplatePrefix) {
-		writeError(w, http.StatusConflict, "proxy is already on the forge-compress@ template")
+		writeErrorCode(w, http.StatusConflict, "proxy_already_migrated", nil, "proxy is already on the forge-compress@ template")
 		return
 	}
 

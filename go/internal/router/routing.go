@@ -17,6 +17,7 @@ import (
 	"github.com/jsaigou/the-forge/internal/authz"
 	"github.com/jsaigou/the-forge/internal/pricing"
 	"github.com/jsaigou/the-forge/internal/sched"
+	"github.com/jsaigou/the-forge/internal/specialist"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -531,6 +532,16 @@ func (s *Server) ensureBackendLoaded(ctx context.Context, modelName string, b *B
 	return true, ""
 }
 
+// finishChain runs every backend's Done hook. Callers defer it right after catalogChain returns a chain, so it fires when the proxied request
+// (including any failover and a streamed response) has finished. It never holds a lock: Done takes the pool manager's lock only briefly.
+func finishChain(chain []*Backend) {
+	for _, b := range chain {
+		if b != nil && b.Done != nil {
+			b.Done()
+		}
+	}
+}
+
 // catalogChain resolves a chat-completion request against a store-backed
 // local Config — the *only* local resolution path (ADR-0007): a static
 // router.toml route pinned to a physical slot's port can silently keep
@@ -647,6 +658,25 @@ func (s *Server) catalogChain(ctx context.Context, model string, requestedBy str
 		return nil, false, "", "", resolvedBody
 	}
 
+	// One owner (ADR-0022): a config the specialist pool hosts is served by the pool, never by an LLM slot. The pool loads it on demand (or it
+	// is always on) and answers with the member's port; the chain below is then the same one an LLM slot would produce, so health gating,
+	// busy mode, aliases, forced defaults and the audit trail all apply unchanged.
+	if s.deps.Specialists != nil {
+		tg, perr := s.deps.Specialists.ResolveConfig(ctx, cfg.Name)
+		switch {
+		case perr == nil:
+			tg.Touch()
+			// Done runs when the request finishes: it gives back the lease the pool took, which also restarts the idle clock from that moment. (The
+			// lease is not renewed here, so a pooled-config request longer than the pool's lease TTL loses its protection after it.)
+			return []*Backend{{
+				Name: loadName, Kind: "foundry_slot", Port: tg.Port, Done: tg.Finish,
+				ReasoningEffortDefault: cfg.ReasoningEffortDefault, ChatTemplateCaps: cfg.EffectiveChatTemplateCaps(),
+			}}, true, "", "", resolvedBody
+		case !errors.Is(perr, specialist.ErrNoMatch):
+			return nil, true, perr.Error(), "", resolvedBody
+		}
+	}
+
 	scd := s.deps.Sched
 	if scd == nil {
 		return nil, true, "scheduler not wired", "", resolvedBody
@@ -721,7 +751,7 @@ func mergeForcedDefaults(body map[string]any, forced map[string]any) map[string]
 // requested config.
 func (s *Server) trySubstitute(ctx context.Context, want store.Config, body map[string]any, requestedBy string) *Backend {
 	scd := s.deps.Sched
-	if scd == nil {
+	if scd == nil || routeOptsFrom(ctx).noSubstitute {
 		return nil
 	}
 	policy := s.substitutionPolicy(ctx, want.CapabilityTierID)
@@ -759,6 +789,9 @@ func (s *Server) trySubstitute(ctx context.Context, want store.Config, body map[
 // condition was already checked (and would have fired) before
 // EnsureLoaded(want) was ever attempted.
 func (s *Server) trySubstituteAfterFailure(ctx context.Context, want store.Config, body map[string]any) *Backend {
+	if routeOptsFrom(ctx).noSubstitute {
+		return nil
+	}
 	policy := s.substitutionPolicy(ctx, want.CapabilityTierID)
 	if policy == subOff {
 		return nil
@@ -1079,6 +1112,14 @@ func (s *Server) consumerLabel(r *http.Request, auth authResult) string {
 	return authz.EffectiveRemoteAddr(parseRemoteAddr(r.RemoteAddr), r.Header.Get("X-Forwarded-For")).String()
 }
 
+// attributeConsumer derives the caller's label once, stashes it for the per-slot marks and tells the request's flight
+// (flight.go) who is calling.
+func (s *Server) attributeConsumer(ctx context.Context, r *http.Request, auth authResult) context.Context {
+	label := s.consumerLabel(r, auth)
+	flightFrom(ctx).setConsumer(label)
+	return context.WithValue(ctx, consumerLabelKey{}, label)
+}
+
 func (s *Server) auditOutcome(ctx context.Context, modelName, result, detail string) {
 	if a := s.deps.Audit; a != nil {
 		// store.AuditEntry has no Result field; fold result into Detail (JSON),
@@ -1091,7 +1132,7 @@ func (s *Server) auditOutcome(ctx context.Context, modelName, result, detail str
 		entry := store.AuditEntry{
 			TS:     time.Now(),
 			Actor:  "router",
-			Action: "chat_completion",
+			Action: routeOptsFrom(ctx).action(),
 			Target: modelName,
 			Detail: string(payload),
 		}

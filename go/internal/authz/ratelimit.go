@@ -55,6 +55,13 @@ func (r *RateLimiter) TooMany(ip string) bool {
 	return e.count >= r.limit
 }
 
+// Reset forgets key's failures (a successful attempt).
+func (r *RateLimiter) Reset(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.entries, key)
+}
+
 // Fail records one failed attempt for ip.
 func (r *RateLimiter) Fail(ip string) {
 	r.mu.Lock()

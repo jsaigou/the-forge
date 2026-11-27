@@ -36,3 +36,11 @@ type SlotAssignment struct {
 type SlotStateSource interface {
 	SlotStates(units map[string]UnitState) map[string]SlotAssignment
 }
+
+// SlotWeightSource is the optional second face of the engine: the model and
+// mmproj paths of a slot's last launch, read from its slot_launches row (empty
+// when there is none). The collector uses it for weight accounting; a
+// SlotStateSource without it reports no weights.
+type SlotWeightSource interface {
+	SlotWeightPaths(slot string) (modelPath, mmprojPath string)
+}

@@ -33,9 +33,9 @@ import (
 // at least one of preflight/worker/registrar; see each file's doc comment
 // for which.
 type Deps struct {
-	Store   *store.DB
-	HF      *hf.Client
-	Cfg     func() *config.Config
+	Store *store.DB
+	HF    *hf.Client
+	Cfg   func() *config.Config
 	// Source is the collector snapshot source, used by Preflight for real
 	// disk/GTT figures. nil ⇒ Preflight degrades those two checks to
 	// "unavailable" rather than blocking on a stale/absent reading.
@@ -49,6 +49,19 @@ type Deps struct {
 	// --load-mode (known=false: could not tell). nil ⇒ run `<bin> --help`.
 	// Injected by tests; see loadmode.go.
 	ProbeLoadMode func(ctx context.Context, path string) (supported, known bool)
+	// VetBinaryPath is the build guard over catalog.build_roots (internal/buildguard, ADR-0020 F8) run on a build's
+	// binary path before the load-mode probe execs it: "" when the path may run, else the reason it may not. nil ⇒
+	// the probe's own narrower check applies; see loadmode.go.
+	VetBinaryPath func(ctx context.Context, path string) string
+	// OnCatalogChange runs after the downloader writes catalog rows (a registered model, or a repointed artifact), so the daemon's config
+	// caches are cleared like they are for the API's own writes. nil ⇒ they age out on their own (5 s).
+	OnCatalogChange func()
+}
+
+func (d Deps) catalogChanged() {
+	if d.OnCatalogChange != nil {
+		d.OnCatalogChange()
+	}
 }
 
 func (d Deps) now() time.Time {

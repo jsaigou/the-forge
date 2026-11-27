@@ -50,7 +50,7 @@ func RunSampler(
 // live reality, never invents a "loaded" state the table doesn't already
 // half-agree with and never touches loaded_at on a row that's already
 // correct. The opposite gap (table says empty, a slot is actually loaded)
-// self-heals via the engine's own sysconfig-inferred reconciliation at
+// self-heals via the engine's own launch-row reconciliation at
 // startup (SlotStates' "unit ACTIVE but untracked" case), so it doesn't
 // need this loop too.
 //

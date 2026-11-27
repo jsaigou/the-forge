@@ -1,33 +1,23 @@
 # /etc/systemd/system/forge-tts.service
-# Qwen3-TTS OpenAI-compatible speech endpoint (port 8082).
-# Enabled at boot (~4.8GB GTT footprint); can still be toggled off from the
-# ops dashboard topbar — the toggle just starts/stops this unit.
+# Speech front door (port 8082): the OpenAI-compatible speech + voices contract and the voice registry. It runs no engine itself: for every request it
+# asks the Forge daemon where an engine is (docs/speech-routing-plan.md), so engines live in the specialist pool (Settings -> Voice & Speech).
 [Unit]
-Description=Forge — TTS (Qwen3-TTS via ggml/qwentts.cpp, port 8082)
-After=network.target forge-tts-custom.service
-Wants=forge-tts-custom.service
+Description=Forge — TTS front door (speech engines resolved per request by the Forge daemon, port 8082)
+After=network.target
 
 [Service]
 Type=simple
 User=testuser
 Group=testuser
 WorkingDirectory=/opt/forge
-# Pure-Go replacement for scripts/tts_server.py. Build from ai-mode:
+# Pure-Go service. Build from ai-mode:
 #   cd go && go build -o /opt/forge/forge-tts ./cmd/forge-tts
-# Inference backend (FORGE_TTS_INFERENCE):
-#   cli    (default) shell the qwen-tts CLI — model reloaded per call.
-#   server front resident tts-server instances (one per model variant) for
-#          GPU-resident models. Requires companion units
-#          forge-tts-custom.service / forge-tts-design.service /
-#          forge-tts-base.service (tts-server --model ... --port 8081/8082/8083),
-#          and FORGE_TTS_SERVER_CUSTOM/_DESIGN/_BASE pointing at them.
+# It REFUSES TO START without FORGE_TTS_DAEMON_KEY (a speech-scoped key:
+#   forge mint-key -kind forge -role operator -scope speech -bind-ip 127.0.0.1 -ttl 8760h -name forge-tts-speech).
+# Put the key (and FORGE_TTS_DAEMON_KEY_EXPIRES, FORGE_TTS_INTERNAL_TOKEN) in the env file below, not in this unit. FORGE_TTS_DEFAULT_VOICE names the voice
+# for requests that name none; without it such a request is refused.
 ExecStart=/opt/forge/forge-tts
 Environment=FORGE_TTS_LISTEN=127.0.0.1:8082
-Environment=FORGE_TTS_INFERENCE=cli
-Environment=FORGE_TTS_BIN_DIR=/opt/forge/qwentts.cpp/build
-Environment=FORGE_TTS_MODELS_DIR=/opt/forge/qwentts.cpp/models
-Environment=FORGE_TTS_SIZE=1.7b
-Environment=FORGE_TTS_BACKEND=Vulkan0
 Environment=FORGE_TTS_REGISTRY=/opt/forge/tts_voices
 EnvironmentFile=-/opt/forge/tts_voices/.internal_token_env
 Restart=on-failure

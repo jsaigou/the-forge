@@ -1,5 +1,6 @@
 import { ICON_MANIFEST, type IconEdge } from "../assets/icons/manifest";
 import { Logo } from "./Logo";
+import { own } from "../lib/own";
 
 // Icon (Sprint 0 §0.8) renders a vendored brand/badge SVG inline with a
 // contrasting ring, falling back to the letter-badge (Logo) for any slug not
@@ -109,7 +110,7 @@ export function Icon({
         </span>
       );
     }
-    const darkEntry = ICON_MANIFEST[dark];
+    const darkEntry = own(ICON_MANIFEST, dark);
     return (
       <span className={`icon ${sizeClass}`.trim()} title={name}>
         {variantMark(undefined, slug, name, "icon-v light")}
@@ -120,7 +121,7 @@ export function Icon({
     );
   }
 
-  const entry = ICON_MANIFEST[slug];
+  const entry = own(ICON_MANIFEST, slug);
   if (!entry) {
     // Unknown slug → letter-badge fallback (identical to the pre-§0.8 Logo).
     // An explicit slugDark can't rescue an unknown light slug — the light
@@ -140,7 +141,7 @@ export function Icon({
       darkDataURL = overrideSlug;
       darkEdge = entry.edge; // no image analysis at runtime; reuse the light mark's edge
     } else {
-      const overrideEntry = ICON_MANIFEST[overrideSlug];
+      const overrideEntry = own(ICON_MANIFEST, overrideSlug);
       darkSVG = overrideEntry?.svg;
       darkEdge = overrideEntry?.edge ?? entry.edge;
     }

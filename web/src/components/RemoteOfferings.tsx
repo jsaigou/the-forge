@@ -201,11 +201,12 @@ function RemoteModelRow({
   // group's own head when nothing is routable) leads; the rest follow in
   // router-priority order.
   return (
-    <div className="ro-group">
+    <div className="ro-group offer">
       {(modelLogo || modelName) && (
         <div className="ro-head">
           {modelLogo ? <Icon slug={modelLogo} slugDark={modelLogoDark} name={modelName ?? ""} /> : <span className="icon" />}
           <span className="ro-model-name">{modelName ?? group[0].wire_model}</span>
+          <span className="chip offer">{t("common:offer.chip")}</span>
         </div>
       )}
       {group.map((o) => {

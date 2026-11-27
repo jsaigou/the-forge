@@ -298,8 +298,11 @@ func TestFailOpen(t *testing.T) {
 // endpoint output or logs. Only sizes and normalized tool names may appear.
 func TestPrivacySentinels(t *testing.T) {
 	var logs bytes.Buffer
+	prevOut := log.Writer()
 	log.SetOutput(&logs)
-	t.Cleanup(func() { log.SetOutput(nil) })
+	// Restore what was there, not nil: a nil writer turns the next log.Printf anywhere in the package (a later test
+	// that opens the real store does one) into a panic, which reads as a crash in whatever ran second.
+	t.Cleanup(func() { log.SetOutput(prevOut) })
 
 	l, db := newTest(t)
 	const S = "SENTINEL_SECRET_9f3a"

@@ -128,6 +128,10 @@ func (c *Core) CouldLoad(ctx context.Context, model string, horizon time.Duratio
 	if slot := c.findLoaded(model, ""); slot != "" {
 		return Placement{Slot: slot}, nil
 	}
+	// Already on its way: EnsureLoaded will wait for it, so there is nothing to place or to substitute for.
+	if slot := c.findLoading(model, ""); slot != "" {
+		return Placement{Slot: slot}, nil
+	}
 	return c.place(ctx, model, "", cfg, reservations, horizon).export(), nil
 }
 
@@ -141,15 +145,27 @@ func (c *Core) occupancy() map[string]collector.SlotAssignment {
 // findLoaded returns the slot where model is currently loaded, or "".
 // When target is given the check is scoped to that one slot — a model
 // loaded elsewhere doesn't count for a pinned caller (a0's backend
-// records have fixed port/slot mappings; V4 parity). A slot whose unit is
-// mid-unload keeps its mode per the crown-jewels rule but is NOT
-// "loaded" for a caller about to send traffic to it.
+// records have fixed port/slot mappings; V4 parity). A slot that is
+// mid-load or mid-unload carries the model's name but is NOT "loaded" for a
+// caller about to send traffic to it: the engine infers the name from the
+// armed launch row as soon as the unit is active, before the server listens.
 func (c *Core) findLoaded(model, target string) string {
+	return c.findSlot(target, func(a collector.SlotAssignment) bool {
+		return a.Mode == model && a.Loading == nil && a.Unloading == nil
+	})
+}
+
+// findLoading returns the slot a load of model is running on, or "".
+func (c *Core) findLoading(model, target string) string {
+	return c.findSlot(target, func(a collector.SlotAssignment) bool {
+		return a.Loading != nil && a.Loading.Mode == model && a.Unloading == nil
+	})
+}
+
+// findSlot returns target, or else the first slot, whose assignment matches; "" when none does.
+func (c *Core) findSlot(target string, match func(collector.SlotAssignment) bool) string {
 	occ := c.occupancy()
-	usable := func(s string) bool {
-		a := occ[s]
-		return a.Mode == model && a.Unloading == nil
-	}
+	usable := func(s string) bool { return match(occ[s]) }
 	if target != "" {
 		if usable(target) {
 			return target
@@ -316,8 +332,8 @@ func (c *Core) place(ctx context.Context, model, target string, cfg Config, rese
 		return placement{slot: target, evict: append([]string{target}, memEvict...), evictComfy: evictComfy}
 	}
 
-	// Free choice: prefer any free bay.
-	for _, s := range c.d.Engine.Slots() {
+	// Free choice: prefer any free bay, one that was not just emptied first (engine.SlotOrderer).
+	for _, s := range engine.LoadOrderOf(c.d.Engine, c.d.Engine.Slots()) {
 		if free(s) {
 			return placement{slot: s, evict: memEvict, evictComfy: evictComfy}
 		}

@@ -364,7 +364,7 @@ func proposeKernelParamsRunbook(env *CheckEnv, f Finding, _ BrainResolution) []A
 	steps := []RunbookStep{
 		{
 			Title:         "Edit the bootloader kernel command line",
-			Command:       `sudo grubby --update-kernel=ALL --args="` + strings.Join(missing, " ") + `"`,
+			Command:       "sudo grubby --update-kernel=ALL --args=" + shellQuote(strings.Join(missing, " ")),
 			Why:           "these params aren't set on the running kernel — kernel_params found them missing from /proc/cmdline",
 			Verify:        "shows " + strings.Join(missing, " "),
 			VerifyCommand: "cat /proc/cmdline",
@@ -493,10 +493,10 @@ func proposeRebuildRunbook(env *CheckEnv, f Finding, _ BrainResolution) []Action
 				{
 					Title: "Run the full build-refresh procedure for " + b.Name,
 					Command: fmt.Sprintf("cd %s && git fetch %s && git rev-list --count HEAD..%s",
-						b.SourceRef, upstreamRemote(b.UpstreamRef), b.UpstreamRef),
+						shellQuote(b.SourceRef), shellQuote(upstreamRemote(b.UpstreamRef)), shellQuote(b.UpstreamRef)),
 					Why:           "binary_versions measured " + b.Name + " " + fmt.Sprintf("%d commit(s) behind %s", b.UpstreamAhead, b.UpstreamRef) + " — the installed build lags upstream" + blastRadiusSummary(blast),
 					Verify:        "shows the commit count the check reported",
-					VerifyCommand: fmt.Sprintf("cd %s && git rev-list --count HEAD..%s", b.SourceRef, b.UpstreamRef),
+					VerifyCommand: fmt.Sprintf("cd %s && git rev-list --count HEAD..%s", shellQuote(b.SourceRef), shellQuote(b.UpstreamRef)),
 				},
 				{
 					Title:         "Rebase the fork onto latest upstream",
@@ -538,10 +538,10 @@ func proposeRebuildRunbook(env *CheckEnv, f Finding, _ BrainResolution) []Action
 		steps := []RunbookStep{
 			{
 				Title:         "Rebuild " + b.Name + " from its current source tree",
-				Command:       fmt.Sprintf("cd %s && cmake --build build -j $(nproc)", b.SourceRef),
+				Command:       fmt.Sprintf("cd %s && cmake --build build -j $(nproc)", shellQuote(b.SourceRef)),
 				Why:           "binary_versions found the installed build's --version lagging this source tree's own HEAD",
 				Verify:        "reports a commit hash matching " + b.SourceRef + "'s new HEAD",
-				VerifyCommand: b.Path + " --version",
+				VerifyCommand: shellQuote(b.Path) + " --version",
 			},
 			{
 				// No sudo: chcon only needs the file's own owner, not
@@ -550,10 +550,10 @@ func proposeRebuildRunbook(env *CheckEnv, f Finding, _ BrainResolution) []Action
 				// build's own output is owned by whoever ran cmake, same
 				// as this binary's real on-host ownership.
 				Title:         "Re-apply the SELinux label (required after any llama-server rebuild)",
-				Command:       "chcon -t bin_t " + b.Path,
+				Command:       "chcon -t bin_t " + shellQuote(b.Path),
 				Why:           "SELinux relabeling is required after any rebuild; the file's own owner can do it — no sudo needed",
 				Verify:        "shows bin_t",
-				VerifyCommand: "ls -Z " + b.Path,
+				VerifyCommand: "ls -Z " + shellQuote(b.Path),
 			},
 		}
 		detail, err := json.Marshal(map[string]any{

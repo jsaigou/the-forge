@@ -3,6 +3,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { BENCHMARK_REFS } from "../../lib/benchmarks";
 import type { CatalogBenchmark, CatalogConfig, CatalogModel, CatalogOffering, CatalogVariant } from "../../lib/types";
 import { SaveButton } from "../SaveButton";
+import { own } from "../../lib/own";
 
 // subjectLabel resolves a benchmark's (subject_type, subject_id) pair to a
 // human name, falling back to a bare #id when the subject was deleted out
@@ -92,12 +93,12 @@ export function BenchmarkForm({
   // benchmarks we have a cited ceiling for.
   const presetKeys = Object.keys(BENCHMARK_REFS);
   const activePreset = presetKeys.includes(notes) ? notes : "__custom__";
-  const activeRef = activePreset !== "__custom__" ? BENCHMARK_REFS[activePreset] : undefined;
+  const activeRef = activePreset !== "__custom__" ? own(BENCHMARK_REFS, activePreset) : undefined;
 
   function selectPreset(key: string) {
     if (key === "__custom__") return;
     setNotes(key);
-    if (!metric.trim()) setMetric(BENCHMARK_REFS[key].defaultMetric);
+    if (!metric.trim()) setMetric(own(BENCHMARK_REFS, key)?.defaultMetric ?? "");
   }
 
   function submit() {

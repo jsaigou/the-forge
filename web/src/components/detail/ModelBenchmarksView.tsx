@@ -15,6 +15,7 @@ import {
 import type { CatalogBenchmark } from "../../lib/types";
 import { BenchmarkForm } from "../catalog/BenchmarkForm";
 import { ConfirmButton } from "../ConfirmButton";
+import { safeHref } from "../../lib/safeHref";
 
 function useErrorState() {
   const [error, setError] = useState<string | null>(null);
@@ -102,7 +103,7 @@ export function ModelBenchmarksView({ modelId }: { modelId: string }) {
                 <span style={{ width: 70, fontFamily: "var(--mono)", fontSize: 12 }}>{b.value}</span>
                 <span style={{ width: 140, fontSize: 11, color: "var(--text-dim)" }}>{b.notes || "—"}</span>
                 <span style={{ fontSize: 10.5, color: "var(--text-mute)", flex: 1, fontFamily: "var(--mono)" }}>
-                  {b.source_url ? <a href={b.source_url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--cool)" }}>{b.source_date || t("benchmarks_view.link_fallback")}</a> : b.source_date || "—"}
+                  {safeHref(b.source_url) ? <a href={safeHref(b.source_url)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--cool)" }}>{b.source_date || t("benchmarks_view.link_fallback")}</a> : b.source_date || "—"}
                 </span>
                 <div className="actions" style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                   <button className="btn" style={{ fontSize: 11, padding: "4px 8px" }} onClick={() => { setEditing(b.id); clearError(); }}>{t("benchmarks_view.edit")}</button>

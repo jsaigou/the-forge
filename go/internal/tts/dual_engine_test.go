@@ -2,7 +2,6 @@ package tts
 
 import (
 	"context"
-	"strings"
 	"testing"
 )
 
@@ -14,7 +13,7 @@ func TestDualEngineNilKokoro(t *testing.T) {
 	fb := &fakeBackend{}
 	reg := NewRegistry(t.TempDir())
 	reg.Put(VoiceEntry{ID: "billie", Name: "Billie", Type: "design", Design: &DesignSpec{Instruct: "warm"}})
-	qwen := NewQwenTTS(fb, reg, nil)
+	qwen := NewQwenTTS(fb, reg)
 	dual := NewDualEngine(qwen, nil, "billie", "af_heart")
 
 	ctx := context.Background()
@@ -53,22 +52,31 @@ func TestDualEngineNilKokoro(t *testing.T) {
 	}
 }
 
-func TestDualEngineDisabledMode(t *testing.T) {
-	fb := &fakeBackend{}
+// modeGateBackend refuses the modes in refuse the way the daemon does for an engine that is turned off (a hard EngineError), and serves the others.
+type modeGateBackend struct {
+	fakeBackend
+	refuse map[VoiceMode]bool
+}
+
+func (b *modeGateBackend) Speech(ctx context.Context, spec SynthSpec, text string) (*SpeechResult, error) {
+	if b.refuse[spec.Mode] {
+		return nil, &EngineError{Code: "speech_engine_disabled", Message: "engine for " + string(spec.Mode) + " is turned off"}
+	}
+	return b.fakeBackend.Speech(ctx, spec, text)
+}
+
+func TestDualEngineEngineTurnedOffByTheDaemon(t *testing.T) {
 	reg := NewRegistry(t.TempDir())
 	reg.Put(VoiceEntry{ID: "billie", Name: "Billie", Type: "design", Design: &DesignSpec{Instruct: "warm"}})
-	reg.Put(VoiceEntry{ID: "bmo", Name: "Bmo", Type: "customvoice"})
-	qwen := NewQwenTTS(fb, reg, map[VoiceMode]bool{ModeVoiceDesign: true})
-	dual := NewDualEngine(qwen, nil, "billie", "af_heart")
+	reg.Put(VoiceEntry{ID: "kit", Name: "Kit", Type: "customvoice"})
+	dual := NewDualEngine(NewQwenTTS(&modeGateBackend{refuse: map[VoiceMode]bool{ModeVoiceDesign: true}}, reg), nil, "billie", "af_heart")
 
-	if _, err := dual.Speech(context.Background(), SpeechRequest{Voice: "billie", Input: "hi"}); err == nil {
-		t.Fatalf("Speech for a disabled mode (voicedesign) should be refused, got success")
-	} else if !strings.Contains(err.Error(), "disabled") {
-		t.Fatalf("error = %v, want it to mention the mode is disabled", err)
+	_, err := dual.Speech(context.Background(), SpeechRequest{Voice: "billie", Input: "hi"})
+	if ee, ok := IsEngineError(err); !ok || ee.Code != "speech_engine_disabled" || ee.Transient {
+		t.Fatalf("Speech for a mode whose engine is turned off = %v, want the daemon's hard refusal", err)
 	}
-
-	// A different, non-disabled mode must still work.
-	if _, err := dual.Speech(context.Background(), SpeechRequest{Voice: "bmo", Input: "hi"}); err != nil {
-		t.Fatalf("Speech for an enabled mode (customvoice) should succeed, got: %v", err)
+	// A different mode must still work.
+	if _, err := dual.Speech(context.Background(), SpeechRequest{Voice: "kit", Input: "hi"}); err != nil {
+		t.Fatalf("Speech for another mode should succeed, got: %v", err)
 	}
 }

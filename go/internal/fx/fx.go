@@ -36,6 +36,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/netguard"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -85,8 +86,8 @@ const (
 // Source interface). The keys are frozen strings, so drift is a non-issue.
 const (
 	settingDisplayCurrency = "billing.display_currency"
-	settingFxSourceURL      = "billing.fx_source_url"
-	settingFxRefreshMin     = "billing.fx_refresh_min"
+	settingFxSourceURL     = "billing.fx_source_url"
+	settingFxRefreshMin    = "billing.fx_refresh_min"
 )
 
 // Cache is the daemon-side fx.Source: a background refresher that fetches
@@ -137,13 +138,29 @@ func WithFetch(f func(ctx context.Context, sourceURL string) (string, map[string
 	return func(c *Cache) { c.fetch = f }
 }
 
+// guardedClient is the rate-source client: the operator-set billing.fx_source_url must resolve to a public address (internal/netguard), so a
+// mistyped or hostile value cannot make the daemon send requests to the tailnet, loopback or a metadata endpoint.
+func guardedClient() *http.Client {
+	c := netguard.NewClient(nil)
+	c.Timeout = httpTimeoutSec * time.Second
+	return c
+}
+
+// WithAllowHost lets the fetcher reach hosts the guard would refuse (tests pointing at an httptest.Server on 127.0.0.1). Never set in production.
+func WithAllowHost(allow func(host string) bool) Option {
+	return func(c *Cache) {
+		c.http = netguard.NewClient(allow)
+		c.http.Timeout = httpTimeoutSec * time.Second
+	}
+}
+
 // New builds a Cache backed by db (fx_rates + router_providers) and the
 // settings KV. Call Start to launch the background refresher; Close to stop.
 func New(db *sql.DB, settings store.Settings, opts ...Option) *Cache {
 	c := &Cache{
 		db:       db,
 		settings: settings,
-		http:     &http.Client{Timeout: httpTimeoutSec * time.Second},
+		http:     guardedClient(),
 		stop:     make(chan struct{}),
 		done:     make(chan struct{}),
 	}

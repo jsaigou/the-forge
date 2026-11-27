@@ -47,6 +47,8 @@ func runCatalogCLI(args []string) error {
 		return runCatalogBackfillGGUF(args[1:])
 	case "delete-artifact":
 		return runCatalogDeleteArtifact(args[1:])
+	case "register-build":
+		return runCatalogRegisterBuild(args[1:])
 	default:
 		return fmt.Errorf("%s", i18n.T("forge.catalog.unknown_subcommand", args[0]))
 	}
@@ -116,20 +118,23 @@ func runCatalogBackfillGGUF(args []string) error {
 			fmt.Fprintln(os.Stderr, i18n.T("forge.catalog.skip_unreadable", a.ID, a.FilePath, mdErr))
 			continue
 		}
-		a.GGUFArch = md.Architecture
-		a.GGUFTrainedCtx = md.TrainedCtx
-		a.GGUFParameterCount = ggufParamStringCLI(md)
-		a.GGUFQuantType = md.QuantType
+		facts := store.ArtifactGGUFFacts{Arch: md.Architecture, TrainedCtx: md.TrainedCtx, ParameterCount: ggufParamStringCLI(md), QuantType: md.QuantType}
 
 		if *dryRun {
-			fmt.Fprintln(os.Stderr, i18n.T("forge.catalog.would_update", a.ID, a.FilePath, a.GGUFArch, a.GGUFTrainedCtx))
+			fmt.Fprintln(os.Stderr, i18n.T("forge.catalog.would_update", a.ID, a.FilePath, facts.Arch, facts.TrainedCtx))
 			updated++
 			continue
 		}
-		if err := db.Catalog().UpdateArtifact(ctx, a); err != nil {
+		// The narrow write re-reads the row and only fills in facts that are still missing, so a value set since the list was taken is kept.
+		wrote, err := (store.ArtifactWrites{Cat: db.Catalog()}).BackfillGGUFFacts(ctx, a.ID, facts)
+		if err != nil {
 			return fmt.Errorf("%s: %w", i18n.T("forge.catalog.err_update_artifact", a.ID), err)
 		}
-		fmt.Fprintln(os.Stderr, i18n.T("forge.catalog.updated", a.ID, a.FilePath, a.GGUFArch, a.GGUFTrainedCtx))
+		if !wrote {
+			alreadySet++
+			continue
+		}
+		fmt.Fprintln(os.Stderr, i18n.T("forge.catalog.updated", a.ID, a.FilePath, facts.Arch, facts.TrainedCtx))
 		updated++
 	}
 
@@ -171,7 +176,9 @@ func runCatalogDeleteArtifact(args []string) error {
 	}
 	defer db.Close()
 
-	if err := db.Catalog().DeleteArtifact(context.Background(), *id); err != nil {
+	// The same rule as the API: an artifact a config still uses as its weight or mmproj is not deleted (this command opens the database directly,
+	// so there is no daemon cache to clear; the daemon's own 5 s cache expires by itself).
+	if err := (store.ArtifactWrites{Cat: db.Catalog()}).Delete(context.Background(), *id); err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("forge.catalog.err_delete_artifact", *id), err)
 	}
 	fmt.Fprintln(os.Stderr, i18n.T("forge.catalog.deleted", *id))

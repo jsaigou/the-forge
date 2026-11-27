@@ -87,7 +87,7 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// Per-slot consumer attribution (status.slot_consumers): derive the
 	// caller's human-facing label once up front and stash it in ctx —
 	// tryBackends Marks each foundry_slot attempt with it.
-	ctx = context.WithValue(ctx, consumerLabelKey{}, s.consumerLabel(r, auth))
+	ctx = s.attributeConsumer(ctx, r, auth)
 
 	// Read & buffer the body once — used for validation and re-serialised
 	// per-backend with wire_model overwritten. Cap at 32 MiB to prevent
@@ -136,6 +136,8 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	flightFrom(ctx).setModel(model)
+
 	// Observe-only creation ledger (WS-N1): once per request (never inside
 	// tryBackends, which re-runs on failover), after validation and before
 	// routing. Queues the untouched inbound bytes; never alters the request.
@@ -162,10 +164,19 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// code kept only for a hypothetical future config source, not a real
 	// fallback today.
 	requestedBy := requestedByHeader(r)
+	if mod, missing := s.missingModality(ctx, model, body); missing {
+		writeUnsupportedModality(w, model, mod)
+		return
+	}
+	if s.decisionOnlyChat(ctx, model) {
+		writeChatToDecisionModel(w, model)
+		return
+	}
 	var chain []*Backend
 	catChain, handled, errMsg, loadReason, resolvedBody := s.catalogChain(ctx, model, requestedBy, body)
 	switch {
 	case handled && catChain != nil:
+		defer finishChain(catChain)
 		chain = catChain
 		// catalogChain may have resolved model via a ModelAlias (T3),
 		// whose request_defaults are merged into resolvedBody — a NEW map,
@@ -200,6 +211,15 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		default:
 			route := cfg.RouteFor(model)
 			if route == nil {
+				if s.isHiddenModel(ctx, model) {
+					writeJSON(w, http.StatusNotFound, map[string]string{
+						"error": "model_not_routable",
+						"model": model,
+						"message": model + " exists in the catalog but is hidden, so a0 does not serve it. " +
+							"Unhide it (visibility) to route it, or test it directly against its slot's port.",
+					})
+					return
+				}
 				writeJSON(w, http.StatusNotFound, map[string]string{
 					"error": "model_not_found",
 					"model": model,
@@ -257,6 +277,7 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 
 	b := chain[idx]
 	cfg := s.cfg()
+	flightFrom(ctx).setModel(model)
 
 	// Gate: health/busy check for foundry_slot backends.
 	// busyMode is read from the store's Settings KV (router.busy_mode) so
@@ -311,14 +332,21 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 	// control — internal/router/reasoning.go). Every other field passes
 	// through untouched (re-serialized, matching V4's dict(body) →
 	// json=upstream_body behavior).
-	requestBody := body
-	switch b.Kind {
-	case "remote":
-		requestBody = applyStreamUsageOptions(body, s.injectStreamUsageEnabled(ctx))
-	case "foundry_slot":
-		requestBody = applyReasoningEffort(b, body)
+	// A handler that is not chat (route_opts.go) forwards its own body untouched: none of the chat rewrites below
+	// (wire model, stream usage, reasoning effort) apply to it.
+	var mutatedBody []byte
+	if raw := routeOptsFrom(ctx).rawBody; raw != nil {
+		mutatedBody = raw
+	} else {
+		requestBody := body
+		switch b.Kind {
+		case "remote":
+			requestBody = applyStreamUsageOptions(body, s.injectStreamUsageEnabled(ctx))
+		case "foundry_slot":
+			requestBody = applyReasoningEffort(b, body)
+		}
+		mutatedBody, err = mutateBody(requestBody, resolved.WireModel)
 	}
-	mutatedBody, err := mutateBody(requestBody, resolved.WireModel)
 	if err != nil {
 		cl.add(b.Name + ":body_error(" + err.Error() + ")")
 		s.tryBackends(ctx, w, r, model, body, chain, idx+1, cl)
@@ -359,7 +387,7 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 	// ported to the chat hot path until now.
 	var attemptBackend func(w http.ResponseWriter, r *http.Request, targetBase string, bypass bool)
 	attemptBackend = func(w http.ResponseWriter, r *http.Request, targetBase string, bypass bool) {
-		targetURL, err := url.Parse(targetBase + "/chat/completions")
+		targetURL, err := url.Parse(routeOptsFrom(ctx).target(targetBase))
 		if err != nil {
 			cl.add(b.Name + ":url_error")
 			s.tryBackends(ctx, w, r, model, body, chain, idx+1, cl)
@@ -391,6 +419,9 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 				if upstreamOverride != "" {
 					pr.Out.Header.Set("x-compress-base-url", upstreamOverride)
 				}
+				// The caller's Authorization is the router's own key (or session) and must never reach an upstream, least of all a keyless
+				// remote target: drop it unconditionally, then add only the credential stored for this target.
+				pr.Out.Header.Del("Authorization")
 				if resolved.APIKey != "" {
 					pr.Out.Header.Set("Authorization", "Bearer "+resolved.APIKey)
 				}
@@ -412,7 +443,15 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 					resp.Header.Set("X-Forge-Capability-Substitution", b.CapabilitySubstitutionMode)
 					resp.Header.Set("X-Forge-Capability-Substitution-Reason", b.CapabilitySubstitutionReason)
 				}
-				if resp.StatusCode >= 500 {
+				if kind, ok := deterministicUpstreamError(resp); ok {
+					// A verdict on the request, not a broken backend (upstream_classify.go): pass the upstream
+					// body through as a 400, no failover, no slot-error count.
+					resp.Header.Set(headerUpstreamStatus, strconv.Itoa(resp.StatusCode))
+					cl.add(b.Name + ":rejected:" + strconv.Itoa(resp.StatusCode) + ":" + kind)
+					resp.StatusCode = http.StatusBadRequest
+					resp.Status = "400 Bad Request"
+				}
+				if resp.StatusCode >= 500 && !routeOptsFrom(ctx).passUpstreamErrors {
 					// Returning an error here triggers ErrorHandler, which
 					// fails over to the next backend. No bytes have been
 					// written to w yet (ModifyResponse runs before
@@ -449,6 +488,7 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 				} else {
 					cl.add(b.Name + ":ok")
 				}
+				flightFrom(ctx).served(resolved, b)
 				if resp.StatusCode < 400 {
 					// Real remote spend (cost/savings sprint Phase 4): only for
 					// committed 2xx responses on "remote" backends, never on
@@ -459,13 +499,16 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 						streaming, _ := body["stream"].(bool)
 						captured := resolved
 						resp.Body = newUsageTap(resp.Body, streaming, func(buf []byte) {
-							s.recordExternalUsage(captured, model, buf, streaming)
+							s.recordExternalUsageFor(ctx, captured, model, buf, streaming)
 						})
+					} else {
+						// Every other committed response: read the token counts the upstream reported for the request's row.
+						flightFrom(ctx).tapLocalUsage(resp)
 					}
 					if b.Kind == "foundry_slot" {
 						// Observe-only: read llama.cpp timings for the ledger's reuse figure.
 						streaming, _ := body["stream"].(bool)
-						s.ledgerTap(ctx, resp, streaming)
+						s.ledgerTap(ctx, resp, streaming, b.Port)
 					}
 					// Consumer attribution completion mark: ReverseProxy
 					// always closes the upstream body after copying it, so
@@ -480,6 +523,13 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 				detail := cl.String()
 				if b.CapabilitySubstitutionMode != "" {
 					detail += ",capability_substituted(" + model + "->" + b.Name + "," + b.CapabilitySubstitutionMode + ")"
+				}
+				if onBody := routeOptsFrom(ctx).onSuccessBody; onBody != nil && resp.StatusCode < 400 && resp.Header.Get("Content-Encoding") == "" {
+					// The handler wants the upstream's own usage figures in the audit row, which only exist once the
+					// body has been read: write the row when the response has been fully sent (the tap never buffers
+					// ahead of the client; the body is one small JSON object).
+					resp.Body = newUsageTap(resp.Body, false, func(buf []byte) { onBody(buf) })
+					return nil
 				}
 				s.auditOutcome(ctx, model, "ok", detail)
 				return nil
@@ -531,6 +581,7 @@ func (s *Server) tryBackends(ctx context.Context, w http.ResponseWriter, r *http
 			Transport:     s.httpClient().Transport,
 		}
 
+		flightFrom(ctx).dispatched()
 		proxy.ServeHTTP(w, r)
 	}
 

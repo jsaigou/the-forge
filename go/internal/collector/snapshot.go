@@ -17,7 +17,11 @@
 // docs/v5-modes-config-editable.md §"Post-MODEL-CATALOG sprint" principle 1).
 package collector
 
-import "time"
+import (
+	"time"
+
+	"github.com/jsaigou/the-forge/internal/memledger"
+)
 
 // Snapshot is the immutable result of one collector cycle. The collector
 // builds a fresh Snapshot each cycle and swaps the pointer; consumers must
@@ -106,6 +110,10 @@ type Metrics struct {
 	// InferenceRSSBytes = gtt_used + unified_rss(ROCm-unified slots only).
 	// ADD, never max() — see docs/pitfalls.md and the crown-jewels list.
 	InferenceRSSBytes *int64
+
+	// Ledger is the host-memory partition (internal/memledger): what is reserved for the OS and the declared specialists, what the models hold,
+	// and the smallest bound on a new load. Computed every cycle so the dashboard, Smith and the fit gate read the same numbers.
+	Ledger            memledger.Ledger
 	ModelWeightsBytes *int64
 	KVCacheBytes      *int64
 
@@ -134,6 +142,11 @@ type Memory struct {
 	UsedBytes  int64
 	AvailBytes int64
 	Pct        float64
+
+	// SwapTotalBytes/SwapUsedBytes are /proc/meminfo's swap figures. On ForgeHost swap is zram, i.e. compressed RAM, so a full swap is memory
+	// pressure, not spare capacity.
+	SwapTotalBytes int64
+	SwapUsedBytes  int64
 }
 
 type CPU struct {

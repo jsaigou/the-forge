@@ -25,6 +25,10 @@
       "add_model": {
         "title": "Add a model",
         "body": "On the Models page, <b>Add Model</b> searches Hugging Face directly, runs a pre-flight check against this hardware, and downloads + auto-registers the result into the catalog."
+      },
+      "speech": {
+        "title": "Set up speech",
+        "body": "Some kinds of voice do not work yet. <b>What works</b> on Voice & Speech says which, and what each one needs."
       }
     }
   }

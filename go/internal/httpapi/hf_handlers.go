@@ -81,7 +81,7 @@ func (s *Server) handleHFSearch(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	results, err := s.deps.HFClient.Search(ctx, hf.Query{Text: q, Limit: intQueryParam(r, "limit", 0)})
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "hf search failed: "+err.Error())
+		writeErrorCode(w, http.StatusBadGateway, "hf_search_failed", map[string]any{"detail": "hf search failed: "+err.Error()}, "hf search failed: "+err.Error())
 		return
 	}
 	out := make([]hfSearchResultJSON, len(results))
@@ -120,7 +120,7 @@ func (s *Server) handleHFTree(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	files, err := s.deps.HFClient.Tree(ctx, repo, revision)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "hf tree failed: "+err.Error())
+		writeErrorCode(w, http.StatusBadGateway, "hf_tree_failed", map[string]any{"detail": "hf tree failed: "+err.Error()}, "hf tree failed: "+err.Error())
 		return
 	}
 	budget := int64(intQueryParam(r, "budget_bytes", 0))
@@ -162,7 +162,7 @@ func (s *Server) handleHFPreflight(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	report, err := s.deps.HFDownload.Preflight(ctx, b.Repo, b.Files, b.DestDir)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "preflight failed: "+err.Error())
+		writeErrorCode(w, http.StatusBadGateway, "hf_preflight_failed", map[string]any{"detail": "preflight failed: "+err.Error()}, "preflight failed: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, report)
@@ -313,7 +313,7 @@ func (s *Server) handleHFDownloadStart(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.deps.HFDownload.StartJob(ctx, b.toRequest(""))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	s.audit(r, identity(r).Name, "hf_download_start", strings.TrimSpace(strconv.FormatInt(id, 10)), b.Repo)
@@ -339,7 +339,7 @@ func (s *Server) handleHFDownloadApprove(w http.ResponseWriter, r *http.Request)
 			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "download"}, "download not found")
 			return
 		}
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	s.audit(r, identity(r).Name, "hf_download_approve", strconv.FormatInt(id, 10), "")
@@ -418,7 +418,7 @@ func (s *Server) handleHFDownloadDelete(w http.ResponseWriter, r *http.Request) 
 			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "download"}, "download not found")
 			return
 		}
-		writeError(w, http.StatusConflict, err.Error())
+		writeErrorCode(w, http.StatusConflict, "request_conflict", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	s.audit(r, identity(r).Name, "hf_download_delete", strconv.FormatInt(id, 10), "")

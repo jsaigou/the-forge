@@ -23,10 +23,11 @@ import (
 	"time"
 
 	"github.com/jsaigou/the-forge/internal/authz"
+	"github.com/jsaigou/the-forge/internal/store"
 )
 
 // modeNamePattern is validators._MODE_NAME_PATTERN (lowercase identifier).
-const modeNamePattern = `^[a-z0-9][a-z0-9\-_]{0,63}$`
+const modeNamePattern = store.ModeNamePattern
 
 var modeNameRE = regexp.MustCompile(modeNamePattern)
 

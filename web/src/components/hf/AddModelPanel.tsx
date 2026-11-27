@@ -15,6 +15,7 @@ import {
   useHFTreeMutation,
 } from "../../lib/queries";
 import type { HFPreflightReport, HFQuantCandidate, HFSearchResult } from "../../lib/types";
+import { SourcingEvaluator } from "./SourcingEvaluator";
 import { HFDownloadTray } from "./HFDownloadTray";
 
 // AddModelPanel — Models page "Add model" sub-tab: search -> pick a repo
@@ -125,6 +126,8 @@ export function AddModelPanel() {
           </div>
         )}
       </div>
+
+      <SourcingEvaluator />
     </>
   );
 }

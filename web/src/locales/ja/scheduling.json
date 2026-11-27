@@ -60,10 +60,10 @@
     "role_required": "スケジューラー設定を表示するには運用者権限が必要です。",
     "loading": "スケジューラー設定を読み込み中…",
     "heading": "スケジューラー調整値",
-    "field_idle_unload": "アイドル解放時間(秒)",
-    "field_small_job_threshold": "小規模ジョブのトークン閾値",
-    "field_priority_jump_cap": "優先度引き上げ上限",
-    "field_reservation_soon": "予約直前ウィンドウ(分)",
+    "field_idle_unload": "アイドルモデルを解放するまでの時間(秒)",
+    "field_small_job_threshold": "小規模ジョブのサイズ(トークン)",
+    "field_priority_jump_cap": "優先ジョブが順番を飛び越せる回数",
+    "field_reservation_soon": "予約を間近とみなす時間(分)",
     "reset": "リセット"
   }
 }

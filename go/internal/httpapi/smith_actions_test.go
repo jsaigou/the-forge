@@ -106,7 +106,7 @@ func seedActionsCatalog(t *testing.T, db *store.DB) {
 	}
 	if _, err := cat.CreateConfig(ctx, store.Config{
 		Name: "ornith-35b", VariantID: varID, WeightArtifactID: artID, EngineID: eng.ID,
-		NCtx: 262144, Parallel: 1, Status: "unverified", Visibility: "visible",
+		NCtx: 262144, Status: "unverified", Visibility: "visible",
 	}); err != nil {
 		t.Fatalf("CreateConfig: %v", err)
 	}
@@ -466,7 +466,7 @@ func TestSmithActionHandoffRemoteSwapsAndApproves(t *testing.T) {
 	}
 	if _, err := cat.CreateConfig(ctx, store.Config{
 		Name: "ornith-35b", VariantID: varID, WeightArtifactID: artID, EngineID: eng.ID,
-		NCtx: 262144, Parallel: 1, Status: "unverified", Visibility: "visible",
+		NCtx: 262144, Status: "unverified", Visibility: "visible",
 	}); err != nil {
 		t.Fatalf("CreateConfig: %v", err)
 	}

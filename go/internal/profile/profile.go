@@ -18,8 +18,6 @@ package profile
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -358,8 +356,14 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (Result, error) {
 		return Result{}, err
 	}
 	svc := mode.Services[0]
-	if svc.Backend == "vllm" {
-		err := fmt.Errorf("profile: vLLM profiling not yet supported (mode %q)", req.Mode)
+	spec, err := svc.Engine()
+	if err != nil {
+		err = fmt.Errorf("profile: mode %q: %w", req.Mode, err)
+		r.publishFailed(ctx, req.Mode, "config", err)
+		return Result{}, err
+	}
+	if !spec.Profilable {
+		err := fmt.Errorf("profile: %s profiling not yet supported (mode %q)", spec.Name, req.Mode)
 		r.publishFailed(ctx, req.Mode, "config", err)
 		return Result{}, err
 	}
@@ -381,8 +385,9 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (Result, error) {
 	// there in place and never touch that slot — only the OTHER slots get
 	// evicted. This also means we must not unload it afterward (Phase 8)
 	// or on failure (cleanup below) — it wasn't ours to evict, so it isn't
-	// ours to remove either. If it isn't loaded anywhere, fall back to the
-	// original behavior: first slot by Order.
+	// ours to remove either. If it isn't loaded anywhere, take the best slot
+	// for a new load: an empty one that was not just freed, so the eviction
+	// below never empties the very slot we are about to load into.
 	slots := r.d.Engine.Slots()
 	if len(slots) == 0 {
 		err := errors.New("profile: no configured slots")
@@ -391,7 +396,7 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (Result, error) {
 	}
 	targetSlot, wasAlreadyLoaded := r.findLoadedSlot(req.Mode)
 	if targetSlot == "" {
-		targetSlot = slots[0]
+		targetSlot = r.newLoadSlot(slots)
 	}
 	slotCfg, ok := cfg.Slots[targetSlot]
 	if !ok {
@@ -438,7 +443,8 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (Result, error) {
 		wrapped := fmt.Errorf("profile: %s: %w", phase, err)
 		r.publishFailed(ctx, req.Mode, phase, wrapped)
 		if !wasAlreadyLoaded {
-			if ures := r.d.Engine.Unload(ctx, targetSlot); !ures.Success {
+			// Not the run's context: a run cut off by its deadline or cancelled must still free the slot it filled.
+			if ures := r.d.Engine.Unload(context.WithoutCancel(ctx), targetSlot); !ures.Success {
 				r.logf("profile: cleanup unload of %q failed: %s", targetSlot, ures.Message)
 			}
 		}
@@ -504,7 +510,7 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (Result, error) {
 		result.PrefillTPS, result.DecodeTPS, len(benchmarks))
 
 	// Phase 7: Compute fingerprint + record.
-	fp, err := r.Fingerprint(req.Mode)
+	fp, err := r.profileFingerprint(req.Mode)
 	if err != nil {
 		return Result{}, cleanup("fingerprint", err)
 	}
@@ -560,6 +566,21 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (Result, error) {
 	result.Stale = false
 	r.d.Publish.Publish(EventDone, map[string]any{"result": result})
 	return result, nil
+}
+
+// newLoadSlot is the first empty slot in load order, or the first in that order when none is empty (or occupancy is unknown).
+func (r *Runner) newLoadSlot(slots []string) string {
+	order := engine.LoadOrderOf(r.d.Engine, slots)
+	if r.d.Snapshots != nil {
+		if snap := r.d.Snapshots.Current(); snap != nil {
+			for _, s := range order {
+				if st, ok := snap.Slots[s]; ok && st.Mode == "" && st.Loading == nil && st.Unloading == nil {
+					return s
+				}
+			}
+		}
+	}
+	return order[0]
 }
 
 // findLoadedSlot reports which slot (if any) currently has mode loaded, per
@@ -628,11 +649,7 @@ func (r *Runner) Get(mode string) (Result, bool) {
 	if err != nil {
 		return Result{}, false
 	}
-	currentFP, fpErr := r.Fingerprint(mode)
-	stale := true
-	if fpErr == nil && currentFP == stored.Fingerprint {
-		stale = false
-	}
+	stale := !r.fingerprintMatches(mode, stored.Fingerprint)
 
 	var depthBenchmarks []DepthBenchmark
 	if rows, err := r.d.Profiles.Benchmarks(ctx, stored.ID); err == nil {
@@ -970,10 +987,23 @@ func resolveModelID(cfg *config.Config, modeName string) string {
 // other subsystems). Changes on any invalidation condition (model replaced,
 // re-quantized, context changed, backend swapped, binary updated, flags changed).
 func (r *Runner) Fingerprint(modeName string) (string, error) {
+	parts, args, err := r.fingerprintParts(modeName)
+	if err != nil {
+		return "", err
+	}
+	// Sorted extra args (--parallel, --ctx-checkpoints, etc.).
+	sorted := make([]string, len(args))
+	copy(sorted, args)
+	sort.Strings(sorted)
+	return hashParts(append(parts, strings.Join(sorted, ","))), nil
+}
+
+// fingerprintParts returns everything but the launch flags, and the flags.
+func (r *Runner) fingerprintParts(modeName string) ([]string, []string, error) {
 	cfg := r.d.Cfg()
 	mode, ok := cfg.Modes[modeName]
 	if !ok || len(mode.Services) == 0 {
-		return "", fmt.Errorf("fingerprint: mode %q not found", modeName)
+		return nil, nil, fmt.Errorf("fingerprint: mode %q not found", modeName)
 	}
 	svc := mode.Services[0]
 
@@ -1024,13 +1054,5 @@ func (r *Runner) Fingerprint(modeName string) (string, error) {
 		parts = append(parts, "stat_err")
 	}
 
-	// Sorted extra args (--parallel, --ctx-checkpoints, etc.).
-	sorted := make([]string, len(svc.ExtraArgs))
-	copy(sorted, svc.ExtraArgs)
-	sort.Strings(sorted)
-	parts = append(parts, strings.Join(sorted, ","))
-
-	joined := strings.Join(parts, "|")
-	sum := sha256.Sum256([]byte(joined))
-	return hex.EncodeToString(sum[:]), nil
+	return parts, svc.ExtraArgs, nil
 }

@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -30,6 +32,12 @@ func checkVoiceID(id string) error {
 		return ErrInvalidVoiceID
 	}
 	return nil
+}
+
+// plainAudioName reports whether n is a bare file name that stays inside AudioDir when joined to it. voices.json is shared and writable by
+// other tools, so a ref_audio read back from it is as untrusted as a request field.
+func plainAudioName(n string) bool {
+	return n != "" && n != "." && n != ".." && n == filepath.Base(n) && !strings.ContainsAny(n, "/\\\x00")
 }
 
 type Registry struct {
@@ -132,6 +140,9 @@ func (r *Registry) Put(v VoiceEntry) error {
 	if err := checkVoiceID(v.ID); err != nil {
 		return err
 	}
+	if v.Clone != nil && v.Clone.RefAudio != "" && !plainAudioName(v.Clone.RefAudio) {
+		return fmt.Errorf("tts: voice %q: ref_audio must be a plain file name: %w", v.ID, ErrInvalidVoiceID)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.loadLocked(); err != nil {
@@ -162,7 +173,11 @@ func (r *Registry) Delete(id string) error {
 	// already ran, so ok was always false and RefAudio was never cleaned
 	// up — v is now captured before the delete instead.
 	if v.Clone != nil && v.Clone.RefAudio != "" {
-		_ = os.Remove(filepath.Join(r.AudioDir(), v.Clone.RefAudio))
+		if plainAudioName(v.Clone.RefAudio) {
+			_ = os.Remove(filepath.Join(r.AudioDir(), v.Clone.RefAudio))
+		} else {
+			log.Printf("tts: voice %q has a ref_audio that is not a plain file name; not deleting it", id)
+		}
 	}
 	_ = os.Remove(filepath.Join(r.AudioDir(), id+"_sample.wav"))
 	return nil

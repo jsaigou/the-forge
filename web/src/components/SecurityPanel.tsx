@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../lib/api";
 import { appLocale } from "../lib/format";
 import { SaveButton } from "./SaveButton";
@@ -47,42 +48,42 @@ const SECURITY_DANGER_FIELDS_BY_ID = Object.fromEntries(SECURITY_DANGER_FIELDS.m
 // `step_up_required`, a StepUpModal is shown; after successful step-up the
 // mutation is retried.
 
-const POLICY_RESOURCES: { key: string; label: string }[] = [
-  { key: "page.dashboard", label: "Dashboard" },
-  { key: "page.console", label: "Console" },
-  { key: "page.scheduling", label: "Scheduling" },
-  { key: "page.compression", label: "Compressor" },
-  { key: "page.settings", label: "Settings" },
+const POLICY_RESOURCES: { key: string; labelKey: string }[] = [
+  { key: "page.dashboard", labelKey: "policy.res_page_dashboard" },
+  { key: "page.console", labelKey: "policy.res_page_console" },
+  { key: "page.scheduling", labelKey: "policy.res_page_scheduling" },
+  { key: "page.compression", labelKey: "policy.res_page_compression" },
+  { key: "page.settings", labelKey: "policy.res_page_settings" },
   // P3 — the Help page's "Ask the smith" chat + Diagnostics sub-tabs. Added
   // proactively alongside the reasoning-tier UI, same reasoning as
   // action.model.profile below: don't ship a new backend-gated resource
   // with no matrix row for it.
-  { key: "page.smith", label: "Help → Ask the smith" },
-  { key: "area.settings.security", label: "Settings → Security" },
-  { key: "area.settings.provider_keys", label: "Settings → Providers" },
+  { key: "page.smith", labelKey: "policy.res_page_smith" },
+  { key: "area.settings.security", labelKey: "policy.res_area_security" },
+  { key: "area.settings.provider_keys", labelKey: "policy.res_area_provider_keys" },
   // Sprint 12 (was H): the Danger Zone's own resource — boot-critical infra
   // (listen addresses, paths, ports, tailscale) + the daemon restart action.
-  { key: "area.settings.system", label: "Settings → Danger Zone" },
-  { key: "action.system.restart", label: "Restart daemon" },
-  { key: "action.model.load_unload", label: "Load / unload models" },
-  { key: "action.compressor.teardown", label: "Compressor teardown" },
-  { key: "action.reservation.write", label: "Reservations" },
+  { key: "area.settings.system", labelKey: "policy.res_area_system" },
+  { key: "action.system.restart", labelKey: "policy.res_action_restart" },
+  { key: "action.model.load_unload", labelKey: "policy.res_action_load_unload" },
+  { key: "action.compressor.teardown", labelKey: "policy.res_action_teardown" },
+  { key: "action.reservation.write", labelKey: "policy.res_action_reservations" },
   // Real pre-existing gap found this sprint: this resource has existed in
   // Go since the PROFILE track (authz/policy.go) but was never added here,
   // so an admin could never actually configure its assurance level from
   // the UI despite the backend already gating on it.
-  { key: "action.model.profile", label: "Run model profiling" },
+  { key: "action.model.profile", labelKey: "policy.res_action_profile" },
   // Wave 3 / P2 (track W3-C) — gates POST /smith/actions (create) and
   // POST /smith/actions/{id}/approve. Added proactively alongside the
   // action-model UI so this resource doesn't repeat the action.model.profile
   // gap noted above (backend-gated for months with no matrix row).
-  { key: "action.smith.execute", label: "Approve smith actions" },
+  { key: "action.smith.execute", labelKey: "policy.res_action_smith_execute" },
   // Autonomous-remediation Sprint 5 (docs/v5-smith.md §13.3): gates PUT
   // /smith/autonomy's ESCALATING direction only (turning the global
   // autonomy kill switch on, or opting a procedure in) — added proactively
   // alongside the backend so this resource doesn't repeat the
   // action.model.profile gap noted above.
-  { key: "action.smith.autonomy", label: "Standing autonomy policy" },
+  { key: "action.smith.autonomy", labelKey: "policy.res_action_autonomy" },
 ];
 
 const FACTORS: AuthFactor[] = ["network", "password", "totp", "passkey"];
@@ -97,6 +98,7 @@ const NETWORK_PROVIDERS: AuthNetworkProvider[] = ["tailscale", "forward_auth_hea
 // ── Policy matrix ─────────────────────────────────────────────────────────────
 
 function PolicyMatrix({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("security");
   const policy = useAuthPolicy();
   const update = useUpdateAuthPolicy();
   const gate = useStepUpGate();
@@ -120,31 +122,29 @@ function PolicyMatrix({ canAdmin }: { canAdmin: boolean }) {
   if (policy.isError) {
     return (
       <>
-        <div className="eyebrow" id="security-policy">Access policy</div>
-        <div className="card"><div className="empty-note">Policy store unavailable.</div></div>
+        <div className="eyebrow" id="security-policy">{t("policy.title")}</div>
+        <div className="card"><div className="empty-note">{t("policy.unavailable")}</div></div>
       </>
     );
   }
 
   return (
     <>
-      <div className="eyebrow" id="security-policy">Access policy · resource → minimum factor</div>
+      <div className="eyebrow" id="security-policy">{t("policy.title_full")}</div>
       <div className="card">
-        <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, lineHeight: 1.55 }}>
-          Each resource requires at least the selected factor. <b>network</b> = tailnet membership suffices;
-          <b> password</b>/<b>totp</b> = step-up needed; <b>passkey</b> = hardware/biometric (L2).
-          Orthogonal to RBAC role (both must pass).
+        <div className="sec-hint">
+          <Trans i18nKey="policy.hint" ns="security" components={{ b: <b /> }} />
         </div>
-        {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
-        <div className="qrow" style={{ color: "var(--text-mute)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em" }}>
-          <span style={{ width: 240 }}>Resource</span>
-          <span style={{ width: 150 }}>Minimum factor</span>
+        {error && <div className="error-note sec-err">{error}</div>}
+        <div className="qrow sec-qhead">
+          <span className="sec-w240">{t("policy.col_resource")}</span>
+          <span className="sec-w150">{t("policy.col_min_factor")}</span>
         </div>
         {POLICY_RESOURCES.map((r) => (
           <div className="qrow" key={r.key}>
-            <span style={{ width: 240, fontSize: 12 }}>{r.label}</span>
+            <span className="sec-w240 sec-cell">{t(r.labelKey)}</span>
             <select
-              style={{ width: 150 }}
+              className="sec-w150"
               value={current[r.key] ?? "network"}
               disabled={!canAdmin}
               onChange={(e) => setDraft({ ...current, [r.key]: e.target.value as AuthFactor })}
@@ -154,9 +154,9 @@ function PolicyMatrix({ canAdmin }: { canAdmin: boolean }) {
           </div>
         ))}
         {canAdmin && dirty && (
-          <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={() => { setDraft(null); setError(null); }}>Reset</button>
-            <button className="btn primary" disabled={update.isPending} onClick={save}>Save policy</button>
+          <div className="form-actions sec-top">
+            <button className="btn" onClick={() => { setDraft(null); setError(null); }}>{t("shared.reset")}</button>
+            <button className="btn primary" disabled={update.isPending} onClick={save}>{t("policy.save")}</button>
           </div>
         )}
       </div>
@@ -168,6 +168,7 @@ function PolicyMatrix({ canAdmin }: { canAdmin: boolean }) {
 // ── Auth config ──────────────────────────────────────────────────────────────
 
 function AuthConfigSection({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("security");
   const cfg = useAuthConfig();
   const update = useUpdateAuthConfig();
   const gate = useStepUpGate();
@@ -187,14 +188,14 @@ function AuthConfigSection({ canAdmin }: { canAdmin: boolean }) {
 
   if (cfg.isError) return (
     <>
-      <div className="eyebrow" id="security-auth-config">Auth configuration</div>
-      <div className="card"><div className="empty-note">Auth config unavailable.</div></div>
+      <div className="eyebrow" id="security-auth-config">{t("auth.title")}</div>
+      <div className="card"><div className="empty-note">{t("auth.unavailable")}</div></div>
     </>
   );
   if (!cfg.data) return (
     <>
-      <div className="eyebrow" id="security-auth-config">Auth configuration</div>
-      <div className="card"><div className="empty-note">Loading auth config…</div></div>
+      <div className="eyebrow" id="security-auth-config">{t("auth.title")}</div>
+      <div className="card"><div className="empty-note">{t("auth.loading")}</div></div>
     </>
   );
 
@@ -203,11 +204,11 @@ function AuthConfigSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow" id="security-auth-config">Auth configuration</div>
+      <div className="eyebrow" id="security-auth-config">{t("auth.title")}</div>
       <div className="card">
-        {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+        {error && <div className="error-note sec-err">{error}</div>}
         <div className="form-grid">
-          <label className="form-row">Network identity provider
+          <label className="form-row">{t("auth.network_provider")}
             <select
               value={String(active.network_provider ?? "none")}
               disabled={!canAdmin}
@@ -216,7 +217,7 @@ function AuthConfigSection({ canAdmin }: { canAdmin: boolean }) {
               {NETWORK_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </label>
-          <label className="form-row">Network default role
+          <label className="form-row">{t("auth.network_role")}
             <select
               value={String(active.network_default_role ?? "viewer")}
               disabled={!canAdmin}
@@ -225,7 +226,7 @@ function AuthConfigSection({ canAdmin }: { canAdmin: boolean }) {
               {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
           </label>
-          <label className="form-row">Step-up TTL (minutes)
+          <label className="form-row">{t("auth.step_up_ttl")}
             <input
               type="number"
               min={1}
@@ -234,7 +235,7 @@ function AuthConfigSection({ canAdmin }: { canAdmin: boolean }) {
               onChange={(e) => setDraft({ ...draft, step_up_ttl_min: parseInt(e.target.value, 10) })}
             />
           </label>
-          <label className="form-row">WebAuthn RP ID
+          <label className="form-row">{t("auth.webauthn_rp_id")}
             <input
               value={String(active.webauthn_rp_id ?? "")}
               placeholder="example-tailnet.ts.net"
@@ -242,7 +243,7 @@ function AuthConfigSection({ canAdmin }: { canAdmin: boolean }) {
               onChange={(e) => setDraft({ ...draft, webauthn_rp_id: e.target.value })}
             />
           </label>
-          <label className="form-row">WebAuthn RP name
+          <label className="form-row">{t("auth.webauthn_rp_name")}
             <input
               value={String(active.webauthn_rp_name ?? "")}
               placeholder="Forge"
@@ -250,20 +251,20 @@ function AuthConfigSection({ canAdmin }: { canAdmin: boolean }) {
               onChange={(e) => setDraft({ ...draft, webauthn_rp_name: e.target.value })}
             />
           </label>
-          <label className="form-row" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <label className="form-row sec-check-row">
             <input
               type="checkbox"
               checked={Boolean(active.a0_tailnet_bypass ?? true)}
               disabled={!canAdmin}
               onChange={(e) => setDraft({ ...draft, a0_tailnet_bypass: e.target.checked })}
             />
-            a0 tailnet bypass
+            {t("auth.a0_bypass")}
           </label>
         </div>
         {canAdmin && dirty && (
-          <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={() => { setDraft(null); setError(null); }}>Reset</button>
-            <button className="btn primary" disabled={update.isPending} onClick={save}>Save config</button>
+          <div className="form-actions sec-top">
+            <button className="btn" onClick={() => { setDraft(null); setError(null); }}>{t("shared.reset")}</button>
+            <button className="btn primary" disabled={update.isPending} onClick={save}>{t("auth.save")}</button>
           </div>
         )}
       </div>
@@ -291,6 +292,7 @@ interface ForwardAuthDraft {
 }
 
 function ForwardAuthDangerZone({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("security");
   const cfg = useAuthConfig();
   const update = useUpdateAuthConfig();
 
@@ -301,16 +303,12 @@ function ForwardAuthDangerZone({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <DangerZone<ForwardAuthDraft>
-      title="Forward-auth keys"
+      title={t("forward_auth.title")}
       canAdmin={canAdmin}
       isError={cfg.isError}
       data={data}
       blurb={
-        <>
-          Only meaningful once <b>network provider</b> above is set to <code>forward_auth_header</code>. A save
-          that would exclude your own address from <b>trusted CIDRs</b> is refused outright — total lockout from
-          a forward-auth deployment has no recovery path short of direct database access.
-        </>
+        <Trans i18nKey="forward_auth.blurb" ns="security" components={{ b: <b />, code: <code /> }} />
       }
       onSave={(draft) =>
         update.mutateAsync({ provider_config: { header_name: draft.header_name, trusted_cidrs: draft.trusted_cidrs } })
@@ -341,6 +339,7 @@ function ForwardAuthDangerZone({ canAdmin }: { canAdmin: boolean }) {
 // re-submitting the masked value read from GET is a no-op, never a clobber.
 
 function HFTokenSection({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("security");
   const token = useHFToken();
   const setToken = useSetHFToken();
   const [value, setValue] = useState("");
@@ -351,21 +350,18 @@ function HFTokenSection({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow" id="security-hf-token">HuggingFace access token</div>
+      <div className="eyebrow" id="security-hf-token">{t("hf_token.title")}</div>
       <div className="card">
-        <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, lineHeight: 1.55 }}>
-          Needed to download gated models (license click-through repos, e.g. Gemma, Llama). Write-only —
-          the real value is never shown once set.
-        </div>
-        {setToken.isError && <div className="error-note" style={{ marginBottom: 10 }}>{apiErrorMessage(setToken.error)}</div>}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <label className="form-row" style={{ flex: "1 1 260px" }}>
+        <div className="sec-hint">{t("hf_token.hint")}</div>
+        {setToken.isError && <div className="error-note sec-err">{apiErrorMessage(setToken.error)}</div>}
+        <div className="sec-row">
+          <label className="form-row sec-grow-260">
             <input
               type="password"
               value={value}
               disabled={!canAdmin}
               onChange={(e) => setValue(e.target.value)}
-              placeholder={token.data?.configured ? "configured" : "not configured"}
+              placeholder={token.data?.configured ? t("hf_token.configured") : t("hf_token.not_configured")}
             />
           </label>
           {canAdmin && (
@@ -380,6 +376,7 @@ function HFTokenSection({ canAdmin }: { canAdmin: boolean }) {
 // ── API keys ────────────────────────────────────────────────────────────────
 
 function APIKeys({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("security");
   const keys = useKeys();
   const create = useKeyCreate();
   const revoke = useKeyRevoke();
@@ -427,64 +424,63 @@ function APIKeys({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow" id="security-api-keys">API keys</div>
+      <div className="eyebrow" id="security-api-keys">{t("api_keys.title")}</div>
       <div className="card">
-        <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, lineHeight: 1.55 }}>
-          Bearer keys for machine consumers (a0 router, MCP, dashboard API). The token is shown <b>once</b>
-          on creation and never again — copy it immediately.
+        <div className="sec-hint">
+          <Trans i18nKey="api_keys.hint" ns="security" components={{ b: <b /> }} />
         </div>
-        {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+        {error && <div className="error-note sec-err">{error}</div>}
         {newToken && (
-          <div className="card" style={{ background: "var(--bg-2)", marginBottom: 12, padding: 12 }}>
-            <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 4 }}>New key (shown once):</div>
-            <code style={{ fontSize: 12, wordBreak: "break-all", fontFamily: "var(--mono)" }}>{newToken}</code>
-            <div style={{ marginTop: 8 }}>
-              <CopyButton text={newToken} label="Copy" />
-              <button className="btn" style={{ marginLeft: 8 }} onClick={() => setNewToken(null)}>Dismiss</button>
+          <div className="card sec-reveal-card">
+            <div className="sec-mini">{t("api_keys.new_key_label")}</div>
+            <code className="sec-token">{newToken}</code>
+            <div className="sec-copy-row">
+              <CopyButton text={newToken} label={t("shared.copy")} />
+              <button className="btn sec-inline-gap" onClick={() => setNewToken(null)}>{t("shared.dismiss")}</button>
             </div>
           </div>
         )}
-        {keys.isLoading && <div className="empty-note">Loading keys…</div>}
+        {keys.isLoading && <div className="empty-note">{t("api_keys.loading")}</div>}
         {list.length === 0 && !keys.isLoading && (
           <div className="empty-note">
-            {allKeys.length === 0 ? "No keys configured." : "No active keys."}
+            {allKeys.length === 0 ? t("api_keys.none") : t("api_keys.none_active")}
           </div>
         )}
         {revokedCount > 0 && (
-          <div style={{ marginBottom: 10 }}>
-            <button className="btn" style={{ fontSize: 11 }} onClick={() => setShowRevoked((v) => !v)}>
-              {showRevoked ? "Hide revoked" : `Show revoked (${revokedCount})`}
+          <div className="sec-revoked-toggle">
+            <button className="btn sec-btn-xs" onClick={() => setShowRevoked((v) => !v)}>
+              {showRevoked ? t("api_keys.hide_revoked") : t("api_keys.show_revoked", { count: revokedCount })}
             </button>
           </div>
         )}
         {list.length > 0 && (
           <>
-            <div className="qrow" style={{ color: "var(--text-mute)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em" }}>
-              <span style={{ width: 120 }}>Key ID</span>
-              <span style={{ width: 70 }}>Kind</span>
-              <span style={{ width: 140 }}>Name</span>
-              <span style={{ width: 70 }}>Role</span>
-              <span style={{ width: 90 }}>Last used</span>
-              <span className="pos">Actions</span>
+            <div className="qrow sec-qhead">
+              <span className="sec-w120">{t("api_keys.col_id")}</span>
+              <span className="sec-w70">{t("api_keys.col_kind")}</span>
+              <span className="sec-w140">{t("api_keys.col_name")}</span>
+              <span className="sec-w70">{t("api_keys.col_role")}</span>
+              <span className="sec-w90">{t("api_keys.col_last_used")}</span>
+              <span className="pos">{t("shared.actions")}</span>
             </div>
             {list.map((k) => (
               <div className="qrow" key={k.keyid}>
-                <span style={{ width: 120, fontFamily: "var(--mono)", fontSize: 11 }}>{k.keyid}</span>
-                <span style={{ width: 70, fontSize: 12 }}>{k.kind}</span>
-                <span style={{ width: 140, fontSize: 12 }}>{k.name}</span>
-                <span style={{ width: 70, fontSize: 12 }}>{k.role ?? "—"}</span>
-                <span style={{ width: 90, fontSize: 12, color: "var(--text-dim)" }}>
-                  {k.last_used_at ? new Date(k.last_used_at * 1000).toLocaleDateString(appLocale()) : "never"}
+                <span className="sec-w120 sec-mono-xs">{k.keyid}</span>
+                <span className="sec-w70 sec-cell">{k.kind}</span>
+                <span className="sec-w140 sec-cell">{k.name}</span>
+                <span className="sec-w70 sec-cell">{k.role ?? "—"}</span>
+                <span className="sec-w90 sec-cell sec-dim">
+                  {k.last_used_at ? new Date(k.last_used_at * 1000).toLocaleDateString(appLocale()) : t("shared.never")}
                 </span>
                 <span className="pos">
                   {k.revoked_at ? (
-                    <span style={{ color: "var(--crit)" }}>revoked</span>
+                    <span className="sec-revoked">{t("shared.revoked")}</span>
                   ) : canAdmin ? (
                     <ConfirmButton
                       pending={revoke.isPending}
                       onConfirm={() => submitRevoke(k.keyid)}
-                      label="Revoke"
-                      warning={`Revoke key ${k.keyid}?`}
+                      label={t("api_keys.revoke")}
+                      warning={t("api_keys.revoke_warning", { keyid: k.keyid })}
                     />
                   ) : null}
                 </span>
@@ -494,33 +490,33 @@ function APIKeys({ canAdmin }: { canAdmin: boolean }) {
         )}
         {canAdmin && (
           creating ? (
-            <div className="form-grid" style={{ marginTop: 14 }}>
-              <label className="form-row">Kind
+            <div className="form-grid sec-top">
+              <label className="form-row">{t("api_keys.field_kind")}
                 <select value={draftKind} onChange={(e) => setDraftKind(e.target.value as APIKeyKind)}>
                   {KEY_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
                 </select>
               </label>
-              <label className="form-row">Name
+              <label className="form-row">{t("api_keys.field_name")}
                 <input value={draftName} placeholder="opencode" onChange={(e) => setDraftName(e.target.value)} />
               </label>
-              <label className="form-row">Preferred label
-                <input value={draftDisplayName} placeholder={'Examplehost (OpenCode) — shown on slot attribution'} onChange={(e) => setDraftDisplayName(e.target.value)} />
+              <label className="form-row">{t("api_keys.field_display_name")}
+                <input value={draftDisplayName} placeholder={t("api_keys.field_display_name_ph")} onChange={(e) => setDraftDisplayName(e.target.value)} />
               </label>
               {draftKind === "forge" && (
-                <label className="form-row">Role
+                <label className="form-row">{t("api_keys.field_role")}
                   <select value={draftRole} onChange={(e) => setDraftRole(e.target.value as Role)}>
                     {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </label>
               )}
-              <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
-                <button className="btn" onClick={() => { setCreating(false); setDraftName(""); }}>Cancel</button>
-                <button className="btn primary" disabled={create.isPending || !draftName} onClick={submitCreate}>Mint key</button>
+              <div className="form-actions sec-grid-actions">
+                <button className="btn" onClick={() => { setCreating(false); setDraftName(""); }}>{t("shared.cancel")}</button>
+                <button className="btn primary" disabled={create.isPending || !draftName} onClick={submitCreate}>{t("api_keys.mint")}</button>
               </div>
             </div>
           ) : (
-            <button className="btn" style={{ marginTop: 14 }} onClick={() => { setCreating(true); setError(null); }}>
-              + Mint key
+            <button className="btn sec-top" onClick={() => { setCreating(true); setError(null); }}>
+              {t("api_keys.mint_add")}
             </button>
           )
         )}
@@ -533,6 +529,7 @@ function APIKeys({ canAdmin }: { canAdmin: boolean }) {
 // ── Identity links ───────────────────────────────────────────────────────────
 
 function IdentityLinks({ canAdmin }: { canAdmin: boolean }) {
+  const { t } = useTranslation("security");
   const links = useIdentityLinks();
   const create = useIdentityLinkCreate();
   const remove = useIdentityLinkDelete();
@@ -573,34 +570,31 @@ function IdentityLinks({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <>
-      <div className="eyebrow" id="security-identity-links">Identity links · network → account</div>
+      <div className="eyebrow" id="security-identity-links">{t("identity.title")}</div>
       <div className="card">
-        <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, lineHeight: 1.55 }}>
-          Links a trusted network principal (e.g. a Tailscale login) to a local account, so the user gets
-          a named session with no password prompt. Admins see all links; others see only their own.
-        </div>
-        {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
-        {list.length === 0 && !links.isLoading && <div className="empty-note">No identity links.</div>}
+        <div className="sec-hint">{t("identity.hint")}</div>
+        {error && <div className="error-note sec-err">{error}</div>}
+        {list.length === 0 && !links.isLoading && <div className="empty-note">{t("identity.none")}</div>}
         {list.length > 0 && (
           <>
-            <div className="qrow" style={{ color: "var(--text-mute)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em" }}>
-              <span style={{ width: 150 }}>Provider</span>
-              <span style={{ width: 200 }}>Principal</span>
-              <span style={{ width: 60 }}>User ID</span>
-              <span className="pos">Actions</span>
+            <div className="qrow sec-qhead">
+              <span className="sec-w150">{t("identity.col_provider")}</span>
+              <span className="sec-w200">{t("identity.col_principal")}</span>
+              <span className="sec-w60">{t("identity.col_user_id")}</span>
+              <span className="pos">{t("shared.actions")}</span>
             </div>
             {list.map((l) => (
               <div className="qrow" key={`${l.provider}:${l.principal}`}>
-                <span style={{ width: 150, fontSize: 12 }}>{l.provider}</span>
-                <span style={{ width: 200, fontFamily: "var(--mono)", fontSize: 11 }}>{l.principal}</span>
-                <span style={{ width: 60, fontFamily: "var(--mono)", fontSize: 12 }}>{l.user_id}</span>
+                <span className="sec-w150 sec-cell">{l.provider}</span>
+                <span className="sec-w200 sec-mono-xs">{l.principal}</span>
+                <span className="sec-w60 sec-mono-sm">{l.user_id}</span>
                 <span className="pos">
                   {canAdmin && (
                     <ConfirmButton
                       pending={remove.isPending}
                       onConfirm={() => submitDelete(l.provider, l.principal)}
-                      label="Unlink"
-                      warning={`Unlink ${l.provider}:${l.principal}?`}
+                      label={t("identity.unlink")}
+                      warning={t("identity.unlink_warning", { provider: l.provider, principal: l.principal })}
                     />
                   )}
                 </span>
@@ -610,16 +604,16 @@ function IdentityLinks({ canAdmin }: { canAdmin: boolean }) {
         )}
         {canAdmin && (
           creating ? (
-            <div className="form-grid" style={{ marginTop: 14 }}>
-              <label className="form-row">Provider
+            <div className="form-grid sec-top">
+              <label className="form-row">{t("identity.field_provider")}
                 <select value={draftProvider} onChange={(e) => setDraftProvider(e.target.value as AuthNetworkProvider)}>
                   {NETWORK_PROVIDERS.filter((p) => p !== "none").map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
               </label>
-              <label className="form-row">Principal
+              <label className="form-row">{t("identity.field_principal")}
                 <input value={draftPrincipal} placeholder="user@github" onChange={(e) => setDraftPrincipal(e.target.value)} />
               </label>
-              <label className="form-row">User ID
+              <label className="form-row">{t("identity.field_user_id")}
                 <input
                   type="number"
                   min={1}
@@ -627,14 +621,14 @@ function IdentityLinks({ canAdmin }: { canAdmin: boolean }) {
                   onChange={(e) => setDraftUserID(Number(e.target.value))}
                 />
               </label>
-              <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
-                <button className="btn" onClick={() => { setCreating(false); setDraftPrincipal(""); }}>Cancel</button>
-                <button className="btn primary" disabled={create.isPending || !draftPrincipal} onClick={submitCreate}>Link</button>
+              <div className="form-actions sec-grid-actions">
+                <button className="btn" onClick={() => { setCreating(false); setDraftPrincipal(""); }}>{t("shared.cancel")}</button>
+                <button className="btn primary" disabled={create.isPending || !draftPrincipal} onClick={submitCreate}>{t("identity.link")}</button>
               </div>
             </div>
           ) : (
-            <button className="btn" style={{ marginTop: 14 }} onClick={() => { setCreating(true); setError(null); }}>
-              + Add link
+            <button className="btn sec-top" onClick={() => { setCreating(true); setError(null); }}>
+              {t("identity.add")}
             </button>
           )
         )}
@@ -647,6 +641,7 @@ function IdentityLinks({ canAdmin }: { canAdmin: boolean }) {
 // ── TOTP ─────────────────────────────────────────────────────────────────────
 
 function TOTPSection() {
+  const { t } = useTranslation("security");
   const enroll = useTOTPEnroll();
   const confirm = useTOTPConfirm();
   const remove = useTOTPDelete();
@@ -689,22 +684,18 @@ function TOTPSection() {
 
   return (
     <>
-      <div className="eyebrow" id="security-totp">TOTP · authenticator app</div>
+      <div className="eyebrow" id="security-totp">{t("totp.title")}</div>
       <div className="card">
-        {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+        {error && <div className="error-note sec-err">{error}</div>}
         {enrollData ? (
           <div>
-            <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 10 }}>
-              Scan this secret in your authenticator app, then enter the 6-digit code it generates.
+            <div className="sec-note">{t("totp.scan_hint")}</div>
+            <div className="sec-secret">{enrollData.secret}</div>
+            <div className="sec-otp-label">
+              otpauth: <span className="sec-mono">{enrollData.otpauth_uri}</span>
             </div>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 12, wordBreak: "break-all", marginBottom: 8, padding: 8, background: "var(--bg-2)", borderRadius: 8 }}>
-              {enrollData.secret}
-            </div>
-            <div style={{ fontSize: 11, color: "var(--text-mute)", marginBottom: 12 }}>
-              otpauth: <span style={{ fontFamily: "var(--mono)" }}>{enrollData.otpauth_uri}</span>
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-              <label className="form-row" style={{ flex: "1 1 200px" }}>Confirmation code
+            <div className="sec-row end">
+              <label className="form-row sec-grow-200">{t("totp.confirm_code")}
                 <input
                   value={confirmCode}
                   onChange={(e) => setConfirmCode(e.target.value)}
@@ -715,21 +706,21 @@ function TOTPSection() {
                 />
               </label>
               <div className="form-actions">
-                <button className="btn" onClick={() => { setEnrollData(null); setConfirmCode(""); }}>Cancel</button>
-                <button className="btn primary" disabled={confirm.isPending || !confirmCode} onClick={submitConfirm}>Confirm</button>
+                <button className="btn" onClick={() => { setEnrollData(null); setConfirmCode(""); }}>{t("shared.cancel")}</button>
+                <button className="btn primary" disabled={confirm.isPending || !confirmCode} onClick={submitConfirm}>{t("totp.confirm")}</button>
               </div>
             </div>
           </div>
         ) : (
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="sec-btnrow">
             <button className="btn" disabled={enroll.isPending} onClick={startEnroll}>
-              {enroll.isPending ? "Enrolling…" : "Enroll TOTP"}
+              {enroll.isPending ? t("totp.enrolling") : t("totp.enroll")}
             </button>
             <ConfirmButton
               pending={remove.isPending}
               onConfirm={submitDelete}
-              label="Remove TOTP"
-              warning="Remove TOTP? This disables 2FA for your account."
+              label={t("totp.remove")}
+              warning={t("totp.remove_warning")}
             />
           </div>
         )}
@@ -742,6 +733,7 @@ function TOTPSection() {
 // ── WebAuthn credentials ────────────────────────────────────────────────────
 
 function WebAuthnSection() {
+  const { t } = useTranslation("security");
   const creds = useWebAuthnCredentials();
   const register = useWebAuthnRegister();
   const assert = useWebAuthnAssert();
@@ -778,42 +770,39 @@ function WebAuthnSection() {
 
   return (
     <>
-      <div className="eyebrow" id="security-webauthn">Passkeys · WebAuthn (L2)</div>
+      <div className="eyebrow" id="security-webauthn">{t("webauthn.title")}</div>
       <div className="card">
-        <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, lineHeight: 1.55 }}>
-          Phishing-resistant hardware/biometric credentials. A passkey registered under one RP ID
-          does not work under another — re-enroll when the domain changes.
-        </div>
-        {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
-        {list.length === 0 && !creds.isLoading && <div className="empty-note">No passkeys registered.</div>}
+        <div className="sec-hint">{t("webauthn.hint")}</div>
+        {error && <div className="error-note sec-err">{error}</div>}
+        {list.length === 0 && !creds.isLoading && <div className="empty-note">{t("webauthn.none")}</div>}
         {list.length > 0 && (
           <>
-            <div className="qrow" style={{ color: "var(--text-mute)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em" }}>
-              <span style={{ width: 200 }}>Credential ID</span>
-              <span style={{ width: 100 }}>Label</span>
-              <span style={{ width: 100 }}>Last used</span>
-              <span className="pos">Actions</span>
+            <div className="qrow sec-qhead">
+              <span className="sec-w200">{t("webauthn.col_credential")}</span>
+              <span className="sec-w100">{t("webauthn.col_label")}</span>
+              <span className="sec-w100">{t("webauthn.col_last_used")}</span>
+              <span className="pos">{t("shared.actions")}</span>
             </div>
             {list.map((c) => (
               <div className="qrow" key={c.id}>
-                <span style={{ width: 200, fontFamily: "var(--mono)", fontSize: 10 }}>{c.id.slice(0, 24)}…</span>
-                <span style={{ width: 100, fontSize: 12 }}>{c.label || "—"}</span>
-                <span style={{ width: 100, fontSize: 12, color: "var(--text-dim)" }}>
-                  {c.last_used_at ? new Date(c.last_used_at * 1000).toLocaleDateString(appLocale()) : "never"}
+                <span className="sec-w200 sec-mono-2xs">{c.id.slice(0, 24)}…</span>
+                <span className="sec-w100 sec-cell">{c.label || "—"}</span>
+                <span className="sec-w100 sec-cell sec-dim">
+                  {c.last_used_at ? new Date(c.last_used_at * 1000).toLocaleDateString(appLocale()) : t("shared.never")}
                 </span>
                 <span className="pos">
-                  <ConfirmButton pending={remove.isPending} onConfirm={() => submitDelete(c.id)} label="Remove" warning="Remove this passkey?" />
+                  <ConfirmButton pending={remove.isPending} onConfirm={() => submitDelete(c.id)} label={t("webauthn.remove")} warning={t("webauthn.remove_warning")} />
                 </span>
               </div>
             ))}
           </>
         )}
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        <div className="sec-btnrow top">
           <button className="btn" disabled={register.isPending} onClick={startRegister}>
-            {register.isPending ? "Registering…" : "+ Register passkey"}
+            {register.isPending ? t("webauthn.registering") : t("webauthn.register")}
           </button>
           <button className="btn" disabled={assert.isPending} onClick={startAssert}>
-            {assert.isPending ? "Verifying…" : "Step up with passkey"}
+            {assert.isPending ? t("webauthn.verifying") : t("webauthn.step_up")}
           </button>
         </div>
       </div>
@@ -825,6 +814,7 @@ function WebAuthnSection() {
 // ── Recovery codes ──────────────────────────────────────────────────────────
 
 function RecoveryCodes() {
+  const { t } = useTranslation("security");
   const status = useRecoveryCodesStatus();
   const generate = useRecoveryCodesGenerate();
   const gate = useStepUpGate();
@@ -843,34 +833,31 @@ function RecoveryCodes() {
 
   return (
     <>
-      <div className="eyebrow" id="security-recovery-codes">Recovery codes</div>
+      <div className="eyebrow" id="security-recovery-codes">{t("recovery.title")}</div>
       <div className="card">
-        <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, lineHeight: 1.55 }}>
-          One-time codes for regaining access if a TOTP device or passkey is lost. Store them safely —
-          each code can be used once. Generating new codes replaces all existing ones.
-        </div>
-        {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+        <div className="sec-hint">{t("recovery.hint")}</div>
+        {error && <div className="error-note sec-err">{error}</div>}
         {status.data && (
-          <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12 }}>
+          <div className="sec-note">
             {status.data.has_codes
-              ? `${status.data.unused} of ${status.data.total} codes unused.`
-              : "No recovery codes generated yet."}
+              ? t("recovery.codes_unused", { unused: status.data.unused, total: status.data.total })
+              : t("recovery.none_yet")}
           </div>
         )}
         {codes && (
-          <div className="card" style={{ background: "var(--bg-2)", marginBottom: 12, padding: 12 }}>
-            <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 6 }}>Save these now — shown once:</div>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 12, lineHeight: 1.8 }}>
+          <div className="card sec-reveal-card">
+            <div className="sec-mini">{t("recovery.save_now")}</div>
+            <div className="sec-codes">
               {codes.map((c) => <div key={c}>{c}</div>)}
             </div>
-            <div style={{ marginTop: 8 }}>
-              <CopyButton text={codes.join("\n")} label="Copy all" />
-              <button className="btn" style={{ marginLeft: 8 }} onClick={() => setCodes(null)}>Dismiss</button>
+            <div className="sec-copy-row">
+              <CopyButton text={codes.join("\n")} label={t("recovery.copy_all")} />
+              <button className="btn sec-inline-gap" onClick={() => setCodes(null)}>{t("shared.dismiss")}</button>
             </div>
           </div>
         )}
         <button className="btn" disabled={generate.isPending} onClick={submitGenerate}>
-          {generate.isPending ? "Generating…" : codes ? "Regenerate codes" : "Generate codes"}
+          {generate.isPending ? t("recovery.generating") : codes ? t("recovery.regenerate") : t("recovery.generate")}
         </button>
       </div>
       <StepUpModal open={gate.open} requiredFactor={gate.factor} onSuccess={gate.onSuccess} onClose={gate.onClose} />

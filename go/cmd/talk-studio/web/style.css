@@ -1,0 +1,197 @@
+/* talk-studio: the shared UI schema of ADR-0023 (docs/adr/0023-shared-ui-tokens-and-component-contracts.md) in Voice Studio's warm skin, because this app sits
+   beside it (same voices, same host). Spacing, type, radius, z-index and elevation use the shared scales; colors are this skin's. A control is compact by
+   default and grows to a 44 px touch target on a coarse pointer. */
+
+:root {
+  /* Skin: orange and grey, dark (graphite). The token names are Voice Studio's, so --amber is this skin's orange and --wave its pale grey. */
+  --ink: #17181a; --panel: #222427; --panel-2: #2a2d31;
+  --paper: #f1efec; --paper-dim: #b6b3ae;
+  --amber: #ff7a1a; --wave: #e6e3de; --coral: #ff5a4a; --sky: #8fa3b8;
+  --border: #3a3e44; --border-soft: #2c2f33;
+  --coral-strong: #b3261e;                   /* fill for a destructive action: white text on it is 6.5:1 */
+  --on-amber: #1a0b00;                       /* text on an orange fill: constant, it must not follow the theme flip */
+  --amber-text: #ff8d3a; --wave-text: #e6e3de; --coral-text: #ff7b6b;
+  /* Stripes are solid greys with one thin orange line: orange blended at low opacity over graphite reads brown, so none is. */
+  --stripe-a: #17181a; --stripe-1: #2c3036; --stripe-2: #4a5059; --stripe-3: #ff7a1a;
+  --stripe-o1: 1; --stripe-o2: .8; --stripe-o3: .85;
+  --card-bg: rgba(34, 36, 39, 0.86); --card-edge: rgba(255, 255, 255, 0.1);
+  --stars-on: 1; --star-1: #ffa24d; --star-2: #e6e3de; --star-3: #ffd0a0;
+
+  /* Shared scales (ADR-0023) */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px; --sp-7: 48px; --sp-8: 64px;
+  --fs-2xs: 10px; --fs-xs: 11px; --fs-sm: 12px; --fs-base: 13px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 18px; --fs-2xl: 22px; --fs-3xl: 28px;
+  --r-xs: 4px; --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-xl: 16px; --r-pill: 999px;
+  --z-base: 1; --z-raised: 10; --z-sticky: 40; --z-overlay: 50; --z-pop: 60;
+  --shadow-1: 0 1px 3px rgba(28, 24, 20, 0.28), 0 1px 8px rgba(28, 24, 20, 0.14);
+  --shadow-3: 0 8px 24px rgba(20, 14, 8, 0.45);
+
+  --serif: "Fraunces", Georgia, serif;
+  --sans: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  --control-h: 32px;            /* compact control height; 44 px on a coarse pointer (below) */
+}
+
+/* Light skin: warm stone, charcoal text, a burnt orange that carries white text at 4.9:1. By the OS setting, or by the toggle (data-theme). */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --ink: #efede9; --panel: #fbfaf8; --panel-2: #f1eeea;
+    --paper: #23211f; --paper-dim: #57534d; --border: #d3cfc8; --border-soft: #e0ddd7;
+    --amber: #c24a00; --on-amber: #ffffff; --wave: #5d6168; --coral: #b3261e; --sky: #5d6f84;
+    --amber-text: #b04200; --wave-text: #4a4e55; --coral-text: #b3261e;
+    --stripe-a: #efede9; --stripe-1: #dcd9d3; --stripe-2: #bfc2c8; --stripe-3: #ff7a1a;
+    --stripe-o1: 1; --stripe-o2: .8; --stripe-o3: .8;
+    --card-bg: rgba(251, 250, 248, 0.9); --card-edge: rgba(0, 0, 0, 0.08);
+    --stars-on: 0;
+  }
+}
+:root[data-theme="light"] {
+  --ink: #efede9; --panel: #fbfaf8; --panel-2: #f1eeea;
+  --paper: #23211f; --paper-dim: #57534d; --border: #d3cfc8; --border-soft: #e0ddd7;
+  --amber: #c24a00; --on-amber: #ffffff; --wave: #5d6168; --coral: #b3261e; --sky: #5d6f84;
+  --amber-text: #b04200; --wave-text: #4a4e55; --coral-text: #b3261e;
+  --stripe-a: #efede9; --stripe-1: #dcd9d3; --stripe-2: #bfc2c8; --stripe-3: #ff7a1a;
+  --stripe-o1: 1; --stripe-o2: .8; --stripe-o3: .8;
+  --card-bg: rgba(251, 250, 248, 0.9); --card-edge: rgba(0, 0, 0, 0.08);
+  --stars-on: 0;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; } /* rows, labels and buttons set their own display, which would otherwise beat the attribute */
+html { color-scheme: dark light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+body {
+  margin: 0; background: var(--ink); color: var(--paper);
+  font: var(--fs-md)/1.5 var(--sans); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+}
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+a { color: var(--amber-text); }
+
+/* Page background: diagonal bands in three layers that drift at different speeds as the page scrolls (backdrop.js), plus the dark-theme stars. */
+.stripes { position: fixed; inset: 0; z-index: -1; overflow: hidden; background: var(--stripe-a); }
+.stripes i { position: absolute; inset: -150% -30%; will-change: transform; }
+.stripes i:nth-child(1) { background: repeating-linear-gradient(20deg, transparent 0 180px, var(--stripe-1) 180px 244px); opacity: var(--stripe-o1); }
+.stripes i:nth-child(2) { background: repeating-linear-gradient(20deg, transparent 0 390px, var(--stripe-2) 390px 430px); opacity: var(--stripe-o2); }
+.stripes i:nth-child(3) { background: repeating-linear-gradient(20deg, transparent 0 660px, var(--stripe-3) 660px 688px); opacity: var(--stripe-o3); }
+
+.app { max-width: 1080px; margin: 0 auto; padding: 0 var(--sp-5) var(--sp-7); }
+
+/* Header */
+.top { position: sticky; top: 0; z-index: var(--z-sticky); background: var(--ink); display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3);
+  padding: var(--sp-3) 0; border-bottom: 1px solid var(--border-soft); margin-bottom: var(--sp-4); }
+.brand { font-family: var(--serif); font-weight: 500; font-size: var(--fs-3xl); letter-spacing: -0.01em; line-height: 1.1; font-variation-settings: "opsz" 144; }
+.brand .dot { color: var(--amber); }
+.header-actions { display: flex; gap: var(--sp-2); align-items: center; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: var(--fs-sm); padding: 3px 12px; border-radius: var(--r-pill); border: 1px solid var(--border); background: var(--panel); color: var(--paper-dim); }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--paper-dim); }
+.pill[data-s="live"] { color: var(--wave-text); border-color: var(--wave); } .pill[data-s="live"]::before { background: var(--wave); }
+.pill[data-s="working"] { color: var(--amber-text); border-color: var(--amber); } .pill[data-s="working"]::before { background: var(--amber); }
+.pill[data-s="error"] { color: var(--coral-text); border-color: var(--coral); } .pill[data-s="error"]::before { background: var(--coral); }
+
+/* Cards: the translucent card of Voice Studio, 12 px radius */
+.card { background: var(--card-bg); border: 1px solid var(--card-edge); border-radius: var(--r-lg); box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  padding: var(--sp-4) var(--sp-4) var(--sp-3); margin: 0 0 var(--sp-3); }
+h2 { font-family: var(--serif); font-weight: 500; font-size: var(--fs-xl); margin: 0 0 var(--sp-2); line-height: 1.25; }
+h3 { font-family: var(--serif); font-weight: 500; font-size: var(--fs-lg); margin: var(--sp-3) 0 var(--sp-1); }
+.lead { margin: 0 0 var(--sp-3); color: var(--paper-dim); font-size: var(--fs-md); }
+.hint, .note { font-size: var(--fs-sm); color: var(--paper-dim); margin: var(--sp-1) 0; }
+.hint.warn { color: var(--amber-text); }
+.k { font-size: var(--fs-sm); color: var(--paper-dim); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.banner { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); position: sticky; top: 56px; z-index: var(--z-raised); background: var(--ink);
+  border: 1px solid var(--coral); color: var(--coral-text); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); margin: 0 0 var(--sp-3); font-size: var(--fs-md); }
+.banner button { flex: none; }
+
+/* Forms: small uppercase labels, 8 px controls */
+label { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--paper-dim); }
+label.check { flex-direction: row; align-items: center; gap: var(--sp-2); text-transform: none; letter-spacing: 0; font-size: var(--fs-md); color: var(--paper); }
+input[type=text], select, textarea { font: inherit; font-size: var(--fs-md); text-transform: none; letter-spacing: 0; color: var(--paper); background: var(--ink); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 5px var(--sp-3); min-height: var(--control-h); width: 100%; outline: none; }
+textarea { resize: vertical; line-height: 1.45; padding: var(--sp-2) var(--sp-3); }
+input[type=text]:focus, select:focus, textarea:focus { border-color: var(--amber); }
+input::placeholder, textarea::placeholder { color: var(--paper-dim); opacity: .7; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sp-3); }
+.wide { grid-column: 1 / -1; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0; }
+.row.nogap { margin: 0; flex-wrap: nowrap; }
+.row.nogap select { flex: 1; min-width: 0; }
+.row label { flex: 1 1 200px; }
+.actions { margin-top: var(--sp-3); }
+
+/* Buttons: ghost by default, amber for the primary, coral for the destructive (Voice Studio's hierarchy) */
+button, .btn { font: inherit; font-size: var(--fs-md); font-weight: 600; text-transform: none; letter-spacing: 0; display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--sp-1); min-height: var(--control-h); padding: 4px var(--sp-4); border-radius: var(--r-md); cursor: pointer; background: transparent; color: var(--paper-dim);
+  border: 1px solid var(--border); transition: background .15s, border-color .15s, color .15s, opacity .15s; }
+button:hover, .btn:hover { border-color: var(--paper-dim); color: var(--paper); }
+button.small, .btn.small { padding: 2px var(--sp-3); min-height: 28px; font-size: var(--fs-base); }
+button.big { min-height: 38px; padding: 6px var(--sp-5); }
+button.primary { background: var(--amber); color: var(--on-amber); border-color: var(--amber); }
+button.primary:hover { opacity: .9; color: var(--on-amber); border-color: var(--amber); }
+button.danger { color: var(--coral-text); border-color: color-mix(in srgb, var(--coral) 35%, transparent); }
+button.danger:hover { color: var(--coral-text); border-color: var(--coral); background: color-mix(in srgb, var(--coral) 12%, transparent); }
+button.danger.armed, button.danger-solid { background: var(--coral-strong); color: #fff; border-color: var(--coral-strong); }
+button[aria-pressed="true"] { background: var(--paper); color: var(--ink); border-color: var(--paper); }
+button:disabled { opacity: .4; cursor: default; }
+.btn-icon { width: 30px; min-height: 30px; padding: 0; }
+@media (pointer: coarse) { :root { --control-h: 44px; } button.small, .btn.small, .btn-icon { min-height: 44px; } button.big { min-height: 48px; } }
+
+/* Chips: Voice Studio's filter chips */
+.chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0 0 var(--sp-2); }
+.chips button { border-radius: var(--r-pill); padding: 3px var(--sp-3); min-height: 28px; font-size: var(--fs-base); }
+@media (pointer: coarse) { .chips button { min-height: 44px; } }
+
+/* Setup: two columns on a wide screen (who | the scene), one on a narrow one */
+.scenario { align-items: flex-end; margin-top: 0; }
+.cols { display: grid; grid-template-columns: 1fr; gap: var(--sp-3) var(--sp-5); }
+@media (min-width: 860px) { .cols { grid-template-columns: 1fr 1fr; align-items: start; } }
+.cols > div { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+fieldset.scene { border: 1px solid var(--border); border-radius: var(--r-md); margin: 10px 0 0; padding: var(--sp-2) var(--sp-3) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
+fieldset.scene legend { font-family: var(--serif); font-size: var(--fs-lg); padding: 0 var(--sp-1); }
+#voicePreview { width: 100%; height: 32px; }
+details.more { margin: var(--sp-3) 0 0; border: 0; padding: 0; }
+details.more > summary { cursor: pointer; color: var(--amber-text); font-size: var(--fs-md); }
+details.more > div { margin-top: var(--sp-2); display: flex; flex-direction: column; gap: var(--sp-2); }
+.block-inner { display: flex; flex-direction: column; gap: var(--sp-2); }
+.startbar { position: sticky; bottom: 0; z-index: var(--z-sticky); background: color-mix(in srgb, var(--ink) 70%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-radius: 0 0 var(--r-md) var(--r-md); display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0 var(--sp-1); margin-top: var(--sp-3); border-top: 1px solid var(--border-soft); }
+.startbar .hint { margin: 0; flex: 1; order: 2; }
+
+/* The live card */
+.meters { display: grid; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-3); }
+.meters > div { display: grid; grid-template-columns: 56px 1fr; align-items: center; gap: var(--sp-2); }
+.bar { height: 8px; background: var(--panel-2); border-radius: var(--r-sm); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--amber); transition: width .08s linear; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--sp-2) var(--sp-4); margin: 0; }
+.stats dt { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--paper-dim); }
+.stats dd { margin: 0; font-family: var(--mono); font-size: var(--fs-base); font-variant-numeric: tabular-nums; }
+.transcript { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); min-height: 80px; max-height: 280px; overflow: auto; background: var(--ink); white-space: pre-wrap; word-break: break-word; }
+.transcript .t { color: var(--paper-dim); font-family: var(--mono); font-size: var(--fs-xs); margin-right: var(--sp-1); }
+
+/* Recordings */
+details:not(.more) { border: 1px solid var(--border); border-radius: var(--r-md); margin: var(--sp-2) 0; padding: var(--sp-2) var(--sp-3); background: var(--panel); }
+summary { cursor: pointer; }
+details audio { width: 100%; margin: var(--sp-1) 0; height: 32px; }
+.rec .lines { font-size: var(--fs-base); max-height: 180px; overflow: auto; white-space: pre-wrap; }
+.rec .meta { color: var(--paper-dim); font-size: var(--fs-sm); }
+
+main { display: flex; flex-direction: column; }
+#banner { order: -2; } #setup { order: 1; } #live { order: 2; } #recSection { order: 3; }
+body.is-live #live { order: 0; }
+body.is-live #setupBody, body.is-live .startbar { display: none; }
+.live-actions { margin-top: var(--sp-1); }
+/* Live view: the transcript on the left, levels and stats beside it on a wide screen */
+.live-grid { display: grid; grid-template-columns: 1fr; gap: var(--sp-3) var(--sp-5); }
+.live-main, .live-side { min-width: 0; }
+@media (min-width: 860px) {
+  .live-grid { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); align-items: start; }
+  .live-side .stats { grid-template-columns: 1fr; }
+  .live-side .stats > div { display: flex; justify-content: space-between; gap: var(--sp-3); border-bottom: 1px solid var(--border-soft); padding: var(--sp-1) 0; }
+  .transcript { max-height: 420px; }
+}
+@media (max-width: 520px) { .app { padding: 0 var(--sp-4) var(--sp-6); } .brand { font-size: var(--fs-2xl); } .grid { grid-template-columns: 1fr; } }
+/* Easter egg: dark to light flashes "MY EYES !!!" (flashMeEyes in app.js). The white is the joke, so it is a literal on purpose. */
+.me-eyes { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, #fff 0%, #fffbe8 45%, rgba(255,255,255,.55) 100%); opacity: 1; transition: opacity .1s linear; }
+.me-eyes.out { opacity: 0; }
+.me-eyes span { font-family: var(--serif); font-weight: 500; text-transform: uppercase; font-size: clamp(44px, 13vw, 190px); line-height: 1; color: #1a0b00; text-align: center; padding: 0 16px; }
+/* Timed from script (100 ms full white, 100 ms fade, removed at 200 ms), so the cap holds even if the browser is slow to start a CSS animation. No motion. */
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

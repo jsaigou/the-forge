@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"net/url"
 )
 
 // Status returns the combined status payload.
@@ -47,6 +48,17 @@ func (c *Client) Load(mode, slot string) (*LifecycleResult, error) {
 	var r LifecycleResult
 	err := c.PostJSON("/api/v1/load", LoadRequest{Mode: mode, Slot: slot}, &r)
 	return &r, err
+}
+
+// Operation fetches one operation, blocking server-side for up to waitSeconds while it is still running. The wait
+// must stay under the client's HTTP timeout.
+func (c *Client) Operation(id string, waitSeconds int) (*Operation, error) {
+	var op Operation
+	path := fmt.Sprintf("/api/v1/operations/%s?wait=%d", url.PathEscape(id), waitSeconds)
+	if err := c.GetJSON(path, &op); err != nil {
+		return nil, err
+	}
+	return &op, nil
 }
 
 // Unload empties a slot.

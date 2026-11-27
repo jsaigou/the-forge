@@ -33,6 +33,8 @@ var critNotificationCodes = map[string]bool{
 	// emergency on its own, but it fired before both 2026-08-16 device-lost
 	// hangs — worth an investigation, not a notification-only.
 	"GTT_DRAIN_TIMEOUT": true,
+	// SPECIALIST_FAILED: an always-on specialist slot member failed to start repeatedly (ADR-0022); the pool's own backoff keeps retrying.
+	"SPECIALIST_FAILED": true,
 }
 
 // anomalyRelevantChecks narrows self-review's investigation-closure gate
@@ -56,6 +58,8 @@ var anomalyRelevantChecks = map[string][]string{
 	// (waitGTTDrain / OnGTTDrainTimeout, see critNotificationCodes above) —
 	// about GTT memory not draining and the hang risk it precedes.
 	"GTT_DRAIN_TIMEOUT": {"gtt_ceiling", "gpu_hang", "slot_agreement"},
+	// SPECIALIST_FAILED: an always-on specialist failed to start repeatedly (ADR-0022); it clears once the pool reports no always-on problem.
+	"SPECIALIST_FAILED": {"specialist_pool"},
 	// INFERENCE_HANG: the collector's own hang detector (requests_processing
 	// > 0 and TPS < 0.1 sustained 90s) — gpu_hang IS this condition;
 	// slot_agreement catches an inconsistent unit/scheduler state behind it.
@@ -411,6 +415,12 @@ func relevantWarnCritCheckIDs(trigger string, findings []StoredFinding) []string
 		if allow[id] {
 			out = append(out, id)
 		}
+	}
+	if len(out) == 0 {
+		// The investigation's own sweep never recorded a warn on the checks that matter for this anomaly (for SPECIALIST_FAILED it opened before
+		// the specialist_pool check existed, or the member had already come back). An empty set would read as "all clean" and propose closure
+		// without looking, so check the condition itself: run the curated checks.
+		return append([]string(nil), relevant...)
 	}
 	return out
 }

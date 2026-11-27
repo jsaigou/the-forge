@@ -28,10 +28,12 @@ func (p Proc) root() string {
 // A1 (bytes retrofit): /proc/meminfo reports KiB; the probe now emits bytes
 // (kiB × 1024) rather than MB. RAM figures scale at display boundaries.
 type ProcStats struct {
-	MemTotalBytes float64
-	MemAvailBytes float64
-	Load1         float64
-	UptimeS       float64
+	MemTotalBytes  float64
+	MemAvailBytes  float64
+	SwapTotalBytes float64
+	SwapFreeBytes  float64
+	Load1          float64
+	UptimeS        float64
 }
 
 // Stats reads meminfo, loadavg, and uptime. Fields that fail to parse stay
@@ -53,6 +55,10 @@ func (p Proc) Stats() ProcStats {
 				s.MemTotalBytes = kb * 1024
 			case "MemAvailable:":
 				s.MemAvailBytes = kb * 1024
+			case "SwapTotal:":
+				s.SwapTotalBytes = kb * 1024
+			case "SwapFree:":
+				s.SwapFreeBytes = kb * 1024
 			}
 		}
 	}
@@ -171,8 +177,8 @@ func (p Proc) ByComm(name string) []int {
 	return pids
 }
 
-// PortArg returns the value following "--port" in the process's cmdline
-// (how V4 attributed llama-server processes to slots).
+// PortArg returns the port the process serves, which is how a process is attributed to its slot: the value following "--port" in its cmdline,
+// or, for an engine started from a settings file only (Radiance 2.x: "--config FILE"), the server port that file states.
 func (p Proc) PortArg(pid int) (int, bool) {
 	raw, err := os.ReadFile(filepath.Join(p.root(), strconv.Itoa(pid), "cmdline"))
 	if err != nil {
@@ -188,7 +194,59 @@ func (p Proc) PortArg(pid int) (int, bool) {
 			return port, true
 		}
 	}
+	for i, a := range args {
+		if a == "--config" && i+1 < len(args) {
+			return settingsFilePort(args[i+1])
+		}
+	}
 	return 0, false
+}
+
+// settingsFilePort reads "port:" from the "server:" section of an engine settings file. Only that section counts: a model entry may carry its
+// own keys. ok=false when the file cannot be read (it belongs to another user, or it is gone) or states no port.
+func settingsFilePort(path string) (int, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	inServer := false
+	for _, line := range strings.Split(string(raw), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") {
+			inServer = trimmed == "server:"
+			continue
+		}
+		if v, found := strings.CutPrefix(trimmed, "port:"); inServer && found {
+			port, err := strconv.Atoi(strings.Trim(strings.TrimSpace(v), `"`))
+			if err != nil {
+				return 0, false
+			}
+			return port, true
+		}
+	}
+	return 0, false
+}
+
+// PrivateRSSBytes is the part of the process's resident set that returns to the host when it exits: anonymous and shared-memory pages.
+// File-backed pages (a memory-mapped model file) are left out because the kernel already counts them as available. 0 when unreadable.
+func (p Proc) PrivateRSSBytes(pid int) float64 {
+	raw, err := os.ReadFile(filepath.Join(p.root(), strconv.Itoa(pid), "status"))
+	if err != nil {
+		return 0
+	}
+	var total float64
+	for _, line := range strings.Split(string(raw), "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 2 && (f[0] == "RssAnon:" || f[0] == "RssShmem:") {
+			if kb, err := strconv.ParseFloat(f[1], 64); err == nil {
+				total += kb * 1024
+			}
+		}
+	}
+	return total
 }
 
 // RSSBytes returns the process's VmRSS in bytes, 0 when unreadable.

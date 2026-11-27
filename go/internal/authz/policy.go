@@ -255,6 +255,8 @@ type Decision struct {
 func (e *PolicyEvaluator) Evaluate(resource string, assurance Assurance, assuranceAt time.Time) Decision {
 	min, ok := e.policy[resource]
 	if !ok {
+		// Deliberate (pinned by TestPolicyEvaluation): a key with no entry is a network-only resource. That is only safe while every declared
+		// resource has an explicit default, which TestEveryResourceHasADefaultPolicy enforces, so this branch is unreachable for real routes.
 		min = string(AssuranceNetwork)
 	}
 	minAssurance := Assurance(min)

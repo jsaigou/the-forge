@@ -1,0 +1,562 @@
+{
+ "version": 1,
+ "span_scale": 1.5,
+ "max_overlapping_emotions": 2,
+ "tags": [
+  {
+   "name": "adoring",
+   "aliases": [],
+   "label": "Adoring, tender affection",
+   "group": "emotion",
+   "description": "Emotion: adoring, tender affection",
+   "scope": "span",
+   "controls": {
+    "emotions.adoring": 1.0
+   },
+   "default": 1.5,
+   "ceiling": 2.0,
+   "provisional": true
+  },
+  {
+   "name": "angry",
+   "aliases": [],
+   "label": "Angry",
+   "group": "emotion",
+   "description": "Emotion: angry",
+   "scope": "span",
+   "controls": {
+    "emotions.angry": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "confused",
+   "aliases": [],
+   "label": "Confused, puzzled",
+   "group": "emotion",
+   "description": "Emotion: confused, puzzled",
+   "scope": "span",
+   "controls": {
+    "emotions.confused": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "content",
+   "aliases": [],
+   "label": "Content, satisfied",
+   "group": "emotion",
+   "description": "Emotion: content, satisfied",
+   "scope": "span",
+   "controls": {
+    "emotions.content": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "cute",
+   "aliases": [],
+   "label": "Cute, playful",
+   "group": "emotion",
+   "description": "Emotion: cute, playful",
+   "scope": "span",
+   "controls": {
+    "emotions.cute": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "desirous",
+   "aliases": [],
+   "label": "Longing, desire",
+   "group": "emotion",
+   "description": "Emotion: longing, desire",
+   "scope": "span",
+   "controls": {
+    "emotions.desirous": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "disappointed",
+   "aliases": [],
+   "label": "Disappointed",
+   "group": "emotion",
+   "description": "Emotion: disappointed",
+   "scope": "span",
+   "controls": {
+    "emotions.disappointed": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 6.0,
+   "provisional": false
+  },
+  {
+   "name": "disgusted",
+   "aliases": [],
+   "label": "Disgusted",
+   "group": "emotion",
+   "description": "Emotion: disgusted",
+   "scope": "span",
+   "controls": {
+    "emotions.disgusted": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "distressed",
+   "aliases": [],
+   "label": "Distressed, upset",
+   "group": "emotion",
+   "description": "Emotion: distressed, upset",
+   "scope": "span",
+   "controls": {
+    "emotions.distressed": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "ecstatic",
+   "aliases": [],
+   "label": "Ecstatic, overjoyed",
+   "group": "emotion",
+   "description": "Emotion: ecstatic, overjoyed",
+   "scope": "span",
+   "controls": {
+    "emotions.ecstatic": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "embarrassed",
+   "aliases": [],
+   "label": "Embarrassed",
+   "group": "emotion",
+   "description": "Emotion: embarrassed",
+   "scope": "span",
+   "controls": {
+    "emotions.embarrassed": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "fearful",
+   "aliases": [],
+   "label": "Fearful, afraid",
+   "group": "emotion",
+   "description": "Emotion: fearful, afraid",
+   "scope": "span",
+   "controls": {
+    "emotions.fearful": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "guilty",
+   "aliases": [],
+   "label": "Guilty",
+   "group": "emotion",
+   "description": "Emotion: guilty",
+   "scope": "span",
+   "controls": {
+    "emotions.guilty": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "happy",
+   "aliases": [],
+   "label": "Happy",
+   "group": "emotion",
+   "description": "Emotion: happy",
+   "scope": "span",
+   "controls": {
+    "emotions.happy": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "interested",
+   "aliases": [],
+   "label": "Interested, curious",
+   "group": "emotion",
+   "description": "Emotion: interested, curious",
+   "scope": "span",
+   "controls": {
+    "emotions.interested": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "pained",
+   "aliases": [],
+   "label": "In pain",
+   "group": "emotion",
+   "description": "Emotion: in pain",
+   "scope": "span",
+   "controls": {
+    "emotions.pained": 1.0
+   },
+   "default": 1.5,
+   "ceiling": 2.0,
+   "provisional": true
+  },
+  {
+   "name": "proud",
+   "aliases": [],
+   "label": "Proud",
+   "group": "emotion",
+   "description": "Emotion: proud",
+   "scope": "span",
+   "controls": {
+    "emotions.proud": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 6.0,
+   "provisional": false
+  },
+  {
+   "name": "realizing",
+   "aliases": [],
+   "label": "Realizing, dawning understanding",
+   "group": "emotion",
+   "description": "Emotion: realizing, dawning understanding",
+   "scope": "span",
+   "controls": {
+    "emotions.realizing": 1.0
+   },
+   "default": 1.5,
+   "ceiling": 2.0,
+   "provisional": true
+  },
+  {
+   "name": "relieved",
+   "aliases": [],
+   "label": "Relieved",
+   "group": "emotion",
+   "description": "Emotion: relieved",
+   "scope": "span",
+   "controls": {
+    "emotions.relieved": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 6.0,
+   "provisional": false
+  },
+  {
+   "name": "sad",
+   "aliases": [],
+   "label": "Sad",
+   "group": "emotion",
+   "description": "Emotion: sad",
+   "scope": "span",
+   "controls": {
+    "emotions.sad": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "scared",
+   "aliases": [],
+   "label": "Scared, frightened",
+   "group": "emotion",
+   "description": "Emotion: scared, frightened",
+   "scope": "span",
+   "controls": {
+    "emotions.scared": 1.0
+   },
+   "default": 4.5,
+   "ceiling": 6.0,
+   "provisional": false
+  },
+  {
+   "name": "serene",
+   "aliases": [
+    "calm"
+   ],
+   "label": "Serene, calm",
+   "group": "emotion",
+   "description": "Emotion: serene, calm",
+   "scope": "span",
+   "controls": {
+    "emotions.serene": 1.0
+   },
+   "default": 4,
+   "ceiling": 6.0,
+   "provisional": false
+  },
+  {
+   "name": "surprised",
+   "aliases": [],
+   "label": "Surprised",
+   "group": "emotion",
+   "description": "Emotion: surprised",
+   "scope": "span",
+   "controls": {
+    "emotions.surprised": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.5,
+   "provisional": true
+  },
+  {
+   "name": "valence",
+   "label": "Valence (positive / negative)",
+   "group": "mood",
+   "description": "Valence (positive / negative)",
+   "scope": "span",
+   "controls": {
+    "mood.valence": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.0,
+   "bipolar": true
+  },
+  {
+   "name": "arousal",
+   "label": "Arousal (energetic / subdued)",
+   "group": "mood",
+   "description": "Arousal (energetic / subdued)",
+   "scope": "span",
+   "controls": {
+    "mood.arousal": 1.0
+   },
+   "default": 3.0,
+   "ceiling": 4.0,
+   "bipolar": true
+  },
+  {
+   "name": "whisper",
+   "label": "Whisper",
+   "group": "delivery",
+   "description": "Breathy, whispered voicing (changes voicing, not level)",
+   "scope": "span",
+   "controls": {
+    "delivery.whisper": 1.0
+   },
+   "default": 1.5,
+   "ceiling": 2.0,
+   "bipolar": false
+  },
+  {
+   "name": "loud",
+   "label": "Loud, projected",
+   "group": "delivery",
+   "description": "Projected, forceful delivery (changes voicing, not level)",
+   "scope": "span",
+   "controls": {
+    "delivery.loud": 1.0
+   },
+   "default": 1.0,
+   "ceiling": 1.5,
+   "bipolar": false
+  },
+  {
+   "name": "lively",
+   "label": "Lively (negative: flat)",
+   "group": "delivery",
+   "description": "Lively (negative: flat)",
+   "scope": "span",
+   "controls": {
+    "expressive.expressive": 1.0
+   },
+   "default": 4.0,
+   "ceiling": 8.0,
+   "bipolar": true
+  },
+  {
+   "name": "casual",
+   "label": "Casual, chatty (negative: careful)",
+   "group": "delivery",
+   "description": "Casual, chatty (negative: careful)",
+   "scope": "span",
+   "controls": {
+    "delivery.conversational": 1.0
+   },
+   "default": 2.0,
+   "ceiling": 4.0,
+   "bipolar": true
+  },
+  {
+   "name": "hesitant",
+   "label": "Hesitant, with pauses",
+   "group": "delivery",
+   "description": "Hesitant, with pauses",
+   "scope": "span",
+   "controls": {
+    "disfluency.disfluent": 1.0
+   },
+   "default": 4.0,
+   "ceiling": 8.0,
+   "bipolar": false
+  },
+  {
+   "name": "fast",
+   "label": "Faster",
+   "group": "delivery",
+   "description": "Faster",
+   "scope": "span",
+   "controls": {
+    "delivery.tempo": 1.0
+   },
+   "default": 1.5,
+   "ceiling": 2.0,
+   "bipolar": false,
+   "tempo": true
+  },
+  {
+   "name": "slow",
+   "label": "Slower",
+   "group": "delivery",
+   "description": "Slower",
+   "scope": "span",
+   "controls": {
+    "delivery.tempo": -1.0
+   },
+   "default": 1.5,
+   "ceiling": 2.0,
+   "bipolar": false,
+   "tempo": true
+  },
+  {
+   "name": "em",
+   "label": "Emphasis on a word",
+   "group": "delivery",
+   "description": "Stress the enclosed word",
+   "scope": "span",
+   "controls": {
+    "emphasis_nv_nodur.emphasis": 1.0,
+    "mood.arousal": 0.25
+   },
+   "default": 4.0,
+   "ceiling": 6.0
+  },
+  {
+   "name": "age",
+   "label": "Age (younger / older)",
+   "group": "line",
+   "description": "Whole-line setting; embedding mode only",
+   "scope": "line",
+   "space": "raw",
+   "controls": {
+    "identity.age": 1.0
+   },
+   "default": 1.0,
+   "ceiling": 1.5,
+   "bipolar": true,
+   "requires": "embedding"
+  },
+  {
+   "name": "excited",
+   "label": "Excited",
+   "group": "style",
+   "description": "Composite style: excited",
+   "scope": "span",
+   "controls": {
+    "emotions.happy": 3.0,
+    "mood.arousal": 2.0
+   },
+   "default": 1.0,
+   "ceiling": 1.5,
+   "provisional": true
+  },
+  {
+   "name": "cheerful",
+   "label": "Cheerful",
+   "group": "style",
+   "description": "Composite style: cheerful",
+   "scope": "span",
+   "controls": {
+    "emotions.happy": 3.0,
+    "expressive.expressive": 3.0
+   },
+   "default": 1.0,
+   "ceiling": 1.5,
+   "provisional": true
+  },
+  {
+   "name": "tired",
+   "label": "Tired",
+   "group": "style",
+   "description": "Composite style: tired",
+   "scope": "span",
+   "controls": {
+    "emotions.sad": 3.0,
+    "mood.arousal": -2.0
+   },
+   "default": 1.0,
+   "ceiling": 1.5,
+   "provisional": true
+  },
+  {
+   "name": "nervous",
+   "label": "Nervous",
+   "group": "style",
+   "description": "Composite style: nervous",
+   "scope": "span",
+   "controls": {
+    "emotions.scared": 4.0,
+    "disfluency.disfluent": 3.0
+   },
+   "default": 1.0,
+   "ceiling": 1.5,
+   "provisional": true
+  },
+  {
+   "name": "gentle",
+   "label": "Gentle",
+   "group": "style",
+   "description": "Composite style: gentle",
+   "scope": "span",
+   "controls": {
+    "emotions.serene": 3.0,
+    "mood.arousal": -1.0
+   },
+   "default": 1.0,
+   "ceiling": 1.5,
+   "provisional": true
+  },
+  {
+   "name": "shout",
+   "label": "Shouting",
+   "group": "style",
+   "description": "Composite style: shouting",
+   "scope": "span",
+   "controls": {
+    "delivery.loud": 1.0,
+    "emotions.angry": 2.0
+   },
+   "default": 1.0,
+   "ceiling": 1.5,
+   "provisional": true
+  }
+ ]
+}

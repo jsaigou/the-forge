@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jsaigou/the-forge/internal/hostprobe"
 	"github.com/jsaigou/the-forge/internal/smith/procedures"
 	"github.com/jsaigou/the-forge/internal/store"
 )
@@ -653,7 +654,7 @@ func (s *Smith) reliabilityTestOneBackend(ctx context.Context, fork buildRefresh
 			fmt.Fprintf(&log, "revert anchor for %s was the candidate itself (an earlier interrupted attempt repointed it); restoring build id %d instead\n", repName, target)
 		}
 		cfg.BuildID = target
-		if uerr := s.d.Catalog.UpdateConfig(ctx, cfg); uerr != nil {
+		if uerr := s.setConfigBuild(ctx, cfg.ID, target); uerr != nil {
 			fmt.Fprintf(&log, "REVERT FAILED for config %s: %v (original error: %v)\n", repName, uerr, reason)
 		} else {
 			fmt.Fprintf(&log, "reverted config %s back to build id %d\n", repName, target)
@@ -664,7 +665,7 @@ func (s *Smith) reliabilityTestOneBackend(ctx context.Context, fork buildRefresh
 	}
 
 	cfg.BuildID = candidateID
-	if err := s.d.Catalog.UpdateConfig(ctx, cfg); err != nil {
+	if err := s.setConfigBuild(ctx, cfg.ID, candidateID); err != nil {
 		return out, fmt.Errorf("repoint %s to candidate build: %w", repName, err)
 	}
 	fmt.Fprintf(&log, "repointed config %s to candidate build id %d\n", repName, candidateID)
@@ -758,7 +759,15 @@ func (s *Smith) findOrCreateCandidateBuild(ctx context.Context, oldBuild store.B
 			return b.ID, true, nil
 		}
 	}
-	id, err := s.d.Catalog.CreateBuild(ctx, store.Build{
+	if s.d.CheckBuildBinary != nil {
+		if reason := s.d.CheckBuildBinary(ctx, newBin); reason != "" {
+			return 0, false, fmt.Errorf("refusing to register candidate build %q: binary %s %s", wantName, newBin, reason)
+		}
+	}
+	if s.d.Builds == nil {
+		return 0, false, ErrBuildWritesUnwired
+	}
+	created, err := s.d.Builds.Create(ctx, store.Build{
 		EngineID: oldBuild.EngineID, Name: wantName,
 		BinaryPath: newBin, Backend: oldBuild.Backend,
 		Reason: "autonomous-remediation Sprint 6 build_refresh candidate, pending promotion",
@@ -766,7 +775,7 @@ func (s *Smith) findOrCreateCandidateBuild(ctx context.Context, oldBuild store.B
 	if err != nil {
 		return 0, false, fmt.Errorf("create candidate build row: %w", err)
 	}
-	return id, false, nil
+	return created.ID, false, nil
 }
 
 // ── step 9: perf measurement (informational — see build_refresh.go's
@@ -988,7 +997,7 @@ func (s *Smith) opBuildCatalogPromote(ctx context.Context, params map[string]str
 	revertAll := func(reason error) error {
 		for _, m := range done {
 			m.cfg.BuildID = m.originalBuildID
-			if uerr := s.d.Catalog.UpdateConfig(ctx, m.cfg); uerr != nil {
+			if uerr := s.setConfigBuild(ctx, m.cfg.ID, m.originalBuildID); uerr != nil {
 				fmt.Fprintf(&log, "REVERT FAILED for config %s: %v\n", m.cfg.Name, uerr)
 			} else {
 				fmt.Fprintf(&log, "reverted config %s to build id %d\n", m.cfg.Name, m.originalBuildID)
@@ -1025,7 +1034,7 @@ func (s *Smith) opBuildCatalogPromote(ctx context.Context, params map[string]str
 				original = b.ID
 			}
 			cfg.BuildID = candidateID
-			if uerr := s.d.Catalog.UpdateConfig(ctx, cfg); uerr != nil {
+			if uerr := s.setConfigBuild(ctx, cfg.ID, candidateID); uerr != nil {
 				revertErr := revertAll(fmt.Errorf("repoint config %s: %w", cfg.Name, uerr))
 				return procedures.StepResult{Stdout: log.String()}, revertErr
 			}
@@ -1109,7 +1118,7 @@ func (s *Smith) opBuildCleanupOld(ctx context.Context, params map[string]string)
 			return procedures.StepResult{Stdout: log.String() + res.Stdout}, fmt.Errorf("remove %s: %w", oldDir, rerr)
 		}
 		fmt.Fprintf(&log, "removed on-disk dir %s\n", oldDir)
-		if uerr := s.d.Catalog.UpdateBuild(ctx, store.Build{ID: b.ID, EngineID: b.EngineID, Name: "(retired) " + b.Name, BinaryPath: "", Backend: b.Backend, Reason: b.Reason + " — retired by build_refresh cleanup"}); uerr != nil {
+		if uerr := s.retireBuild(ctx, b.ID, " — retired by build_refresh cleanup"); uerr != nil {
 			fmt.Fprintf(&log, "WARNING: removed %s on disk but could not clear catalog build row %d: %v\n", oldDir, b.ID, uerr)
 		} else {
 			fmt.Fprintf(&log, "cleared catalog build row %d\n", b.ID)
@@ -1169,8 +1178,8 @@ func (s *Smith) opBuildRecordUpstreamSha(ctx context.Context, params map[string]
 			Duration: time.Since(start),
 		}, nil
 	}
-	if ok, reason := upstreamURLAllowed(eff.UpstreamURL); !ok {
-		return procedures.StepResult{}, fmt.Errorf("smith: build_refresh: tracked upstream url %q not allowed: %s", eff.UpstreamURL, reason)
+	if ok, reason := hostprobe.ValidateUpstreamURL(eff.UpstreamURL); !ok {
+		return procedures.StepResult{}, fmt.Errorf("smith: build_refresh: tracked upstream url %q not allowed: %s", hostprobe.RedactURL(eff.UpstreamURL), reason)
 	}
 	if s.d.GitLsRemote == nil {
 		return procedures.StepResult{}, ErrGitLsRemoteUnwired
@@ -1179,13 +1188,34 @@ func (s *Smith) opBuildRecordUpstreamSha(ctx context.Context, params map[string]
 	sha, err := s.d.GitLsRemote(lctx, eff.UpstreamURL)
 	cancel()
 	if err != nil || sha == "" {
-		return procedures.StepResult{}, fmt.Errorf("smith: build_refresh: ls-remote %s: %v", eff.UpstreamURL, err)
+		return procedures.StepResult{}, fmt.Errorf("smith: build_refresh: ls-remote %s: %v", hostprobe.RedactURL(eff.UpstreamURL), err)
 	}
 	if err := s.recordForkLastBuiltSha(ctx, fork.SourceRef, sha); err != nil {
 		return procedures.StepResult{}, err
 	}
 	return procedures.StepResult{
-		Stdout:   fmt.Sprintf("recorded upstream HEAD %s (%s) as last_built_upstream_sha for %s", shortSha(sha), eff.UpstreamURL, fork.SourceRef),
+		Stdout:   fmt.Sprintf("recorded upstream HEAD %s (%s) as last_built_upstream_sha for %s", shortSha(sha), hostprobe.RedactURL(eff.UpstreamURL), fork.SourceRef),
 		Duration: time.Since(start),
 	}, nil
+}
+
+// setConfigBuild repoints one Config at another Build through the catalog's narrow build-pointer write. It re-reads the Config and changes only
+// its Build, so a refresh that has held its copy for minutes (it benchmarks a candidate before promoting it, and reverts after a failure) never
+// writes that stale copy back over an edit the operator made in the meantime, and the change reaches the caches the API's own writes clear.
+func (s *Smith) setConfigBuild(ctx context.Context, configID, buildID int64) error {
+	if s.d.ConfigBuilds == nil {
+		return ErrConfigBuildsUnwired
+	}
+	_, err := s.d.ConfigBuilds.SetBuild(ctx, configID, buildID)
+	return err
+}
+
+// retireBuild marks a Build retired through the catalog's narrow retire write: it re-reads the row (smith holds a list taken earlier in the loop),
+// refuses while a Config still runs on the Build, and clears the config caches.
+func (s *Smith) retireBuild(ctx context.Context, buildID int64, reasonSuffix string) error {
+	if s.d.Builds == nil {
+		return ErrBuildWritesUnwired
+	}
+	_, err := s.d.Builds.Retire(ctx, buildID, reasonSuffix)
+	return err
 }

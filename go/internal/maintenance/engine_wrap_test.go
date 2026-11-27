@@ -61,7 +61,17 @@ func (f *fakeFullEngine) StopUnit(ctx context.Context, unit string) error {
 
 func (f *fakeFullEngine) SlotFootprintBytes(slot string) int64 { return 42 }
 
+func (f *fakeFullEngine) LoadOrder() []string            { return []string{"a2", "a1"} }
+func (f *fakeFullEngine) RecentlyFreed(slot string) bool { return slot == "a1" }
+
 var _ engineFull = (*fakeFullEngine)(nil)
+
+func TestWrapperKeepsTheLoadOrder(t *testing.T) {
+	wrapped := WrapEngine(New(nil, nil, nil, nil), newFakeFullEngine())
+	if order := engine.LoadOrderOf(wrapped, []string{"a1", "a2"}); len(order) != 2 || order[0] != "a2" {
+		t.Fatalf("order = %v: the wrapper hid the engine's load order", order)
+	}
+}
 
 // The wrapper must keep exposing the footprint seam: consumers find it by
 // type assertion, so dropping it silently disables the fit check's

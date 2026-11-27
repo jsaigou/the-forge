@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Trans, useTranslation } from "react-i18next";
 import { SpotlightCutout, useTrackedRect, type Rect } from "./Spotlight";
 import { useOnboarding } from "./useOnboarding";
+import { useSpeechReadiness } from "../lib/queries";
 
 // Guided first-run tour (Sprint 6, 2026-08-27 — replaces the P4 static
 // six-step prose modal). That version never pointed at anything real: no
@@ -72,6 +73,14 @@ const STEPS: TourStep[] = [
     targets: ['[data-tour-id="models-add-tab"]'],
   },
 ];
+
+// Shown last, and only while some kind of speech does not work (docs/speech-setup-plan.md, step 2).
+const SPEECH_STEP: TourStep = {
+  titleKey: "tour.steps.speech.title",
+  bodyKey: "tour.steps.speech.body",
+  hash: "settings/voice",
+  targets: ['[data-tour-id="speech-setup"]'],
+};
 
 const RESOLVE_TIMEOUT_MS = 2000;
 const CARD_MARGIN = 12;
@@ -165,6 +174,8 @@ function cardStyle(rect: Rect | null, cardSize: { width: number; height: number 
 export function OnboardingTour() {
   const { t } = useTranslation("onboarding");
   const { open, dismiss } = useOnboarding();
+  const speech = useSpeechReadiness(open); // asked only while the tour is open
+  const steps = speech.data && !speech.data.ready ? [...STEPS, SPEECH_STEP] : STEPS;
   const [stepIdx, setStepIdx] = useState(0);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [cardSize, setCardSize] = useState({ width: CARD_WIDTH, height: 140 });
@@ -199,9 +210,9 @@ export function OnboardingTour() {
     return () => ro.disconnect();
   }, []);
 
-  const clampedIdx = Math.min(stepIdx, STEPS.length - 1);
-  const step = STEPS[clampedIdx];
-  const isFinal = clampedIdx === STEPS.length - 1;
+  const clampedIdx = Math.min(stepIdx, steps.length - 1);
+  const step = steps[clampedIdx];
+  const isFinal = clampedIdx === steps.length - 1;
 
   const targetEl = useStepTarget(step, open);
   const rect = useTrackedRect(targetEl);
@@ -221,7 +232,7 @@ export function OnboardingTour() {
         style={cardStyle(rect, cardSize)}
       >
         <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 6 }}>
-          {t("tour.progress", { current: clampedIdx + 1, total: STEPS.length })}
+          {t("tour.progress", { current: clampedIdx + 1, total: steps.length })}
         </div>
         <h3 id="onboarding-title" style={{ marginBottom: 8 }}>{t(step.titleKey)}</h3>
         <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.6 }}>

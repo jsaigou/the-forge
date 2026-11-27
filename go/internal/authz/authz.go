@@ -62,6 +62,9 @@ type Identity struct {
 	// a0's slot-consumer attribution uses it verbatim; "" = derive at
 	// request time from key name + User-Agent.
 	DisplayName string
+	// Scope narrows a bearer identity to part of the API ("" = unscoped; ScopeCatalog = only /api/v1/catalog/*,
+	// ADR-0020 F11). Always "" for sessions. Enforced in httpapi's auth middleware.
+	Scope string
 	// Sprint 0-AUTH (§3.1): assurance level the session has proven. Set
 	// for session-based identities (from the session row); zero for bearer
 	// identities — bearer-key paths skip the policy matrix (§5).

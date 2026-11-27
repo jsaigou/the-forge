@@ -122,7 +122,7 @@ func (s *Server) handleCatalogOfferingCreate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var b offeringBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
@@ -134,7 +134,7 @@ func (s *Server) handleCatalogOfferingCreate(w http.ResponseWriter, r *http.Requ
 	defer cancel()
 	providerID, ok := s.resolveOfferingProviderID(ctx, b.Provider)
 	if !ok {
-		writeError(w, http.StatusUnprocessableEntity, "provider does not exist")
+		writeErrorCode(w, http.StatusUnprocessableEntity, "provider_not_found", nil, "provider does not exist")
 		return
 	}
 	priority := 100 // column DEFAULT — omitted body means "no preference"
@@ -172,7 +172,7 @@ func (s *Server) handleCatalogOfferingUpdate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var b offeringBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
@@ -193,7 +193,7 @@ func (s *Server) handleCatalogOfferingUpdate(w http.ResponseWriter, r *http.Requ
 	}
 	providerID, ok := s.resolveOfferingProviderID(ctx, b.Provider)
 	if !ok {
-		writeError(w, http.StatusUnprocessableEntity, "provider does not exist")
+		writeErrorCode(w, http.StatusUnprocessableEntity, "provider_not_found", nil, "provider does not exist")
 		return
 	}
 	priority := existing.Priority // omitted body field preserves the rank
@@ -252,11 +252,11 @@ func (s *Server) handleCatalogOfferingValidate(w http.ResponseWriter, r *http.Re
 		return
 	}
 	var b offeringBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
-	if fields, codes := s.validateOffering(r.Context(), b, 0); len(fields) > 0 {
+	if fields, codes := s.validateOffering(r.Context(), b, validateExcludeID(r)); len(fields) > 0 {
 		writeValidationErrorCodes(w, fields, codes)
 		return
 	}

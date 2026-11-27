@@ -10,9 +10,13 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +57,19 @@ func (s *Server) handleAuthStepUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limitKey := "stepup-session:" + sess.ID
+	userKey := "stepup-user:" + strconv.FormatInt(sess.UserID, 10)
+	if s.stepUpLimiter.TooMany(limitKey) || s.stepUpUserLimiter.TooMany(userKey) {
+		writeErrorCode(w, http.StatusTooManyRequests, "too_many_attempts", nil, "too many failed step-up attempts")
+		return
+	}
+	// stepUpFail records a failed factor check against the limiter and answers 401 with the factor's own code.
+	stepUpFail := func(code, msg string) {
+		s.stepUpLimiter.Fail(limitKey)
+		s.stepUpUserLimiter.Fail(userKey)
+		writeErrorCode(w, http.StatusUnauthorized, code, nil, msg)
+	}
+
 	var newAssurance authz.Assurance
 	switch authz.Assurance(b.Factor) {
 	case authz.AssurancePassword:
@@ -67,7 +84,7 @@ func (s *Server) handleAuthStepUp(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 		if err := s.deps.StepUpVerifier.VerifyPassword(ctx, sess.UserID, b.Password); err != nil {
-			writeError(w, http.StatusUnauthorized, "invalid password")
+			stepUpFail("invalid_password", "invalid password")
 			return
 		}
 		newAssurance = authz.AssurancePassword
@@ -84,15 +101,15 @@ func (s *Server) handleAuthStepUp(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		totp, err := s.deps.TOTPStore.Get(ctx, sess.UserID)
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "TOTP not enrolled")
+			writeErrorCode(w, http.StatusUnauthorized, "totp_not_enrolled", nil, "TOTP not enrolled")
 			return
 		}
 		if !totp.Confirmed {
-			writeError(w, http.StatusUnauthorized, "TOTP not confirmed")
+			writeErrorCode(w, http.StatusUnauthorized, "totp_not_confirmed", nil, "TOTP not confirmed")
 			return
 		}
 		if !authz.ValidateTOTP(totp.Secret, b.Code, time.Now()) {
-			writeError(w, http.StatusUnauthorized, "invalid TOTP code")
+			stepUpFail("invalid_totp_code", "invalid TOTP code")
 			return
 		}
 		newAssurance = authz.AssuranceTOTP
@@ -112,7 +129,7 @@ func (s *Server) handleAuthStepUp(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 		if err := s.deps.RecoveryService.VerifyCode(ctx, sess.UserID, b.Code); err != nil {
-			writeError(w, http.StatusUnauthorized, "invalid or used recovery code")
+			stepUpFail("invalid_recovery_code", "invalid or used recovery code")
 			return
 		}
 		newAssurance = authz.AssurancePassword
@@ -120,6 +137,9 @@ func (s *Server) handleAuthStepUp(w http.ResponseWriter, r *http.Request) {
 		writeValidationErrorCodes(w, map[string]string{"factor": "must be one of: password, totp, recovery_code"}, map[string]string{"factor": "must_be_one_of"})
 		return
 	}
+
+	s.stepUpLimiter.Reset(limitKey)
+	s.stepUpUserLimiter.Reset(userKey)
 
 	// Rotate session ID + CSRF token (§8: session fixation prevention).
 	newSID, err := authz.RandomToken(32)
@@ -133,9 +153,21 @@ func (s *Server) handleAuthStepUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
+	// A step-up never LOWERS a session that is still validly elevated: a password step-up on a live passkey session rotates the ID but keeps
+	// passkey and its original timestamp (a weaker factor must not refresh the stronger one's TTL either). Once the stronger elevation has
+	// expired, the fresh factor applies as usual.
+	grantAssurance, grantAt := newAssurance, now
+	cur := authz.Assurance(sess.Assurance)
+	ttl := s.deps.StepUpTTL
+	if ttl == 0 {
+		ttl = authz.DefaultStepUpTTL
+	}
+	if cur.AtLeast(newAssurance) && !newAssurance.AtLeast(cur) && !sess.AssuranceAt.IsZero() && now.Sub(sess.AssuranceAt) <= ttl {
+		grantAssurance, grantAt = cur, sess.AssuranceAt
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	if err := s.deps.Sessions.ElevateSession(ctx, sess.ID, newSID, newCSRF, string(newAssurance), now); err != nil {
+	if err := s.deps.Sessions.ElevateSession(ctx, sess.ID, newSID, newCSRF, string(grantAssurance), grantAt); err != nil {
 		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "session elevation failed")
 		return
 	}
@@ -143,14 +175,14 @@ func (s *Server) handleAuthStepUp(w http.ResponseWriter, r *http.Request) {
 	elevatedSess := sess
 	elevatedSess.ID = newSID
 	elevatedSess.CSRFToken = newCSRF
-	elevatedSess.Assurance = string(newAssurance)
-	elevatedSess.AssuranceAt = now
+	elevatedSess.Assurance = string(grantAssurance)
+	elevatedSess.AssuranceAt = grantAt
 	s.setSessionCookie(w, elevatedSess)
 
-	s.audit(r, ident.Name, "step_up", string(newAssurance), "")
-	at := unixSeconds(now)
+	s.audit(r, ident.Name, "step_up", string(grantAssurance), "")
+	at := unixSeconds(grantAt)
 	writeJSON(w, http.StatusOK, stepUpResponse{
-		Assurance:   string(newAssurance),
+		Assurance:   string(grantAssurance),
 		AssuranceAt: &at,
 	})
 }
@@ -179,7 +211,7 @@ func (s *Server) handleWebAuthnRegisterBegin(w http.ResponseWriter, r *http.Requ
 	ident := identity(r)
 	wa, err := s.webAuthnInstance(r)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, err.Error())
+		writeErrorCode(w, http.StatusServiceUnavailable, "auth_unavailable", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -220,7 +252,7 @@ func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Req
 	ident := identity(r)
 	challengeToken := challengeCookie(r)
 	if challengeToken == "" {
-		writeError(w, http.StatusBadRequest, "missing challenge cookie")
+		writeErrorCode(w, http.StatusBadRequest, "missing_challenge_cookie", nil, "missing challenge cookie")
 		return
 	}
 	var b webauthnFinishRegisterRequest
@@ -236,14 +268,14 @@ func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Req
 	}
 	wa, err := s.webAuthnInstance(r)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, err.Error())
+		writeErrorCode(w, http.StatusServiceUnavailable, "auth_unavailable", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	result, err := s.deps.WebAuthnService.FinishRegistration(ctx, wa, ident.Name, challengeToken, b.Label, body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	// Clear the challenge cookie.
@@ -278,7 +310,7 @@ func (s *Server) handleWebAuthnAssertBegin(w http.ResponseWriter, r *http.Reques
 	ident := identity(r)
 	wa, err := s.webAuthnInstance(r)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, err.Error())
+		writeErrorCode(w, http.StatusServiceUnavailable, "auth_unavailable", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -319,7 +351,7 @@ func (s *Server) handleWebAuthnAssertFinish(w http.ResponseWriter, r *http.Reque
 	ident := identity(r)
 	challengeToken := challengeCookie(r)
 	if challengeToken == "" {
-		writeError(w, http.StatusBadRequest, "missing challenge cookie")
+		writeErrorCode(w, http.StatusBadRequest, "missing_challenge_cookie", nil, "missing challenge cookie")
 		return
 	}
 	var b webauthnFinishAssertRequest
@@ -334,14 +366,14 @@ func (s *Server) handleWebAuthnAssertFinish(w http.ResponseWriter, r *http.Reque
 	}
 	wa, err := s.webAuthnInstance(r)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, err.Error())
+		writeErrorCode(w, http.StatusServiceUnavailable, "auth_unavailable", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	result, err := s.deps.WebAuthnService.FinishAssertion(ctx, wa, ident.Name, challengeToken, body)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, err.Error())
+		writeErrorCode(w, http.StatusUnauthorized, "auth_failed", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	// Clear the challenge cookie.
@@ -421,7 +453,7 @@ func (s *Server) handleWebAuthnCredentialDelete(w http.ResponseWriter, r *http.R
 	}
 	credID := r.PathValue("id")
 	if credID == "" {
-		writeError(w, http.StatusBadRequest, "credential id is required")
+		writeErrorCode(w, http.StatusBadRequest, "credential_id_required", nil, "credential id is required")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -518,11 +550,11 @@ func (s *Server) handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	totp, err := s.deps.TOTPStore.Get(ctx, sess.UserID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "no TOTP enrollment in progress")
+		writeErrorCode(w, http.StatusNotFound, "no_totp_enrollment_in_progress", nil, "no TOTP enrollment in progress")
 		return
 	}
 	if !authz.ValidateTOTP(totp.Secret, b.Code, time.Now()) {
-		writeError(w, http.StatusUnauthorized, "invalid TOTP code")
+		writeErrorCode(w, http.StatusUnauthorized, "invalid_totp_code", nil, "invalid TOTP code")
 		return
 	}
 	if err := s.deps.TOTPStore.Confirm(ctx, sess.UserID); err != nil {
@@ -549,7 +581,7 @@ func (s *Server) handleTOTPDelete(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if err := s.deps.TOTPStore.Delete(ctx, sess.UserID); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "no TOTP enrolled")
+			writeErrorCode(w, http.StatusNotFound, "totp_not_enrolled", nil, "no TOTP enrolled")
 			return
 		}
 		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "TOTP removal failed")
@@ -640,6 +672,10 @@ func (s *Server) handleIdentityLinkCreate(w http.ResponseWriter, r *http.Request
 		CreatedAt: time.Now(),
 	}
 	if err := s.deps.IdentityLinks.Create(ctx, link); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			writeErrorCode(w, http.StatusConflict, "already_exists", nil, "this identity is already linked to another user; delete the link first")
+			return
+		}
 		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "identity link create failed")
 		return
 	}
@@ -661,7 +697,7 @@ func (s *Server) handleIdentityLinkDelete(w http.ResponseWriter, r *http.Request
 	provider := r.PathValue("provider")
 	principal := r.PathValue("principal")
 	if provider == "" || principal == "" {
-		writeError(w, http.StatusBadRequest, "provider and principal are required")
+		writeErrorCode(w, http.StatusBadRequest, "provider_and_principal_required", nil, "provider and principal are required")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -749,6 +785,25 @@ func (s *Server) handleKeyCreate(w http.ResponseWriter, r *http.Request) {
 		writeValidationErrorCodes(w, map[string]string{"role": "is required for forge keys"}, map[string]string{"role": "required_forge_keys"})
 		return
 	}
+	if b.Scope != "" {
+		scopeFields := map[string]string{}
+		switch {
+		case b.Scope != authz.ScopeCatalog:
+			// The speech scope is not mintable over HTTP: it needs a loopback binding and a year-long life, and belongs to a service on the host, so it
+			// is minted with `forge mint-key -scope speech -bind-ip 127.0.0.1` where the database is.
+			scopeFields["scope"] = "must be: catalog"
+		case b.Kind != "forge":
+			scopeFields["scope"] = "only forge keys can be scoped"
+		case b.TTLSeconds <= 0:
+			scopeFields["ttl_seconds"] = "is required for a scoped key (it must expire)"
+		case time.Duration(b.TTLSeconds)*time.Second > authz.MaxScopedKeyTTL:
+			scopeFields["ttl_seconds"] = "a scoped key may live at most 86400 seconds (24 hours)"
+		}
+		if len(scopeFields) > 0 {
+			writeValidationError(w, scopeFields)
+			return
+		}
+	}
 
 	// #37: gating lives here (not requireAssurance) because the
 	// self-rotation carve-out needs the decoded body. A session identity
@@ -763,7 +818,7 @@ func (s *Server) handleKeyCreate(w http.ResponseWriter, r *http.Request) {
 	// step-up — which a bearer identity can never satisfy, so it's a hard
 	// block in practice, same as DELETE (requireStrictAssurance).
 	ident := identity(r)
-	isSelfRotation := ident.KeyID != "" &&
+	isSelfRotation := ident.KeyID != "" && b.Scope == "" &&
 		ident.Kind == authz.KindForge &&
 		authz.KeyKind(b.Kind) == authz.KindForge &&
 		b.Name == ident.Name &&
@@ -798,7 +853,13 @@ func (s *Server) handleKeyCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	token, err := s.deps.KeyManager.MintKey(ctx, authz.KeyKind(b.Kind), b.Name, b.DisplayName, role, boundIP, expiresAt)
+	var token string
+	var err error
+	if b.Scope != "" {
+		token, err = s.deps.KeyManager.MintScopedKey(ctx, b.Name, b.DisplayName, role, boundIP, expiresAt, b.Scope)
+	} else {
+		token, err = s.deps.KeyManager.MintKey(ctx, authz.KeyKind(b.Kind), b.Name, b.DisplayName, role, boundIP, expiresAt)
+	}
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -816,7 +877,7 @@ func (s *Server) handleKeyCreate(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	s.audit(r, identity(r).Name, "key_mint", b.Kind+":"+b.Name, "")
+	s.audit(r, identity(r).Name, "key_mint", b.Kind+":"+b.Name, b.Scope)
 	writeJSON(w, http.StatusCreated, apiKeyCreateResponse{
 		Token: token,
 		Key:   toAPIKeyResponse(keyRow),
@@ -831,7 +892,7 @@ func (s *Server) handleKeyRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	keyid := r.PathValue("keyid")
 	if keyid == "" {
-		writeError(w, http.StatusBadRequest, "keyid is required")
+		writeErrorCode(w, http.StatusBadRequest, "key_id_required", nil, "keyid is required")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -845,6 +906,29 @@ func (s *Server) handleKeyRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, identity(r).Name, "key_revoke", keyid, "")
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleKeyRevokeSelf — DELETE /api/v1/keys/self. A bearer key revokes ITSELF, with no step-up: an agent handed a
+// short-lived scoped key can end its own access the moment its job is done (ADR-0020 F11). It can revoke only the key
+// that made the request, never another; revoking any other key stays an interactive, stepped-up admin action.
+func (s *Server) handleKeyRevokeSelf(w http.ResponseWriter, r *http.Request) {
+	ident := identity(r)
+	if ident.KeyID == "" || ident.Kind != authz.KindForge {
+		writeErrorCode(w, http.StatusForbidden, "key_required", nil, "only a bearer key can revoke itself")
+		return
+	}
+	if s.deps.KeyManager == nil {
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_available", map[string]any{"resource": "key manager"}, "key manager not available")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	if err := s.deps.KeyManager.RevokeKey(ctx, ident.KeyID); err != nil {
+		writeErrorCode(w, http.StatusInternalServerError, "operation_failed", nil, "key revoke failed")
+		return
+	}
+	s.audit(r, ident.Name, "key_revoke_self", ident.KeyID, ident.Scope)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -1173,6 +1257,7 @@ func toAPIKeyResponse(k store.APIKey) apiKeyResponse {
 		DisplayName: k.DisplayName,
 		BoundIP:     k.BoundIP,
 		CreatedAt:   unixSeconds(k.CreatedAt),
+		Scope:       k.Scope,
 	}
 	if !k.LastUsedAt.IsZero() {
 		t := unixSeconds(k.LastUsedAt)
@@ -1253,11 +1338,11 @@ func creationOptionsFromProtocol(c *protocol.CredentialCreation) webauthnCreatio
 		Name: resp.RelyingParty.Name,
 	}
 	user := webauthnUserJSON{
-		ID:          fmt.Sprintf("%s", resp.User.ID),
+		ID:          b64urlBytes(resp.User.ID),
 		Name:        resp.User.Name,
 		DisplayName: resp.User.DisplayName,
 	}
-	challenge := string(resp.Challenge)
+	challenge := b64urlBytes([]byte(resp.Challenge))
 	var params []webauthnPubKeyCredParamJSON
 	for _, p := range resp.Parameters {
 		params = append(params, webauthnPubKeyCredParamJSON{
@@ -1293,7 +1378,7 @@ func requestOptionsFromProtocol(a *protocol.CredentialAssertion) webauthnRequest
 		return webauthnRequestOptionsJSON{}
 	}
 	resp := a.Response
-	challenge := string(resp.Challenge)
+	challenge := b64urlBytes([]byte(resp.Challenge))
 	var allow []webauthnPublicKeyCredentialDescriptorJSON
 	for _, c := range resp.AllowedCredentials {
 		allow = append(allow, credentialDescriptorFromProtocol(c))
@@ -1313,7 +1398,7 @@ func credentialDescriptorFromProtocol(d protocol.CredentialDescriptor) webauthnP
 		transports = append(transports, string(t))
 	}
 	return webauthnPublicKeyCredentialDescriptorJSON{
-		ID:         string(d.CredentialID),
+		ID:         b64urlBytes([]byte(d.CredentialID)),
 		Type:       string(d.Type),
 		Transports: transports,
 	}
@@ -1336,4 +1421,24 @@ func toWebAuthnCredentialJSON(c authz.WebAuthnCredentialRecord) webauthnCredenti
 		resp.LastUsedAt = &t
 	}
 	return resp
+}
+
+// b64urlBytes encodes the raw bytes WebAuthn options carry (challenge, user handle, credential id) as unpadded base64url, the form the browser
+// helper decodes back into the ArrayBuffers navigator.credentials requires. string(bytes) here would put invalid UTF-8 on the wire and
+// json.Marshal would replace it with U+FFFD, destroying the value.
+//
+// Only the byte types go-webauthn actually produces are accepted. Anything else (a string that might or might not already be encoded, a
+// type a library upgrade introduces) is NOT guessed at: a wrong guess yields a plausible-looking but corrupt id that mis-binds a passkey
+// without any error. It returns "" and logs, so the ceremony fails loudly in the browser instead.
+func b64urlBytes(v any) string {
+	switch x := v.(type) {
+	case []byte:
+		return base64.RawURLEncoding.EncodeToString(x)
+	case protocol.URLEncodedBase64:
+		return base64.RawURLEncoding.EncodeToString([]byte(x))
+	case nil:
+		return ""
+	}
+	log.Printf("httpapi: webauthn: refusing to encode an option field of unexpected type %T", v)
+	return ""
 }

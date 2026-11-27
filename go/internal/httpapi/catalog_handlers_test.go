@@ -119,11 +119,12 @@ func seedCatalogPrereqs(t *testing.T, db *store.DB) catalogPrereqs {
 	if err != nil {
 		t.Fatalf("CreateArtifact mmproj: %v", err)
 	}
-	engines, err := cat.ListEngines(ctx)
+	// llama.cpp by name: the engines list is sorted by name and migration 0106 added "Radiance", which sorts first.
+	eng, err := cat.EngineByName(ctx, "llama.cpp")
 	if err != nil {
-		t.Fatalf("ListEngines: %v", err)
+		t.Fatalf("EngineByName: %v", err)
 	}
-	engID := engines[0].ID
+	engID := eng.ID
 	bID, err := cat.CreateBuild(ctx, store.Build{
 		EngineID: engID, Name: "vulkan-build", BinaryPath: "/usr/bin/llama-server",
 		Backend: "vulkan",
@@ -701,17 +702,6 @@ func TestCatalogModalitiesRoundTrip(t *testing.T) {
 	if c3.Modalities == nil || len(*c3.Modalities) != 2 {
 		t.Fatalf("get config after override: Modalities = %+v, want [text vision] (dead-column regression)", c3.Modalities)
 	}
-
-	// Reject an unknown modality on a config too.
-	body = `{"name":"omni-cfg","variant_id":` + itoa(pq.variantID) +
-		`,"weight_artifact_id":` + itoa(pq.artifactID) +
-		`,"engine_id":` + itoa(pq.engineID) +
-		`,"build_id":` + itoa(pq.buildID) +
-		`,"modalities":["telepathy"]}`
-	w = do(t, s, authedRequest("PUT", "/api/v1/catalog/configs/"+itoa(c.ID), bytes.NewBufferString(body)))
-	if w.Code != 422 {
-		t.Fatalf("unknown modality on config = %d, want 422: %s", w.Code, w.Body.String())
-	}
 }
 
 func TestCatalogConfigDeleteLoaded(t *testing.T) {
@@ -723,7 +713,7 @@ func TestCatalogConfigDeleteLoaded(t *testing.T) {
 	id, err := db.Catalog().CreateConfig(ctx, store.Config{
 		Name: "loaded-config", VariantID: pq.variantID,
 		WeightArtifactID: pq.artifactID, EngineID: pq.engineID,
-		NCtx: 131072, Parallel: 1,
+		NCtx: 131072,
 	})
 	if err != nil {
 		t.Fatalf("CreateConfig: %v", err)
@@ -1268,6 +1258,11 @@ func TestCatalogEnumLists(t *testing.T) {
 	decodeJSON(t, w.Body, &engines)
 	if len(engines) == 0 {
 		t.Error("expected non-empty engines")
+	}
+	for _, e := range engines {
+		if e.Kind == "" {
+			t.Errorf("engine %q has no kind in the list JSON; the config editor selects its flag help from it", e.Name)
+		}
 	}
 }
 

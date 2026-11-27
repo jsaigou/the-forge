@@ -60,6 +60,52 @@ func TestMigration0090DryRunOnCopy(t *testing.T) {
 	if _, err := db.sql.Exec(`DROP TABLE context_creation_hourly`); err != nil {
 		t.Fatal(err)
 	}
+	// 0095 added a column and 0096 dropped one, which (unlike the data-only migrations in between) cannot be applied twice.
+	if _, err := db.sql.Exec(`ALTER TABLE builds DROP COLUMN retired`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`ALTER TABLE configs ADD COLUMN parallel INTEGER NOT NULL DEFAULT 1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`ALTER TABLE api_keys DROP COLUMN scope`); err != nil {
+		t.Fatal(err)
+	}
+	// 0101 added specialist_occupants.stopped, which cannot be applied twice either.
+	if _, err := db.sql.Exec(`ALTER TABLE specialist_occupants DROP COLUMN stopped`); err != nil {
+		t.Fatal(err)
+	}
+	// 0100 added two tables (CREATE IF NOT EXISTS, safe to re-run); 0099 added slots.pool, which also cannot be applied twice.
+	if _, err := db.sql.Exec(`ALTER TABLE slots DROP COLUMN pool`); err != nil {
+		t.Fatal(err)
+	}
+	// 0098 added the output_modalities columns, which also cannot be applied twice.
+	if _, err := db.sql.Exec(`ALTER TABLE models DROP COLUMN output_modalities`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`ALTER TABLE configs DROP COLUMN output_modalities`); err != nil {
+		t.Fatal(err)
+	}
+	// 0103 added engines.kind, which also cannot be applied twice.
+	if _, err := db.sql.Exec(`ALTER TABLE engines DROP COLUMN kind`); err != nil {
+		t.Fatal(err)
+	}
+	// 0104 created slot_launches with IF NOT EXISTS, so re-applying it needs no undo.
+	// 0105 added five usage_events columns and a partial index.
+	if _, err := db.sql.Exec(`DROP INDEX idx_usage_events_started_ms`); err != nil {
+		t.Fatal(err)
+	}
+	for _, col := range []string{"started_ms", "duration_ms", "outcome", "consumer", "wait_ms"} {
+		if _, err := db.sql.Exec(`ALTER TABLE usage_events DROP COLUMN ` + col); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 0106 added builds.launch_env and 0107 benchmarks.tuple_json (the seeded engine/format rows are INSERT OR IGNORE).
+	if _, err := db.sql.Exec(`ALTER TABLE builds DROP COLUMN launch_env`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.sql.Exec(`ALTER TABLE benchmarks DROP COLUMN tuple_json`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.sql.Exec(`DELETE FROM schema_migrations WHERE version >= 90`); err != nil {
 		t.Fatal(err)
 	}
@@ -83,8 +129,8 @@ func TestMigration0090DryRunOnCopy(t *testing.T) {
 	defer cp.Close()
 	var v int
 	cp.sql.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&v)
-	if v != 91 {
-		t.Fatalf("version=%d", v)
+	if v != 113 {
+		t.Fatalf("version=%d, want 113", v)
 	}
 	if raw, err := cp.Settings().Get(context.Background(), "marker"); err != nil || string(raw) != `"keep"` {
 		t.Fatalf("existing data lost: %v %s", err, raw)

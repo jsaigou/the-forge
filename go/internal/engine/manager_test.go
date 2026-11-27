@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -121,6 +122,9 @@ func (f *fakeUsage) History(context.Context, string, int) ([]store.ModeHistoryEn
 func (f *fakeUsage) TokenActivity(context.Context, time.Time) ([]store.TokenActivityRow, error) {
 	return nil, nil
 }
+func (f *fakeUsage) Intervals(context.Context, store.IntervalQuery) (store.IntervalSet, error) {
+	return store.IntervalSet{}, nil
+}
 
 // llamaStub serves /health and /props with a configurable n_ctx.
 type llamaStub struct {
@@ -150,6 +154,7 @@ func newLlamaStub(t *testing.T, nctx int) *llamaStub {
 func testConfig(t *testing.T) *config.Config {
 	t.Helper()
 	return &config.Config{
+		Memory: config.Memory{OSFloorBytes: 2 << 30, GrowthMarginBytes: 4 << 30, HostFloorBytes: 8 << 30},
 		Paths: config.Paths{
 			SysconfigDir: t.TempDir(),
 			ModelsDir:    t.TempDir(),
@@ -212,15 +217,38 @@ func newTestManager(t *testing.T, cfg *config.Config, sys *fakeSys, stub *llamaS
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Wired after construction so the daemon-start adopt step (which would consume the fake systemd sequences) does not run in these tests.
+	m.d.SlotLaunches = seededRowDB(t, cfg).SlotLaunches()
 	return m, usage, notify
 }
 
+// seededDBs maps a test config to the in-memory store its manager reads launch rows from, so a test can seed a slot's row before or after the
+// manager exists (the row replaced the env file the engine used to read, Phase 1b step d2).
+var seededDBs sync.Map // *config.Config -> *store.DB
+
+func seededRowDB(t *testing.T, cfg *config.Config) *store.DB {
+	t.Helper()
+	if v, ok := seededDBs.Load(cfg); ok {
+		return v.(*store.DB)
+	}
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close(); seededDBs.Delete(cfg) })
+	seededDBs.Store(cfg, db)
+	return db
+}
+
+// writeSlotEnv seeds an armed launch row for slot as if mode `alias` had been loaded from `model` (name kept from the env-file era).
 func writeSlotEnv(t *testing.T, cfg *config.Config, slot, alias, model string) {
 	t.Helper()
-	content := "FORGE_MODEL_PATH=" + filepath.Join(cfg.Paths.ModelsDir, model) + "\n" +
-		"FORGE_MODEL_ALIAS=" + alias + "\n"
-	path := filepath.Join(cfg.Paths.SysconfigDir, "forge-"+slot+"-env")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	row := store.SlotLaunch{
+		Slot: slot, ConfigName: alias, EngineKind: "llamacpp", Backend: "vulkan",
+		Exe: "/opt/test/llama-server", Argv: []string{"--model", filepath.Join(cfg.Paths.ModelsDir, model)},
+		Port: 8080, ModelPath: filepath.Join(cfg.Paths.ModelsDir, model), WrittenBy: "test",
+	}
+	if _, err := seededRowDB(t, cfg).SlotLaunches().Put(context.Background(), row); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -310,9 +338,9 @@ func TestSlotStateFailedClears(t *testing.T) {
 	}
 }
 
-// Active-but-untracked slots get their mode inferred from sysconfig env
+// Active-but-untracked slots get their mode from the slot's armed launch row
 // (restart recovery without slots.json).
-func TestSlotStateInfersFromEnv(t *testing.T) {
+func TestSlotStateInfersFromRow(t *testing.T) {
 	cfg := testConfig(t)
 	writeSlotEnv(t, cfg, "a4", "qwen", "qwen.gguf")
 	m, _, _ := newTestManager(t, cfg, newFakeSys(), nil)
@@ -666,13 +694,16 @@ func TestSwitchModeFullFlow(t *testing.T) {
 	if len(sys.started) != 1 || sys.started[0] != "forge-a1" {
 		t.Errorf("started = %v", sys.started)
 	}
-	// Env file written with FORGE_ keys.
-	env := collector.ReadSlotEnv(cfg.Paths.SysconfigDir, "a1")
-	if env["FORGE_MODEL_ALIAS"] != "gemma" || env["FORGE_BACKEND"] != "vulkan" {
-		t.Errorf("env = %+v", env)
+	// The launch row (not an env file) records what was launched.
+	row, err := seededRowDB(t, cfg).SlotLaunches().Get(context.Background(), "a1")
+	if err != nil {
+		t.Fatalf("launch row for a1: %v", err)
 	}
-	if env["FORGE_CONTEXT"] != "131072" {
-		t.Errorf("FORGE_CONTEXT = %q", env["FORGE_CONTEXT"])
+	if row.ConfigName != "gemma" || row.Backend != "vulkan" || !row.Armed {
+		t.Errorf("row = %+v", row)
+	}
+	if row.NCtx != 131072 {
+		t.Errorf("row n_ctx = %d", row.NCtx)
 	}
 	// State file records the mode.
 	if m.CurrentMode() != "gemma" {
@@ -790,92 +821,6 @@ func TestCurrentModeUnknownWithoutStateFile(t *testing.T) {
 	}
 }
 
-// ── Sysconfig writing ──
-
-func TestWriteServiceFilesPreservesNonForgeKeys(t *testing.T) {
-	cfg := testConfig(t)
-	envPath := filepath.Join(cfg.Paths.SysconfigDir, "forge-a1-env")
-	seed := "FORGE_MODEL_PATH=/old/model.gguf\n" +
-		"GGML_CUDA_ENABLE_UNIFIED_MEMORY=ON\n" +
-		"LD_LIBRARY_PATH=/opt/rocm-therock-7.13/lib\n" +
-		"HSA_OVERRIDE_GFX_VERSION=11.5.1\n" +
-		// Frozen pre-rename legacy keys — must be dropped, not preserved
-		// forever alongside the fresh FORGE_* lines (docs/pitfalls.md's
-		// FOUNDRY_*/FORGE_* divergence incident: the deployed launcher
-		// script read these exclusively and silently diverged from what
-		// the engine believed was loaded once they stopped being updated).
-		"FOUNDRY_MODEL_PATH=/ancient/wrong-model.gguf\n" +
-		"FOUNDRY_MODEL_ALIAS=wrong-alias\n" +
-		"FOUNDRY_BACKEND=vulkan\n"
-	if err := os.WriteFile(envPath, []byte(seed), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	m, _, _ := newTestManager(t, cfg, newFakeSys(), nil)
-
-	svc := cfg.Modes["nemotron"].Services[0]
-	svc.PortRole = "a1"
-	svc.ExtraArgs = []string{"--parallel", "1", "--ctx-checkpoints", "0"}
-	if err := m.writeServiceFiles("a1", svc); err != nil {
-		t.Fatal(err)
-	}
-
-	env := collector.ReadSlotEnv(cfg.Paths.SysconfigDir, "a1")
-	if env["GGML_CUDA_ENABLE_UNIFIED_MEMORY"] != "ON" {
-		t.Error("GGML_CUDA_ENABLE_UNIFIED_MEMORY lost — ROCm capped at ~63GB without it")
-	}
-	if env["LD_LIBRARY_PATH"] != "/opt/rocm-therock-7.13/lib" || env["HSA_OVERRIDE_GFX_VERSION"] != "11.5.1" {
-		t.Errorf("preserved keys lost: %+v", env)
-	}
-	if env["FORGE_MODEL_PATH"] != filepath.Join(cfg.Paths.ModelsDir, "nemotron.gguf") {
-		t.Errorf("FORGE_MODEL_PATH = %q", env["FORGE_MODEL_PATH"])
-	}
-	if env["FORGE_BACKEND"] != "rocm" {
-		t.Errorf("FORGE_BACKEND = %q", env["FORGE_BACKEND"])
-	}
-	for _, key := range []string{"FOUNDRY_MODEL_PATH", "FOUNDRY_MODEL_ALIAS", "FOUNDRY_BACKEND"} {
-		if v, ok := env[key]; ok {
-			t.Errorf("stale legacy key %s=%q must be dropped, not preserved forever", key, v)
-		}
-	}
-
-	args, err := os.ReadFile(filepath.Join(cfg.Paths.SysconfigDir, "forge-a1-args"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(args) != "--parallel\n1\n--ctx-checkpoints\n0\n" {
-		t.Errorf("args = %q", string(args))
-	}
-}
-
-// FORGE_LLAMA_BIN is written only when the service sets a per-service
-// override (custom builds like kintsugi/puzzle ahead of upstream llama.cpp);
-// when empty the launcher must fall back to its FORGE_BACKEND default, so
-// the key must be absent rather than blank.
-func TestWriteServiceFilesLlamaBinOverride(t *testing.T) {
-	cfg := testConfig(t)
-	m, _, _ := newTestManager(t, cfg, newFakeSys(), nil)
-
-	svc := cfg.Modes["gemma"].Services[0]
-	svc.PortRole = "a1"
-
-	// No override → key absent.
-	if err := m.writeServiceFiles("a1", svc); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := collector.ReadSlotEnv(cfg.Paths.SysconfigDir, "a1")["FORGE_LLAMA_BIN"]; ok {
-		t.Error("FORGE_LLAMA_BIN should be absent when svc.LlamaBin is empty")
-	}
-
-	// Override set → key written verbatim.
-	svc.LlamaBin = "/opt/forge/llama.cpp-kintsugi/build-vulkan/bin/llama-server"
-	if err := m.writeServiceFiles("a1", svc); err != nil {
-		t.Fatal(err)
-	}
-	if got := collector.ReadSlotEnv(cfg.Paths.SysconfigDir, "a1")["FORGE_LLAMA_BIN"]; got != svc.LlamaBin {
-		t.Errorf("FORGE_LLAMA_BIN = %q, want %q", got, svc.LlamaBin)
-	}
-}
-
 // ── Eviction planning: smallest footprint first ──
 
 func TestFitPlanEvictsSmallestFirst(t *testing.T) {
@@ -933,6 +878,7 @@ func TestFitPlanEvictsSmallestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.d.SlotLaunches = seededRowDB(t, cfg).SlotLaunches() // the seeded launch rows are what the engine reads back (wired after construction: no adopt step)
 
 	plan, err := m.FitPlan("nemotron")
 	if err != nil {
@@ -1022,6 +968,7 @@ func TestFitPlanCreditsLiveFootprintOnEviction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.d.SlotLaunches = seededRowDB(t, cfg).SlotLaunches() // the seeded launch rows are what the engine reads back (wired after construction: no adopt step)
 
 	plan, err := m.FitPlan("nemotron")
 	if err != nil {
@@ -1366,6 +1313,7 @@ func TestMemoryBudgetAddsUnifiedRSS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.d.SlotLaunches = seededRowDB(t, cfg).SlotLaunches() // the seeded launch rows are what the engine reads back (wired after construction: no adopt step)
 
 	b, err := m.MemoryBudget()
 	if err != nil {
@@ -1392,5 +1340,77 @@ func TestRestartUnloadedIsNoop(t *testing.T) {
 	}
 	if len(sys.stopped) != 0 {
 		t.Errorf("nothing should stop: %v", sys.stopped)
+	}
+}
+
+// ADR-0027: an always-on specialist's declared peak is carved out of the model budget whether or not it is running, so an LLM load cannot take the
+// memory a restarting specialist needs, and the refusal says how the budget was cut.
+func TestFitPlanLeavesRoomForDeclaredSpecialists(t *testing.T) {
+	cfg := testConfig(t)
+	if err := os.WriteFile(filepath.Join(cfg.Paths.ModelsDir, "qwen.gguf"), make([]byte, 6*1024*1024), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gpuRoot := t.TempDir()
+	dev := filepath.Join(gpuRoot, "card0", "device")
+	os.MkdirAll(dev, 0o755)
+	os.WriteFile(filepath.Join(dev, "vendor"), []byte("0x1002\n"), 0o644)
+	os.WriteFile(filepath.Join(dev, "mem_info_gtt_used"), []byte("0\n"), 0o644)
+	os.WriteFile(filepath.Join(dev, "mem_info_gtt_total"), []byte(strconv.Itoa(10*1024*1024)+"\n"), 0o644) // 10 MiB
+
+	build := func(declared int64) *Manager {
+		m, err := NewManager(Deps{
+			Cfg: func() *config.Config { return cfg }, Sys: newFakeSys(), GPU: &collector.GPU{DRMRoot: gpuRoot}, Proc: collector.Proc{Root: t.TempDir()},
+			Usage: &fakeUsage{}, Kill: func(int) error { return nil }, PollInterval: time.Millisecond, Logf: t.Logf,
+			SpecialistDeclaredBytes: func() int64 { return declared },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	// 6 MiB needed, 10 MiB budget: fits with nothing declared.
+	if plan, _ := build(0).FitPlan("qwen"); !plan.Fits {
+		t.Fatalf("with nothing declared the load must fit: %+v", plan)
+	}
+	// 5 MiB is declared for always-on engines: only 5 MiB is the model budget, so the 6 MiB load is refused, and says why.
+	plan, err := build(5 * 1024 * 1024).FitPlan("qwen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Fits {
+		t.Fatalf("a load took memory declared for always-on engines: %+v", plan)
+	}
+	if !strings.Contains(plan.Message, "declared for always-on engines") {
+		t.Errorf("the refusal does not explain the partition: %q", plan.Message)
+	}
+	b, _ := build(5 * 1024 * 1024).MemoryBudget()
+	if b.Ledger.SpecialistDeclared != 5*1024*1024 || b.FreeBytes != 5*1024*1024 {
+		t.Errorf("budget = %+v, want 5 MiB declared and 5 MiB free", b)
+	}
+}
+
+// One owner (ADR-0022): the engine refuses to load a config the specialist pool hosts, with a plain-language message, and touches nothing.
+func TestLoadRefusesAConfigTheSpecialistPoolHosts(t *testing.T) {
+	cfg := testConfig(t)
+	sys := newFakeSys()
+	stub := newLlamaStub(t, 131072)
+	m, _, _ := newTestManager(t, cfg, sys, stub)
+	m.d.PooledConfig = func(_ context.Context, config string) bool { return config == "gemma" }
+
+	res := m.Load(context.Background(), "gemma", "a1")
+	if res.Success || !strings.Contains(res.Message, "specialist") || !strings.Contains(res.Message, "Specialists tab") {
+		t.Fatalf("Load of a pooled config: %+v", res)
+	}
+	if len(sys.started) != 0 || len(sys.stopped) != 0 {
+		t.Errorf("the engine touched units (started=%v stopped=%v) before refusing", sys.started, sys.stopped)
+	}
+	if res := m.SwitchMode(context.Background(), "gemma"); res.Success || !strings.Contains(res.Message, "specialist") {
+		t.Errorf("SwitchMode of a pooled config: %+v", res)
+	}
+	// An unpooled config loads as ever.
+	m.d.PooledConfig = func(context.Context, string) bool { return false }
+	sys.setSeq("forge-a1", st("inactive", "dead"), st("active", "running"))
+	if res := m.Load(context.Background(), "gemma", "a1"); !res.Success {
+		t.Errorf("an unpooled config must load: %s", res.Message)
 	}
 }

@@ -19,6 +19,8 @@ function friendlyUnit(unit: string, t: (key: string, opts?: Record<string, unkno
     forge: t("memory_meter.unit_forge"),
   };
   if (known[unit]) return known[unit];
+  const pool = unit.match(/^forge-pool@(.+)$/);
+  if (pool) return t("memory_meter.unit_pool", { slot: pool[1].toUpperCase() });
   const compress = unit.match(/^forge-compress@(.+)$/);
   if (compress) return t("memory_meter.unit_compressor", { proxy: compress[1] });
   return unit;
@@ -102,10 +104,42 @@ export function MemoryMeterWidget() {
     segments.push({ cls: "other", pct: (otherBytes / totalGtt) * 100, name: t("memory_meter.other"), detail: null });
   }
 
-  const committedBytes = allBytesKnown ? slotTotal + otherBytes : usedFloor;
-  const committedPct = totalGtt > 0 ? Math.min(100, (committedBytes / totalGtt) * 100) : 0;
-  const freePct = Math.max(0, 100 - committedPct);
-  const freeBytes = Math.max(0, totalGtt - committedBytes);
+  let committedBytes = allBytesKnown ? slotTotal + otherBytes : usedFloor;
+  let committedPct = totalGtt > 0 ? Math.min(100, (committedBytes / totalGtt) * 100) : 0;
+  let freePct = Math.max(0, 100 - committedPct);
+  let freeBytes = Math.max(0, totalGtt - committedBytes);
+
+  // Host-memory partition (internal/memledger). On this machine GTT pages are system RAM, so the bar is drawn over the HOST total and split into
+  // regions: what the models hold, what a new load may still claim, what is held back (host floor), and what is reserved up front for the declared
+  // always-on specialists, the OS and the growth margin. Falls back to the GTT-ceiling bar above when the daemon predates the partition.
+  const part = budget?.partition;
+  const reserveRows: { name: string; bytes: number }[] = [];
+  if (part && part.host_total_bytes > 0) {
+    const host = part.host_total_bytes;
+    const pct = (b: number) => (Math.max(0, b) / host) * 100;
+    segments.length = 0;
+    let slotsShown = 0;
+    if (allBytesKnown) {
+      for (let i = 0; i < loadedSlots.length; i++) {
+        const sl = loadedSlots[i];
+        slotsShown += sl.bytes!;
+        segments.push({ cls: segClasses[i % 4], pct: pct(sl.bytes!), name: sl.mode, detail: `${sl.measured ? "" : "~"}${formatGB(sl.bytes!)} GB` });
+      }
+    }
+    const modelOther = Math.max(0, part.model_used_bytes - slotsShown);
+    if (modelOther > 0) segments.push({ cls: allBytesKnown ? "other" : "m1", pct: pct(modelOther), name: t("memory_meter.other_models"), detail: null });
+    const held = Math.max(0, part.model_budget_bytes - part.model_used_bytes - part.free_bytes);
+    reserveRows.push({ name: t("memory_meter.reserved_specialists"), bytes: part.specialist_declared_bytes });
+    reserveRows.push({ name: t("memory_meter.reserved_os"), bytes: part.os_floor_bytes });
+    reserveRows.push({ name: t("memory_meter.reserved_margin"), bytes: part.growth_margin_bytes });
+    committedBytes = part.model_used_bytes;
+    freeBytes = part.free_bytes;
+    freePct = pct(freeBytes);
+    // Free sits right after the models; the remaining regions follow in a fixed order so the eye can read the bar left to right.
+    segments.push({ cls: "free", pct: freePct, name: t("memory_meter.free", { amount: formatGB(freeBytes) }), detail: null });
+    if (held > 0) segments.push({ cls: "held", pct: pct(held), name: t("memory_meter.held_by", { bound: t(`memory_meter.bound_${part.binding}`) }), detail: null });
+    for (const r of reserveRows) if (r.bytes > 0) segments.push({ cls: "reserve", pct: pct(r.bytes), name: r.name, detail: `${formatGB(r.bytes)} GB` });
+  }
 
   // Legend rows: everything the bar names, with figures — this is where
   // ComfyUI gets named even at widths where its in-bar label truncates.
@@ -121,29 +155,50 @@ export function MemoryMeterWidget() {
   for (const h of auxHolders) {
     legend.push({ color: "var(--m2)", name: h.name, bytes: `${formatGB(h.bytes)} GB` });
   }
-  if (otherBytes > 0) {
+  for (const r of reserveRows) {
+    if (r.bytes > 0) legend.push({ color: "var(--text-mute)", name: r.name, bytes: `${formatGB(r.bytes)} GB` });
+  }
+  if (part && part.swap_total_bytes > 0 && part.swap_used_bytes > 0) {
+    legend.push({ color: "var(--warn)", name: t("memory_meter.swap_in_use"), bytes: `${formatGB(part.swap_used_bytes)} / ${formatGB(part.swap_total_bytes)} GB` });
+  }
+  if (otherBytes > 0 && !part) {
     legend.push({ color: "var(--text-mute)", name: t("memory_meter.other_legend"), bytes: `${formatGB(otherBytes)} GB` });
+  }
+  if (part && part.host_total_bytes > 0) {
+    const slotsShown = allBytesKnown ? loadedSlots.reduce((n, sl) => n + sl.bytes!, 0) : 0;
+    const modelOther = Math.max(0, part.model_used_bytes - slotsShown);
+    if (modelOther > 0) legend.push({ color: "var(--text-mute)", name: t("memory_meter.other_models_legend"), bytes: `${formatGB(modelOther)} GB` });
+    legend.push({ color: "var(--ok)", name: t("memory_meter.free_legend", { bound: t(`memory_meter.bound_${part.binding}`) }), bytes: `${formatGB(part.free_bytes)} GB` });
   }
 
   return (
     <>
-      <div className="eyebrow">{budget ? t("memory_meter.title_with_total", { total: formatGB(budget.total_bytes) }) : t("memory_meter.title_no_total")}</div>
+      <div className="eyebrow">
+        {part && part.host_total_bytes > 0
+          ? t("memory_meter.title_host", { total: formatGB(part.host_total_bytes) })
+          : budget
+            ? t("memory_meter.title_with_total", { total: formatGB(budget.total_bytes) })
+            : t("memory_meter.title_no_total")}
+      </div>
       <div className="budget">
         {budget ? (
           <div className="meter">
             {segments.map((seg, i) => {
               // Bigger in-bar text needs more room; degrade gracefully
               // rather than clip a half-drawn label.
-              const text = seg.pct >= 20 ? [seg.name, seg.detail].filter(Boolean).join(" · ") : seg.pct >= 10 ? seg.name : null;
+              const quiet = seg.cls === "reserve" || seg.cls === "held";
+              const text = quiet ? null : seg.pct >= 20 ? [seg.name, seg.detail].filter(Boolean).join(" · ") : seg.pct >= 10 ? seg.name : null;
               return (
                 <div className={`seg ${seg.cls}`} key={`${seg.cls}-${i}`} title={seg.name ?? undefined} style={{ width: `${seg.pct}%` }}>
                   {text ?? ""}
                 </div>
               );
             })}
-            <div className="seg free" style={{ width: `${freePct}%` }}>
-              {freePct >= 10 ? t("memory_meter.free", { amount: formatGB(freeBytes) }) : ""}
-            </div>
+            {!part && (
+              <div className="seg free" style={{ width: `${freePct}%` }}>
+                {freePct >= 10 ? t("memory_meter.free", { amount: formatGB(freeBytes) }) : ""}
+              </div>
+            )}
           </div>
         ) : (
           <div className="empty-note">{t("memory_meter.loading")}</div>

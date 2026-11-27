@@ -697,48 +697,6 @@ func TestCompressorProxyUnitsUseRealUnitName(t *testing.T) {
 	}
 }
 
-// TestTTSEngineUnitsDiscoveredLive: Tier 1 Sprint 2 (Voice & Speech
-// settings) — tts.engines' configured units (forge-tts-custom/-base,
-// kokoro) must be watched so their restart-loop alerts actually fire (the
-// Sprint 0 incident: they crash-looped for 5 days undetected because
-// nothing probed them). Unlike ExtraUnits (a static snapshot from daemon
-// startup), TTSEngineUnits is a closure re-consulted every cycle — this
-// test proves that by changing what it returns between two ProbeNow calls
-// on the SAME Collector, with no restart.
-func TestTTSEngineUnitsDiscoveredLive(t *testing.T) {
-	cfg := testConfig(t)
-	sys := &fakeSystemd{}
-	sys.set("forge-tts-custom", "active", "running")
-
-	var configured []string
-	c := New(Options{
-		Cfg:            func() *config.Config { return cfg },
-		Systemd:        sys,
-		GPU:            &GPU{DRMRoot: t.TempDir()},
-		Proc:           Proc{Root: t.TempDir()},
-		BaseURL:        func(port int) string { return "http://127.0.0.1:1" },
-		DialPort:       func(port int) bool { return false },
-		TTSEngineUnits: func() []string { return configured },
-	})
-
-	snap := c.ProbeNow(context.Background())
-	if _, ok := snap.Units["forge-tts-custom"]; ok {
-		t.Fatal("forge-tts-custom probed before it was configured — TTSEngineUnits should gate this")
-	}
-
-	// Simulate an operator saving Settings -> Voice & Speech with a real
-	// unit filled in, with no daemon restart in between.
-	configured = []string{"forge-tts-custom"}
-	snap = c.ProbeNow(context.Background())
-	u, ok := snap.Units["forge-tts-custom"]
-	if !ok {
-		t.Fatal("forge-tts-custom not probed after TTSEngineUnits started returning it — not read live per cycle")
-	}
-	if !u.Active() {
-		t.Errorf("forge-tts-custom state = %+v, want active", u)
-	}
-}
-
 // fakeCompressorState is a mutable, mutex-guarded set of Compressor /metrics
 // counter values a test can script across ProbeNow cycles.
 type fakeCompressorState struct {
@@ -1398,5 +1356,38 @@ func TestCycleSamplesStorageAndHostSensors(t *testing.T) {
 	}
 	if snap.Metrics.CPUPackageTempC == nil || *snap.Metrics.CPUPackageTempC != 55 {
 		t.Errorf("CPUPackageTempC = %v, want 55", deref2(snap.Metrics.CPUPackageTempC))
+	}
+}
+
+// The host-memory ledger counts EVERY loaded slot's resident set (the engine's fit gate does too: the 2026-08-22 crash came from counting ROCm
+// only), unlike InferenceRSSBytes above which keeps the legacy ROCm-only rule. Specialist-pool units' GPU use is carved out of the model figure.
+func TestLedgerCountsEverySlotRSSAndCarvesOutSpecialists(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Memory = config.Memory{OSFloorBytes: 2 << 30, GrowthMarginBytes: 4 << 30, HostFloorBytes: 8 << 30}
+	cfg.SpecialistSlots = map[string]config.Slot{"s1": {Unit: "forge-pool@s1", Port: 8100}}
+	sys := &fakeSystemd{}
+	sys.set("forge-a1", "active", "running") // vulkan
+	sys.set("forge-a3", "active", "running") // rocm
+
+	proc := writeFakeProc(t, map[int]fakePid{
+		201: {comm: "llama-server", args: []string{"llama-server", "--port", "8080"}, rssKB: 50 * 1024 * 1024},
+		202: {comm: "llama-server", args: []string{"llama-server", "--port", "8087"}, rssKB: 91 * 1024 * 1024},
+	})
+	slots := &fakeSlots{m: map[string]SlotAssignment{"a1": {Mode: "vk-mode"}, "a3": {Mode: "nemotron"}}}
+
+	c := New(Options{
+		Cfg: func() *config.Config { return cfg }, Systemd: sys, Slots: slots, GPU: fakeGPU(t, 10000, 122880), Proc: proc,
+		DialPort: func(int) bool { return false }, BaseURL: func(int) string { return "http://127.0.0.1:1" },
+		SpecialistDeclaredBytes: func() int64 { return 13 << 30 },
+	})
+	l := c.ProbeNow(context.Background()).Metrics.Ledger
+
+	if l.SpecialistDeclared != 13<<30 {
+		t.Errorf("SpecialistDeclared = %d, want 13 GiB", l.SpecialistDeclared)
+	}
+	// 10000 MiB of GTT (no specialist unit is running here, so none is carved out) + 50 GiB vulkan RSS + 91 GiB rocm RSS.
+	want := int64(10000)*1024*1024 + int64(141)<<30
+	if l.ModelUsed != want {
+		t.Errorf("ModelUsed = %d, want %d (GTT plus both slots' RSS)", l.ModelUsed, want)
 	}
 }

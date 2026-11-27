@@ -68,7 +68,7 @@ func TestPlaceIdleEvictionThreshold(t *testing.T) {
 			name: "unknown activity is never idle-eligible",
 			idleFor: map[string]time.Duration{
 				"a1": 10 * time.Second,
-				"a3":      10 * time.Second, "a4": 20 * time.Second,
+				"a3": 10 * time.Second, "a4": 20 * time.Second,
 				// a2 absent — zero LastActivity
 			},
 			wantMsg: "No idle, unreserved slot",
@@ -522,5 +522,31 @@ func TestFindLoadedScoping(t *testing.T) {
 	}
 	if got := c.findLoaded("llama", "a2"); got != "a2" {
 		t.Fatalf("findLoaded pinned-match = %q, want a2", got)
+	}
+}
+
+// orderedEngine is a fakeEngine that also says which slot a new load should take (engine.SlotOrderer).
+type orderedEngine struct {
+	*fakeEngine
+	order []string
+}
+
+func (e orderedEngine) LoadOrder() []string       { return e.order }
+func (e orderedEngine) RecentlyFreed(string) bool { return false }
+
+func TestPlaceTakesFreeSlotsInLoadOrder(t *testing.T) {
+	eng := orderedEngine{fakeEngine: newFakeEngine(), order: []string{"a2", "a3", "a4", "a1"}}
+	c := placeCore(t, eng, eng.Slots(), nil)
+
+	pl := c.place(context.Background(), "llama", "", DefaultConfig(), nil, 30*time.Second)
+	if pl.slot != "a2" || len(pl.evict) != 0 {
+		t.Fatalf("place = %+v, want a2: a1 was just freed", pl)
+	}
+	// The first choice being occupied moves on down the order; the resting slot is still used when it is the only one left.
+	eng.setOcc("a2", "gemma")
+	eng.setOcc("a3", "qwen")
+	eng.setOcc("a4", "other")
+	if pl := c.place(context.Background(), "llama", "", DefaultConfig(), nil, 30*time.Second); pl.slot != "a1" {
+		t.Fatalf("place = %+v, want a1", pl)
 	}
 }

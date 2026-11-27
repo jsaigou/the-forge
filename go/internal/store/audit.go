@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -39,14 +40,17 @@ func (v auditView) Write(ctx context.Context, e AuditEntry) error {
 // actionPrefix+target contract. Read-only, best-effort caps: an empty
 // actionPrefix matches every action (LIKE '%').
 func (v auditView) List(ctx context.Context, actionPrefix, target string, limit int) ([]AuditEntry, error) {
-	if limit <= 0 || limit > 200 {
+	if limit <= 0 {
 		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
 	}
 	rows, err := v.d.sql.QueryContext(ctx,
 		`SELECT id, ts, actor, action, target, detail, remote_addr FROM audit_log
-		 WHERE action LIKE ? AND (? = '' OR target = ?)
+		 WHERE action LIKE ? ESCAPE '\' AND (? = '' OR target = ?)
 		 ORDER BY ts DESC, id DESC LIMIT ?`,
-		actionPrefix+"%", target, target, limit)
+		likeEscape(actionPrefix)+"%", target, target, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: audit.list: %w", err)
 	}
@@ -98,4 +102,9 @@ func (v auditView) mirror(e AuditEntry) {
 	}
 	defer f.Close()
 	_, _ = f.Write(append(line, '\n'))
+}
+
+// likeEscape makes s match literally inside a LIKE pattern that declares ESCAPE '\': an action prefix containing % or _ must not widen the match.
+func likeEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }

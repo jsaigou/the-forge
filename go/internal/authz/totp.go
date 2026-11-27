@@ -14,6 +14,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
 	"fmt"
@@ -61,7 +62,7 @@ func ValidateTOTP(secret, code string, t time.Time) bool {
 		} else {
 			c += uint64(delta)
 		}
-		if computeTOTP(secret, c) == code {
+		if subtle.ConstantTimeCompare([]byte(computeTOTP(secret, c)), []byte(code)) == 1 {
 			return true
 		}
 	}

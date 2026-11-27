@@ -483,9 +483,8 @@ func (s *Smith) renderHandoffRunbook(br BrainResolution, a *Action) []RunbookSte
 			VerifyCommand: operationVerifyCommand(a),
 		},
 		{
-			Title: "Restore smith's brain when done",
-			Command: fmt.Sprintf(`curl -X POST localhost:5000/api/v1/load -d '{"mode":%q,"slot":%q}'`,
-				br.Model, s.freeSlotGuess(br.Slot)),
+			Title:         "Restore smith's brain when done",
+			Command:       curlPost("/api/v1/load", map[string]string{"mode": br.Model, "slot": s.freeSlotGuess(br.Slot)}),
 			Verify:        `GET /api/v1/smith/status reports .brain.resolution == "local_slot"`,
 			Why:           "the operation above doesn't reload smith's own brain automatically — this is a manual step by design (docs §4.5 guardrail 2: smith never unloads/loads its own slot as a side effect)",
 			VerifyCommand: "curl -s localhost:5000/api/v1/smith/status | jq .brain",
@@ -499,13 +498,13 @@ func operationCommand(a *Action) string {
 	switch a.Kind {
 	case KindLoadConfig:
 		d, _ := parseDetail[loadConfigDetail](a.Detail)
-		return fmt.Sprintf(`curl -X POST localhost:5000/api/v1/load -d '{"mode":%q,"slot":%q}'`, d.Mode, d.Slot)
+		return curlPost("/api/v1/load", map[string]string{"mode": d.Mode, "slot": d.Slot})
 	case KindUnloadSlot:
 		d, _ := parseDetail[unloadSlotDetail](a.Detail)
-		return fmt.Sprintf(`curl -X POST localhost:5000/api/v1/unload -d '{"slot":%q}'`, d.Slot)
+		return curlPost("/api/v1/unload", map[string]string{"slot": d.Slot})
 	case KindRestartForgeUnit:
 		d, _ := parseDetail[restartUnitDetail](a.Detail)
-		return "sudo systemctl restart " + d.Unit + ".service"
+		return "sudo systemctl restart " + shellQuote(d.Unit+".service")
 	default:
 		return "# no direct command equivalent for action kind " + a.Kind
 	}
@@ -534,7 +533,7 @@ func operationVerifyCommand(a *Action) string {
 		return "curl -s localhost:5000/api/v1/status | jq .slots"
 	case KindRestartForgeUnit:
 		d, _ := parseDetail[restartUnitDetail](a.Detail)
-		return "systemctl is-active " + d.Unit + ".service"
+		return "systemctl is-active " + shellQuote(d.Unit+".service")
 	default:
 		return ""
 	}
@@ -562,4 +561,11 @@ func (s *Smith) freeSlotGuess(brainSlot string) string {
 		return slot
 	}
 	return placeholder
+}
+
+// curlPost renders a curl POST to the local dashboard with a JSON body built by json.Marshal and single-quoted for the shell. The values
+// (a model, slot or unit name from an action's detail) are never spliced into the command text: %q is Go quoting, not shell quoting.
+func curlPost(path string, body map[string]string) string {
+	b, _ := json.Marshal(body) // a map of strings cannot fail to marshal
+	return "curl -X POST localhost:5000" + path + " -d " + shellQuote(string(b))
 }

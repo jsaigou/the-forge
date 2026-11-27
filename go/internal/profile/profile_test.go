@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -762,6 +763,34 @@ func TestRunVLLMRejected(t *testing.T) {
 	}
 }
 
+func TestRunUnknownEngineKindRejected(t *testing.T) {
+	fe := newFakeEngine()
+	runner, _, _, _ := newTestRunner(t, fe)
+	runner.d.Cfg = func() *config.Config {
+		cfg := testConfig()
+		cfg.Modes["qwen3"].Services[0].EngineKind = "bogus"
+		return cfg
+	}
+	_, err := runner.Run(context.Background(), RunRequest{Mode: "qwen3"})
+	if err == nil || !strings.Contains(err.Error(), "unknown engine kind") {
+		t.Fatalf("err = %v, want an unknown-engine-kind error", err)
+	}
+}
+
+func TestRunVLLMEngineKindRejected(t *testing.T) {
+	fe := newFakeEngine()
+	runner, _, _, _ := newTestRunner(t, fe)
+	runner.d.Cfg = func() *config.Config {
+		cfg := testConfig()
+		cfg.Modes["qwen3"].Services[0].EngineKind = "vllm" // GPU backend stays vulkan/rocm: kind, not backend, decides
+		return cfg
+	}
+	_, err := runner.Run(context.Background(), RunRequest{Mode: "qwen3"})
+	if err == nil || !strings.Contains(err.Error(), "vllm profiling not yet supported") {
+		t.Fatalf("err = %v, want vllm profiling refused", err)
+	}
+}
+
 func TestRunContextReductionAborts(t *testing.T) {
 	fe := newFakeEngine()
 	runner, _, events, _ := newTestRunner(t, fe)
@@ -1166,5 +1195,45 @@ func TestProfileJSONSerialization(t *testing.T) {
 	}
 	if back.Mode != r.Mode || back.SafeMemoryBytes != r.SafeMemoryBytes || back.DecodeTPS != r.DecodeTPS {
 		t.Errorf("round trip mismatch:\n got  %+v\n want %+v", back, r)
+	}
+}
+
+type orderedFakeEngine struct {
+	*fakeEngine
+	order []string
+}
+
+func (e orderedFakeEngine) LoadOrder() []string       { return e.order }
+func (e orderedFakeEngine) RecentlyFreed(string) bool { return false }
+
+// A model that is not loaded goes into an empty slot taken in load order, so the eviction never empties the slot it is about to load into.
+func TestRunLoadsIntoAnEmptySlotInLoadOrder(t *testing.T) {
+	fe := newFakeEngine()
+	fe.loaded["a1"] = "other"
+	runner, _, events, _ := newTestRunner(t, fe)
+	runner.d.Engine = orderedFakeEngine{fakeEngine: fe, order: []string{"a1", "a2", "a3", "a4"}}
+	runner.d.Snapshots = collector.NewStatic(&collector.Snapshot{
+		Slots: map[string]collector.SlotState{
+			"a1": {Slot: "a1", Mode: "other", Port: 8080},
+			"a2": {Slot: "a2", Port: 8081},
+		},
+	})
+	ctx := context.Background()
+	sub := events.Subscribe(ctx)
+	go func() {
+		for range sub {
+		}
+	}()
+
+	if _, err := runner.Run(ctx, RunRequest{Mode: "qwen3"}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	fe.mu.Lock()
+	defer fe.mu.Unlock()
+	if len(fe.loadCalls) != 1 || fe.loadCalls[0] != "a2" {
+		t.Fatalf("load calls = %v, want a2 (a1 is about to be emptied)", fe.loadCalls)
+	}
+	if !slices.Contains(fe.unloadCalls, "a1") {
+		t.Fatalf("a1 was not evicted: %v", fe.unloadCalls)
 	}
 }

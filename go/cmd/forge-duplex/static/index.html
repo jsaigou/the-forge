@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Forge duplex client</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Forge duplex</h1>
+      <p class="subtitle">Minimal WS3 client: microphone in, model audio out, one frame at a time.</p>
+    </div>
+    <div id="stateBadge" class="badge state-idle" role="status" aria-live="polite">idle</div>
+  </header>
+
+  <div id="errorBanner" class="error-banner" role="alert" hidden></div>
+
+  <main>
+    <section class="panel" aria-labelledby="controlsTitle">
+      <h2 id="controlsTitle">Session</h2>
+      <div class="row buttons">
+        <button id="startBtn" type="button" class="primary">Start session</button>
+        <button id="stopBtn" type="button" disabled>Stop</button>
+        <button id="cancelBtn" type="button" class="danger" disabled>Cancel</button>
+      </div>
+      <label class="field">
+        <span>WebSocket URL</span>
+        <input id="wsUrl" type="url" spellcheck="false" autocomplete="off">
+      </label>
+      <div class="row">
+        <label class="field compact">
+          <span>Playout buffer</span>
+          <select id="playoutTarget">
+            <option value="1" selected>1 frame (133 ms)</option>
+            <option value="2">2 frames (267 ms)</option>
+          </select>
+        </label>
+        <label class="check">
+          <input id="autoReconnect" type="checkbox">
+          <span>Reconnect on disconnect (new session)</span>
+        </label>
+      </div>
+      <div class="row mic-row">
+        <div class="mic-block">
+          <span class="label">Microphone</span>
+          <span id="micState" class="mic mic-off">off</span>
+        </div>
+        <button id="retryMicBtn" type="button" class="small" hidden>Retry mic</button>
+        <label class="check">
+          <input id="micMuted" type="checkbox" disabled>
+          <span>Mute input</span>
+        </label>
+      </div>
+      <dl class="facts">
+        <div><dt>Session id</dt><dd id="sessionId">—</dd></div>
+        <div><dt>Tenant</dt><dd id="tenant">loopback</dd></div>
+        <div><dt>Uptime</dt><dd id="uptime">—</dd></div>
+        <div><dt>Bytes sent / received</dt><dd id="bytes">—</dd></div>
+      </dl>
+    </section>
+
+    <section class="panel" aria-labelledby="metricsTitle">
+      <h2 id="metricsTitle">Counters</h2>
+      <dl class="metrics">
+        <div><dt>Frames sent</dt><dd id="sentFrames">0</dd></div>
+        <div><dt>Frames received</dt><dd id="recvFrames">0</dd></div>
+        <div><dt>Out sequence</dt><dd id="outSeq">0</dd></div>
+        <div><dt>In sequence</dt><dd id="inSeq">0</dd></div>
+        <div><dt>Output sequence gaps</dt><dd id="gaps">0</dd></div>
+        <div><dt>Late sends</dt><dd id="lateFrames">0</dd></div>
+        <div><dt>Local frame drops</dt><dd id="localDrops">0</dd></div>
+        <div><dt>Underruns</dt><dd id="underruns">0</dd></div>
+        <div><dt>Underrun silence</dt><dd id="underrunMs">0.0 ms</dd></div>
+        <div><dt>Playout queue</dt><dd id="queuedFrames">0</dd></div>
+        <div><dt>Playout drops</dt><dd id="playoutDrops">0</dd></div>
+        <div><dt>Server queue in / out</dt><dd id="serverQueue">—</dd></div>
+        <div><dt>Server drops</dt><dd id="serverDrops">—</dd></div>
+      </dl>
+      <h3>Latency</h3>
+      <dl class="metrics">
+        <div><dt>Playout delay p50</dt><dd id="playoutP50">—</dd></div>
+        <div><dt>Playout delay p95</dt><dd id="playoutP95">—</dd></div>
+        <div><dt>Playout delay max</dt><dd id="playoutMax">—</dd></div>
+        <div><dt>Server step p50 / p95</dt><dd id="serverStep">—</dd></div>
+        <div><dt>Server end-to-end p50 / p95</dt><dd id="serverE2E">—</dd></div>
+      </dl>
+    </section>
+
+    <section class="panel" aria-labelledby="transcriptTitle">
+      <h2 id="transcriptTitle">Model text</h2>
+      <pre id="transcript" class="transcript" aria-live="polite"></pre>
+    </section>
+
+    <section class="panel" aria-labelledby="logTitle">
+      <h2 id="logTitle">Log</h2>
+      <ol id="log" class="log" aria-live="polite"></ol>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      Protocol <code>forge-duplex.v1</code> · 24 kHz mono PCM16 · 3200-sample frames (133.33 ms).
+      Dev mode: <code>node docs/duplex/dev/mock-duplex.mjs</code> then open the printed URL.
+    </p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

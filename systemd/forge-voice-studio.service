@@ -1,0 +1,25 @@
+# /etc/systemd/system/forge-voice-studio.service
+# Voice Studio, the web app for making and using voices, installed by installer/voice-studio.sh (docs/speech-setup-plan.md section 5.4). It runs no
+# engine: it talks to forge-tts. It has no sign-in of its own, so it listens on loopback only; remote access goes through Tailscale serve, opt-in, with
+# the served name in VOICE_STUDIO_ALLOWED_HOSTS. The env file is mode 0600 and holds the speech service's token.
+# A host that already runs Voice Studio elsewhere (the reference host's runs in Docker on another machine) does not need this unit.
+[Unit]
+Description=Forge — Voice Studio (web app for voices, 127.0.0.1:8090)
+After=network.target forge-tts.service
+
+[Service]
+Type=simple
+User=testuser
+Group=testuser
+WorkingDirectory=/var/lib/forge/voice-studio
+EnvironmentFile=/opt/forge/voice-studio/voice-studio.env
+ExecStart=/opt/forge/voice-studio/voice-studio -listen 127.0.0.1:8090 -data /var/lib/forge/voice-studio
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-voice-studio
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

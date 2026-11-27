@@ -71,6 +71,11 @@ type Backend struct {
 	WireModel  string // remote: model string the upstream expects
 	Credential string // remote: provider name → store.Routing.Providers
 
+	// Done, when set, runs once the request routed through this backend has finished (ADR-0022: a specialist-pool member's idle clock
+	// restarts when its request ENDS, not only when it begins, so a request longer than idle_unload_s never leaves it instantly evictable).
+	// Set only for pool-hosted configs; see finishChain.
+	Done func()
+
 	// Pricing fields (cost/savings sprint Phase 4, 2026-07-30) — populated
 	// only by offeringChain, from the store.Offering matched for this
 	// request, so usage recording has real per-1M rates with no extra DB

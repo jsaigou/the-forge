@@ -3,6 +3,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { apiErrorMessage } from "../../lib/api";
 import { useSmithActionProcedurePreview, useSmithActionProcedurize } from "../../lib/queries";
 import { useStepUpGate } from "../../lib/useStepUpGate";
+import { Modal } from "../Modal";
 import { StepUpModal } from "../StepUpModal";
 
 // DowntimeModal — "let smith fix it" (autonomous-remediation Sprint 3,
@@ -12,9 +13,12 @@ import { StepUpModal } from "../StepUpModal";
 // maintenance window or pause mid-run in ways the plain atomic action never
 // did, so the operator sees that disclosure — sourced live from
 // ProcedurePreview.Impact, never a hardcoded copy of it — before committing.
-// Modal shell mirrors StepUpModal.tsx's open/onClose pattern; the step-up
-// gate is owned locally here (procedurize carries the same
-// action.smith.execute step-up as approve).
+// On the shared Modal shell (ADR-0023 contract b) — same open/onClose
+// pattern as StepUpModal, dismissal guarded while the procedurize request
+// is in flight. The step-up gate is owned locally here (procedurize carries
+// the same action.smith.execute step-up as approve) and stacks above this
+// modal: the shell's dialog stack makes Escape dismiss the step-up first,
+// this one only when it is topmost.
 
 interface DowntimeModalProps {
   actionId: number;
@@ -50,70 +54,66 @@ export function DowntimeModal({ actionId, onClose, extraWarning }: DowntimeModal
   const p = preview.data;
 
   return (
-    <div className="modal-backdrop" onClick={(e) => { e.stopPropagation(); if (!busy) onClose(); }}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{t("downtime_modal.title")}</h3>
+    <Modal title={t("downtime_modal.title")} onClose={() => { if (!busy) onClose(); }}>
+      {extraWarning && (
+        <div className="error-note" style={{ marginBottom: 14 }}>{extraWarning}</div>
+      )}
 
-        {extraWarning && (
-          <div className="error-note" style={{ marginBottom: 14 }}>{extraWarning}</div>
-        )}
+      {preview.isLoading && (
+        <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 14 }}>{t("downtime_modal.loading")}</div>
+      )}
+      {preview.isError && (
+        <div className="error-note" style={{ marginBottom: 14 }}>{apiErrorMessage(preview.error)}</div>
+      )}
 
-        {preview.isLoading && (
-          <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 14 }}>{t("downtime_modal.loading")}</div>
-        )}
-        {preview.isError && (
-          <div className="error-note" style={{ marginBottom: 14 }}>{apiErrorMessage(preview.error)}</div>
-        )}
-
-        {p && (
-          <>
-            <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 14 }}>
-              <Trans i18nKey="downtime_modal.run_description" ns="common" values={{ title: p.title }} components={{ b: <b /> }} />
+      {p && (
+        <>
+          <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 14 }}>
+            <Trans i18nKey="downtime_modal.run_description" ns="common" values={{ title: p.title }} components={{ b: <b /> }} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12.5, marginBottom: 14 }}>
+            <div>
+              <span style={{ color: "var(--text-mute)" }}>{t("downtime_modal.estimated_duration_label")}</span>
+              {p.est_duration_sec < 60
+                ? t("downtime_modal.duration_seconds", { sec: p.est_duration_sec })
+                : t("downtime_modal.duration_minutes", { min: Math.round(p.est_duration_sec / 60) })}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12.5, marginBottom: 14 }}>
-              <div>
-                <span style={{ color: "var(--text-mute)" }}>{t("downtime_modal.estimated_duration_label")}</span>
-                {p.est_duration_sec < 60
-                  ? t("downtime_modal.duration_seconds", { sec: p.est_duration_sec })
-                  : t("downtime_modal.duration_minutes", { min: Math.round(p.est_duration_sec / 60) })}
+            {p.needs_maintenance && (
+              <div style={{ color: "var(--warn)" }}>
+                {t("downtime_modal.maintenance_window_warning")}
               </div>
-              {p.needs_maintenance && (
-                <div style={{ color: "var(--warn)" }}>
-                  {t("downtime_modal.maintenance_window_warning")}
-                </div>
-              )}
-              {p.daemon_restart && (
-                <div style={{ color: "var(--warn)" }}>
-                  {t("downtime_modal.daemon_restart_warning")}
-                </div>
-              )}
-              {p.affected_slots && p.affected_slots.length > 0 && (
-                <div>
-                  <span style={{ color: "var(--text-mute)" }}>{t("downtime_modal.affected_slots_label")}</span>
-                  {p.affected_slots.join(", ")}
-                </div>
-              )}
-              {p.affected_services && p.affected_services.length > 0 && (
-                <div>
-                  <span style={{ color: "var(--text-mute)" }}>{t("downtime_modal.affected_services_label")}</span>
-                  {p.affected_services.join(", ")}
-                </div>
-              )}
-            </div>
-          </>
-        )}
+            )}
+            {p.daemon_restart && (
+              <div style={{ color: "var(--warn)" }}>
+                {t("downtime_modal.daemon_restart_warning")}
+              </div>
+            )}
+            {p.affected_slots && p.affected_slots.length > 0 && (
+              <div>
+                <span style={{ color: "var(--text-mute)" }}>{t("downtime_modal.affected_slots_label")}</span>
+                {p.affected_slots.join(", ")}
+              </div>
+            )}
+            {p.affected_services && p.affected_services.length > 0 && (
+              <div>
+                <span style={{ color: "var(--text-mute)" }}>{t("downtime_modal.affected_services_label")}</span>
+                {p.affected_services.join(", ")}
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
-        {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
+      {error && <div className="error-note" style={{ marginBottom: 12 }}>{error}</div>}
 
-        <div className="form-actions">
-          <button className="btn" disabled={busy} onClick={onClose}>{t("downtime_modal.cancel")}</button>
-          <button className="btn primary" disabled={busy || !p} onClick={confirm}>
-            {busy ? "…" : t("downtime_modal.run_through_smith")}
-          </button>
-        </div>
-
-        <StepUpModal open={gate.open} requiredFactor={gate.factor} onSuccess={gate.onSuccess} onClose={gate.onClose} />
+      <div className="form-actions">
+        <button className="btn" disabled={busy} onClick={onClose}>{t("downtime_modal.cancel")}</button>
+        <button className="btn primary" disabled={busy || !p} onClick={confirm}>
+          {busy ? "…" : t("downtime_modal.run_through_smith")}
+        </button>
       </div>
-    </div>
+
+      <StepUpModal open={gate.open} requiredFactor={gate.factor} onSuccess={gate.onSuccess} onClose={gate.onClose} />
+    </Modal>
   );
 }

@@ -211,7 +211,7 @@ func TestWaitGTTDrainTimeoutCallback(t *testing.T) {
 	dev := filepath.Join(gpuRoot, "card0", "device")
 	os.MkdirAll(dev, 0o755)
 	os.WriteFile(filepath.Join(dev, "vendor"), []byte("0x1002\n"), 0o644)
-	os.WriteFile(filepath.Join(dev, "mem_info_gtt_used"), []byte(strconv.Itoa(2*1024*1024*1024)+"\n"), 0o644)  // 2 GiB, above the 1 GiB baseline
+	os.WriteFile(filepath.Join(dev, "mem_info_gtt_used"), []byte(strconv.Itoa(2*1024*1024*1024)+"\n"), 0o644) // 2 GiB, above the 1 GiB baseline
 
 	var gotBefore, gotAfter int64
 	cb := func(before, after int64) {
@@ -231,11 +231,92 @@ func TestWaitGTTDrainTimeoutCallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.waitGTTDrain()
+	if m.waitGTTDrain(gttSnapshot{}) {
+		t.Fatal("waitGTTDrain reported a drain with GTT stuck at 2 GiB and no snapshot")
+	}
 	if gotBefore == 0 {
 		t.Fatalf("OnGTTDrainTimeout not called (before=%d after=%d)", gotBefore, gotAfter)
 	}
 	if gotBefore != 2*1024*1024*1024 || gotAfter != 2*1024*1024*1024 {
 		t.Errorf("callback args = (%d, %d), want (2GiB, 2GiB)", gotBefore, gotAfter)
+	}
+}
+
+// gttDrainManager builds a Manager whose GTT counter reads gttBytes, counting OnGTTDrainTimeout calls.
+func gttDrainManager(t *testing.T, gttBytes int64) (*Manager, *int) {
+	t.Helper()
+	gpuRoot := t.TempDir()
+	dev := filepath.Join(gpuRoot, "card0", "device")
+	os.MkdirAll(dev, 0o755)
+	os.WriteFile(filepath.Join(dev, "vendor"), []byte("0x1002\n"), 0o644)
+	os.WriteFile(filepath.Join(dev, "mem_info_gtt_used"), []byte(strconv.FormatInt(gttBytes, 10)+"\n"), 0o644)
+	timeouts := new(int)
+	cfg := testConfig(t)
+	m, err := NewManager(Deps{
+		Cfg:               func() *config.Config { return cfg },
+		Sys:               newFakeSys(),
+		GPU:               &collector.GPU{DRMRoot: gpuRoot},
+		Proc:              collector.Proc{Root: t.TempDir()},
+		PollInterval:      time.Millisecond,
+		Logf:              t.Logf,
+		OnGTTDrainTimeout: func(_, _ int64) { *timeouts++ },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m, timeouts
+}
+
+// The ForgeHost case (measured 2026-11-02): other slots and always-on services keep 12.5 GiB resident, so the absolute floor can
+// never be met, but the unloaded slot's 7.5 GiB is gone. That is a drain, with no timeout and no anomaly.
+func TestWaitGTTDrain_RelativeDropWithNeighboursResident(t *testing.T) {
+	m, timeouts := gttDrainManager(t, 125*gib/10)               // 12.5 GiB left
+	snap := gttSnapshot{used: 20 * gib, expected: 15 * gib / 2} // was 20 GiB, slot held 7.5 GiB
+	start := time.Now()
+	if !m.waitGTTDrain(snap) {
+		t.Fatal("a drop of the slot's whole footprint was not seen as a drain")
+	}
+	if *timeouts != 0 {
+		t.Errorf("OnGTTDrainTimeout fired %d times for a clean drain", *timeouts)
+	}
+	if time.Since(start) > 500*time.Millisecond {
+		t.Errorf("waited %v; the relative check must finish before any poll sleep", time.Since(start))
+	}
+}
+
+// 80% of the footprint is enough (fdinfo and the GTT counter only roughly agree); well under that is still a timeout.
+func TestWaitGTTDrain_PartialDropThreshold(t *testing.T) {
+	snap := gttSnapshot{used: 20 * gib, expected: 10 * gib}
+	m, timeouts := gttDrainManager(t, 12*gib) // 8 GiB back = exactly 80%
+	if !m.waitGTTDrain(snap) || *timeouts != 0 {
+		t.Errorf("80%% of the footprint back should count as drained (timeouts=%d)", *timeouts)
+	}
+	m, timeouts = gttDrainManager(t, 13*gib) // 7 GiB back = 70%
+	if m.waitGTTDrain(snap) || *timeouts != 1 {
+		t.Errorf("70%% back must still time out and report (timeouts=%d)", *timeouts)
+	}
+}
+
+// The case the anomaly exists for: the process is gone but GTT did not move.
+func TestWaitGTTDrain_NoDropStillTimesOut(t *testing.T) {
+	m, timeouts := gttDrainManager(t, 20*gib)
+	if m.waitGTTDrain(gttSnapshot{used: 20 * gib, expected: 7 * gib}) {
+		t.Fatal("GTT did not move, yet the wait reported a drain")
+	}
+	if *timeouts != 1 {
+		t.Errorf("OnGTTDrainTimeout fired %d times, want 1", *timeouts)
+	}
+}
+
+// Without a footprint or counter reading nothing is learned, so behavior is the old one: an idle GPU exits at once, a
+// busy one times out.
+func TestWaitGTTDrain_UnknownFootprintKeepsOldBehaviour(t *testing.T) {
+	m, timeouts := gttDrainManager(t, gib/2)
+	if !m.waitGTTDrain(gttSnapshot{}) || *timeouts != 0 {
+		t.Error("an idle GPU (under 1 GiB) must still end the wait at once")
+	}
+	m, timeouts = gttDrainManager(t, 12*gib)
+	if m.waitGTTDrain(gttSnapshot{used: 20 * gib}) || *timeouts != 1 {
+		t.Errorf("a drop with no known footprint cannot be judged; expected the timeout (timeouts=%d)", *timeouts)
 	}
 }

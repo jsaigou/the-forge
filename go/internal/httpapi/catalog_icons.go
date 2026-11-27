@@ -8,12 +8,15 @@ package httpapi
 // code-quality cleanup, #33).
 
 import (
+	"bytes"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -67,16 +70,21 @@ func (s *Server) handleCatalogIconUpload(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	// The declared type is client-supplied; the bytes must actually be that type (and an SVG must carry no active content), or a ".html" payload
+	// with an image/png header would be stored and later served as a page.
+	if !iconBytesMatch(ct, data) {
+		writeValidationErrorCodes(w, map[string]string{"file": "content does not match its declared type"}, map[string]string{"file": "invalid_file_type"})
+		return
+	}
+
 	// Save to IconsDir if configured, else store as a data URL in the logo field.
 	// The dark variant gets its own filename suffix so it never collides
 	// with the light file for the same subject/id.
 	var logo string
 	iconsDir := s.deps.Config().Paths.IconsDir
 	if iconsDir != "" {
-		ext := filepath.Ext(header.Filename)
-		if ext == "" {
-			ext = contentTypeToExt(ct)
-		}
+		// The extension comes from the validated type, never from the client's file name.
+		ext := contentTypeToExt(ct)
 		suffix := ""
 		if dark {
 			suffix = "-dark"
@@ -106,7 +114,7 @@ func (s *Server) handleCatalogIconUpload(w http.ResponseWriter, r *http.Request,
 	}
 	if err := set(ctx, id, logo); err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, notFoundMsg)
+			writeErrorCode(w, http.StatusNotFound, "not_found_detail", map[string]any{"detail": notFoundMsg}, notFoundMsg)
 			return
 		}
 		writeInternalError(w, err)
@@ -216,4 +224,84 @@ func base64Encode(data []byte) string {
 		}
 	}
 	return sb.String()
+}
+
+// svgAllowedElements is the drawing subset an icon needs. Anything else (script, foreignObject, style, animate/set, image, iframe, a, ...) is
+// refused rather than stripped: an allowlist cannot be outflanked by a spelling the denylist did not think of.
+var svgAllowedElements = map[string]bool{
+	"svg": true, "g": true, "defs": true, "path": true, "circle": true, "ellipse": true, "rect": true, "line": true, "polyline": true, "polygon": true,
+	"lineargradient": true, "radialgradient": true, "stop": true, "clippath": true, "mask": true, "pattern": true, "symbol": true, "use": true,
+	"title": true, "desc": true, "text": true, "tspan": true, "metadata": true,
+}
+
+var svgURLRefRE = regexp.MustCompile(`(?i)url\(\s*['"]?\s*([^)'"\s]*)`)
+
+// svgSafe reports whether data is a well-formed SVG made only of allowlisted elements, with no event handler, no reference that leaves the
+// document and no entity/DOCTYPE tricks. encoding/xml decodes character references before this sees the value, so "&#106;avascript:" is
+// checked as "javascript:". Any href must be a "#fragment" of the same document; url(...) in any attribute must be too.
+func svgSafe(data []byte) bool {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	dec.Strict = true
+	dec.Entity = nil // only the five predefined entities; anything else is a parse error
+	sawSVG := false
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return sawSVG
+		}
+		if err != nil {
+			return false
+		}
+		switch t := tok.(type) {
+		case xml.Directive: // <!DOCTYPE ...>, <!ENTITY ...>
+			return false
+		case xml.ProcInst:
+			if !strings.EqualFold(t.Target, "xml") {
+				return false // e.g. <?xml-stylesheet ...?>
+			}
+		case xml.StartElement:
+			name := strings.ToLower(t.Name.Local)
+			if !svgAllowedElements[name] {
+				return false
+			}
+			if name == "svg" {
+				sawSVG = true
+			}
+			for _, a := range t.Attr {
+				attr := strings.ToLower(a.Name.Local)
+				if strings.HasPrefix(attr, "on") {
+					return false
+				}
+				val := strings.TrimSpace(a.Value)
+				if attr == "href" && !strings.HasPrefix(val, "#") {
+					return false
+				}
+				lv := strings.ToLower(val)
+				if attr == "src" || strings.Contains(lv, "javascript:") || strings.Contains(lv, "data:") || strings.Contains(lv, "expression(") || strings.Contains(lv, "@import") {
+					return false
+				}
+				for _, m := range svgURLRefRE.FindAllStringSubmatch(val, -1) {
+					if !strings.HasPrefix(m[1], "#") {
+						return false
+					}
+				}
+			}
+		}
+	}
+}
+
+// iconBytesMatch reports whether data really is the allowlisted type ct names. Raster and WebM types are checked by magic number (net/http's
+// sniffer); an SVG must start like an SVG document and contain no script, event handler, foreignObject or external-entity construct.
+func iconBytesMatch(ct string, data []byte) bool {
+	sniffed := http.DetectContentType(data)
+	switch ct {
+	case "image/png", "image/jpeg", "image/webp":
+		return sniffed == ct
+	case "video/webm":
+		// DetectContentType knows WebM by its EBML header.
+		return sniffed == "video/webm"
+	case "image/svg+xml":
+		return svgSafe(data)
+	}
+	return false
 }

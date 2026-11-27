@@ -135,7 +135,7 @@ func TestRegistrySamples(t *testing.T) {
 func TestRegistryWrappedFormat(t *testing.T) {
 	dir, _ := os.MkdirTemp("", "reg-")
 	defer os.RemoveAll(dir)
-	wrapped := `{"voices":[{"id":"bmo","name":"BMO","type":"clone","language":"English","clone":{"ref_audio":"bmo.wav","ref_text":"hi","x_vector_only":false},"sample_text":"Beemo chop."}]}`
+	wrapped := `{"voices":[{"id":"kit","name":"KIT","type":"clone","language":"English","clone":{"ref_audio":"kit.wav","ref_text":"hi","x_vector_only":false},"sample_text":"Sample line."}]}`
 	if err := os.WriteFile(filepath.Join(dir, "voices.json"), []byte(wrapped), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -143,11 +143,11 @@ func TestRegistryWrappedFormat(t *testing.T) {
 	if err := reg.Load(); err != nil {
 		t.Fatalf("load wrapped: %v", err)
 	}
-	v, ok, err := reg.Get("bmo")
+	v, ok, err := reg.Get("kit")
 	if err != nil || !ok {
-		t.Fatalf("get bmo: ok=%v err=%v", ok, err)
+		t.Fatalf("get kit: ok=%v err=%v", ok, err)
 	}
-	if v.SampleText != "Beemo chop." {
+	if v.SampleText != "Sample line." {
 		t.Fatalf("sample_text not preserved: %q", v.SampleText)
 	}
 	if v.Clone == nil || v.Clone.RefText != "hi" {
@@ -168,19 +168,44 @@ func TestRegistryWrappedFormat(t *testing.T) {
 	if err := json.Unmarshal(raw, &check); err != nil {
 		t.Fatalf("rewritten file is not wrapped: %v (%s)", err, raw)
 	}
-	foundBMO, foundNew := false, false
+	foundKit, foundNew := false, false
 	for _, e := range check.Voices {
-		if e.ID == "bmo" {
-			foundBMO = true
-			if e.SampleText != "Beemo chop." {
-				t.Fatalf("bmo sample_text lost on rewrite: %q", e.SampleText)
+		if e.ID == "kit" {
+			foundKit = true
+			if e.SampleText != "Sample line." {
+				t.Fatalf("kit sample_text lost on rewrite: %q", e.SampleText)
 			}
 		}
 		if e.ID == "new" {
 			foundNew = true
 		}
 	}
-	if !foundBMO || !foundNew {
-		t.Fatalf("rewritten voices missing entries: bmo=%v new=%v", foundBMO, foundNew)
+	if !foundKit || !foundNew {
+		t.Fatalf("rewritten voices missing entries: kit=%v new=%v", foundKit, foundNew)
+	}
+}
+
+// voices.json is shared and writable: a ref_audio that is a path must neither be accepted by Put nor deleted by Delete.
+func TestRegistryDoesNotDeleteOutsideAudioDirViaRefAudio(t *testing.T) {
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "victim.txt")
+	if err := os.WriteFile(victim, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRegistry(dir)
+	if err := r.Put(VoiceEntry{ID: "v1", Name: "V", Type: "clone", Clone: &CloneSpec{RefAudio: "../victim.txt"}}); err == nil {
+		t.Fatal("Put must refuse a ref_audio that is not a plain file name")
+	}
+	// Simulate another tool having written the hostile value straight into voices.json.
+	raw := `[{"id":"v1","name":"V","type":"clone","clone":{"ref_audio":"../victim.txt"}}]`
+	if err := os.WriteFile(filepath.Join(dir, "voices.json"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r2 := NewRegistry(dir)
+	if err := r2.Delete("v1"); err != nil {
+		t.Fatalf("Delete must succeed (the entry is removed, the unsafe file name is just not touched): %v", err)
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Fatalf("a file outside AudioDir was deleted: %v", err)
 	}
 }
