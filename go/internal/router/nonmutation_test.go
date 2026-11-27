@@ -245,7 +245,10 @@ func storeLocalServer(t *testing.T, cfgName string, mutate func(ctx context.Cont
 	}
 	t.Cleanup(func() { db.Close() })
 	ctx := context.Background()
-	cfgID := seedCatalogConfig(t, db.Catalog(), cfgName, 32768, "visible")
+	// These cases send image and audio parts and assert the bytes forwarded; the config must declare them or
+	// the modality pre-check (modality_gate.go) would correctly refuse the request before dispatch.
+	allModalities := []string{"text", "vision", "audio"}
+	cfgID := seedCatalogConfig(t, db.Catalog(), cfgName, 32768, "visible", seedConfigOpts{cfgModalities: &allModalities})
 	if mutate != nil {
 		mutate(ctx, db.Catalog(), cfgID)
 	}

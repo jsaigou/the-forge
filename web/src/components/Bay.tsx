@@ -9,6 +9,7 @@ import { BadgeIcon } from "./BadgeIcon";
 import { CopyButton } from "./CopyButton";
 import { Icon } from "./Icon";
 import { SquareSnake } from "./SquareSnake";
+import { runtimeLabel } from "../lib/runtime";
 
 // Sprint K: unload staged progress. The prior investigation found no
 // removable delay behind a slow unload — it's genuine systemd + GTT-drain
@@ -70,6 +71,10 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
   const mode = status.slots[slotKey] ?? null;
   const loading = status.slot_loading[slotKey];
   const unloading = status.slot_unloading[slotKey];
+  // The daemon remembers why the last load of an empty slot failed (ADR-0020 F4); without this a failed load
+  // looked identical to a bay that was never used.
+  const opState = status.slot_states?.[slotKey];
+  const failed = opState?.state === "failed" ? opState : null;
   const modeInfo = mode ? status.modes_available[mode] : undefined;
   const card = mode ? configCards?.find((c) => c.name === mode) : undefined;
   // T3 follow-up (2026-09-14, operator feedback): the slot's loaded name is
@@ -133,10 +138,27 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
       );
     }
     return (
-      <div className="bay empty">
-        <span className="statusdot dot-empty" />
+      <div className={failed ? "bay empty failed" : "bay empty"}>
+        <span className={failed ? "statusdot dot-crit" : "statusdot dot-empty"} />
         <span className="slotid">{slotLabel}</span>
         <div style={{ margin: "auto 0" }}>
+          {failed && (
+            <div className="load-failed" role="alert">
+              <div style={{ fontSize: 13, color: "var(--crit)" }}>{t("bay.load_failed_mode", { mode: failed.mode ?? "" })}</div>
+              {failed.message && <div className="why">{failed.message}</div>}
+              {failed.detail && (
+                <details>
+                  <summary>{t("bay.load_failed_logs")}</summary>
+                  <pre>{failed.detail}</pre>
+                </details>
+              )}
+              {canOperate && (
+                <button className="load-btn" disabled={unload.isPending} onClick={() => unload.mutate(slotKey)}>
+                  {t("bay.dismiss")}
+                </button>
+              )}
+            </div>
+          )}
           <div style={{ fontSize: 13 }}>{t("bay.bay_free")}</div>
           {canOperate && (
             <button className="load-btn" data-tour-id="bay-load" onClick={onLoadClick}>
@@ -194,6 +216,7 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
           className="icon-btn action bay-eject"
           style={{ position: "absolute", top: 10, right: 10, width: 24, height: 24, fontSize: 11 }}
           title={t("bay.unload_title")}
+          aria-label={t("bay.unload_title")}
           disabled={unload.isPending}
           onClick={() => unload.mutate(slotKey)}
         >
@@ -238,6 +261,7 @@ export function Bay({ slotKey, status, schedulerStatus, schedulerUpdatedAt, conf
           ) : (
             <span>{t("bay.idle", { idle: formatIdle(idleDisplayS) })}</span>
           )}
+          {card && card.engine_kind && card.engine_kind !== "llamacpp" && <span className="chip">{runtimeLabel(card.engine_kind)}</span>}
           <span className={`chip ${modeInfo?.backend === "rocm" ? "rocm" : "vulkan"}`}>{modeInfo?.backend ?? "vulkan"}</span>
         </span>
       </div>

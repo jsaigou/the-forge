@@ -178,7 +178,6 @@ func TestCatalogFullRoundTrip(t *testing.T) {
 		BuildID:          buildID,
 		MMProjArtifactID: mmprojID,
 		NCtx:             262144,
-		Parallel:         2,
 		ExtraArgs:        []string{"--no-mmap", "--jinja", "--parallel", "2"},
 		Status:           "unverified",
 		Visibility:       "visible",
@@ -327,7 +326,7 @@ func TestCatalogFullRoundTrip(t *testing.T) {
 		t.Fatalf("ListConfigs: got %d, want 1", len(cfgs))
 	}
 	c := cfgs[0]
-	if c.Name != "gemma4-31b" || c.NCtx != 262144 || c.Parallel != 2 || !c.IsDefault {
+	if c.Name != "gemma4-31b" || c.NCtx != 262144 || !c.IsDefault {
 		t.Errorf("config round-trip mismatch: %+v", c)
 	}
 	if len(c.ExtraArgs) != 4 || c.ExtraArgs[0] != "--no-mmap" {

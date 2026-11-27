@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import { ICON_ATTRIBUTIONS, type IconSource } from "../assets/icons/attributions";
 import { Icon } from "../components/Icon";
-import { GO_DEPS, NPM_DEPS, RUNTIME_STACK } from "../lib/attributions.generated";
+import { FONTS, GO_DEPS, NPM_DEPS, RUNTIME_STACK } from "../lib/attributions.generated";
 import { useCatalogModels, useStatus } from "../lib/queries";
+import { safeHref } from "../lib/safeHref";
 
 // Sprint F — this app redistributes a lot of other people's work (31
 // vendored icons across three sources, ~2 dozen Go modules, a handful of
@@ -27,9 +28,10 @@ const ICON_SOURCE_LABEL: Record<IconSource, string> = {
 const ICON_SOURCE_ORDER: IconSource[] = ["svgl", "lobehub", "raster", "inline"];
 
 function LinkOrText({ href, children }: { href: string; children: ReactNode }) {
-  if (!href) return <span>{children}</span>;
+  const safe = safeHref(href);
+  if (!safe) return <span>{children}</span>;
   return (
-    <a href={href} target="_blank" rel="noreferrer noopener">
+    <a href={safe} target="_blank" rel="noreferrer noopener">
       {children}
     </a>
   );
@@ -113,6 +115,27 @@ export function Attributions() {
                 <span className="chip">{r.license}</span>
               </div>
               <span className="pu">{r.role}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="eyebrow">Fonts</div>
+      <div className="card">
+        <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, lineHeight: 1.55 }}>
+          Font files this app serves itself; listed in <code>web/scripts/gen-attributions.mjs</code>.
+        </div>
+        <div className="hoom">
+          {FONTS.map((f) => (
+            <div className="prox" key={f.name} style={{ flexDirection: "column", alignItems: "stretch", gap: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span className="pn">
+                  <LinkOrText href={f.projectUrl}>{f.name}</LinkOrText>
+                </span>
+                <span className="chip">{f.license}</span>
+              </div>
+              <span className="pu">{f.role}</span>
+              <span className="pu">{f.copyright}</span>
             </div>
           ))}
         </div>

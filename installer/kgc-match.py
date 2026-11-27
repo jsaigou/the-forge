@@ -21,7 +21,7 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REGISTRY = os.path.join(HERE, "kgc.json")
+REGISTRY = os.path.join(HERE, "kgc", "kgc.json")
 
 
 def detect_cpu():
@@ -48,17 +48,41 @@ def detect_cpu():
     return model
 
 
+def gfx_from_target_version(value):
+    """KFD's gfx_target_version (MMmmss decimal: 110501) as the gfx name (gfx1151); '' for 0 or junk."""
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return ""
+    if v <= 0:
+        return ""
+    return "gfx%d%x%x" % (v // 10000, (v // 100) % 100, v % 100)
+
+
 def detect_gpu():
     """Return a GPU identifier string, e.g. 'gfx1151', or ''."""
     # Preferred: KFD topology exposes the gfx target directly.
     nodes = "/sys/class/kfd/kfd/topology/nodes"
     try:
         for name in sorted(os.listdir(nodes)):
-            p = os.path.join(nodes, name, "name")
-            with open(p) as f:
-                gfx = f.read().strip()
-            if gfx.startswith("gfx"):
-                return gfx
+            try:
+                with open(os.path.join(nodes, name, "name")) as f:
+                    gfx = f.read().strip()
+                if gfx.startswith("gfx"):
+                    return gfx
+            except OSError:
+                pass
+            # On current kernels `name` reads "ip discovery"; the target is a number in `properties`
+            # (110501 for gfx1151). CPU nodes carry 0.
+            try:
+                with open(os.path.join(nodes, name, "properties")) as f:
+                    for line in f:
+                        if line.startswith("gfx_target_version"):
+                            gfx = gfx_from_target_version(line.split()[1])
+                            if gfx:
+                                return gfx
+            except (OSError, IndexError):
+                pass
     except OSError:
         pass
     # Fallback: AMD vendor present on PCI bus (no precise gfx id available).

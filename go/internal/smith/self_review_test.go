@@ -392,3 +392,43 @@ func TestMaybeSelfReview_RespectsInterval(t *testing.T) {
 		t.Errorf("lastSelfReviewAt changed within the interval: %v -> %v", first, second)
 	}
 }
+
+// A SPECIALIST_FAILED investigation whose sweep never warned on specialist_pool must not be proposed for closure while an always-on member is
+// still failing: self-review has to run the check, not read an empty set as clean.
+func TestSelfReviewOnce_SpecialistFailedStillFailingIsNotProposedForClosure(t *testing.T) {
+	db := openDB(t)
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	failing := []SpecialistProblem{{Slot: "s6", Occupant: "kokoro", State: "failed", Err: "exited 2", Attempts: 4}}
+	s := New(Deps{Store: db, Settings: db.Settings(), Now: fixedNow(now), Logf: func(string, ...any) {},
+		SpecialistProblems: func(context.Context) []SpecialistProblem { return failing }})
+	setSetting(t, db, SettingSelfReview, `{"enabled":true,"grace_minutes":30}`)
+	ctx := context.Background()
+
+	invID, err := s.CreateInvestigation(ctx, "anomaly:SPECIALIST_FAILED", "")
+	if err != nil {
+		t.Fatalf("CreateInvestigation: %v", err)
+	}
+	forceInvestigationOpenedAt(t, s, invID, now.Add(-time.Hour))
+	if _, err := s.persistFindings(ctx, []Finding{{CheckID: "brain_resolvable", Severity: SeverityWarn, Summary: "smith.model is unset"}},
+		SweepAnomaly, now.Add(-time.Hour), &invID); err != nil {
+		t.Fatalf("persistFindings: %v", err)
+	}
+
+	res, err := s.selfReviewOnce(ctx)
+	if err != nil {
+		t.Fatalf("selfReviewOnce: %v", err)
+	}
+	if res.InvestigationsProposed != 0 {
+		t.Fatalf("InvestigationsProposed = %d, want 0 while the member is still failing", res.InvestigationsProposed)
+	}
+
+	// Once the pool is healthy again the same investigation is proposed for closure.
+	failing = nil
+	res, err = s.selfReviewOnce(ctx)
+	if err != nil {
+		t.Fatalf("selfReviewOnce: %v", err)
+	}
+	if res.InvestigationsProposed != 1 {
+		t.Errorf("InvestigationsProposed = %d, want 1 once specialist_pool re-checks clean", res.InvestigationsProposed)
+	}
+}

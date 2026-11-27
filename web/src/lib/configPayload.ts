@@ -44,3 +44,44 @@ import type { CatalogConfig } from "./types";
 // added to CatalogConfig in the future is still required here
 // automatically, with no separate list to remember to update.
 export type ConfigWritePayload = Omit<CatalogConfig, "id" | "chat_template_caps" | "chat_template_caps_probed_at">;
+
+// Read-only on the wire: a write must never carry these (see above). The server drops them if they arrive from a GET body, but the decode of
+// a hand-built body still rejects them, so the one helper below is the only place that knows the list.
+export const CONFIG_READ_ONLY_KEYS = ["id", "chat_template_caps", "chat_template_caps_probed_at"] as const satisfies readonly (keyof CatalogConfig)[];
+
+// toConfigWritePayload turns a full Config record into a write body: the read-only fields are stripped and `changes` replace what the caller
+// edits, so a save can never wipe a field the caller does not show. Use it at every site that starts from an existing record; a form that
+// builds its body field by field keeps the field-by-field construction (the type above checks that one).
+export function toConfigWritePayload(existing: CatalogConfig, changes: Partial<ConfigWritePayload> = {}): ConfigWritePayload {
+  const { id: _id, chat_template_caps: _caps, chat_template_caps_probed_at: _probedAt, ...rest } = existing;
+  return { ...rest, ...changes };
+}
+
+// Every key of CatalogConfig, at runtime. Typing it as Record<keyof CatalogConfig, true> makes `tsc` fail the moment a field is added to (or
+// removed from) CatalogConfig without being listed here, and scripts/config-fields.test.mjs checks this list against the Go side's
+// golden field list (go/internal/httpapi/catalog_configs_fields_test.go), so the two languages cannot drift apart silently.
+export const CATALOG_CONFIG_KEYS: Record<keyof CatalogConfig, true> = {
+  id: true,
+  name: true,
+  variant_id: true,
+  weight_artifact_id: true,
+  engine_id: true,
+  build_id: true,
+  mmproj_artifact_id: true,
+  n_ctx: true,
+  extra_args: true,
+  status: true,
+  visibility: true,
+  is_default: true,
+  fingerprint: true,
+  logo: true,
+  logo_dark: true,
+  modalities: true,
+  output_modalities: true,
+  capability_tier_id: true,
+  capability_rank: true,
+  chat_template_caps: true,
+  chat_template_caps_probed_at: true,
+  chat_template_caps_override: true,
+  reasoning_effort_default: true,
+};

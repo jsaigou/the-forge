@@ -1,16 +1,21 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api, setCsrfToken } from "./api";
+import { concurrencyRange, type ConcurrencyWindow } from "./concurrency";
 import { currentLang } from "./i18n";
+import { normalizeDefaults } from "./speechModel";
 import type { ConfigWritePayload } from "./configPayload";
 import type {
   APIKeyCreateRequest,
+  ArtifactWritePayload,
+  BuildWritePayload,
   AuthConfigPutRequest,
   AuthPolicyPutRequest,
   BillingSettings,
   CatalogBenchmark,
   CatalogFamily,
   CatalogGenealogy,
+  RemovalKind,
   CatalogModel,
   CatalogModelAlias,
   CatalogVirtualModel,
@@ -47,13 +52,18 @@ import type {
   SystemSettingsUpdate,
   TotpConfirmRequest,
   UISettingsUpdate,
-  VoiceSettingsUpdate,
+  SpeechDefaultsDraft,
   WebAuthnFinishAssertRequest,
   WebAuthnFinishRegisterRequest,
   ContextCreationBy,
   ContextCreationResult,
   ContextCreationWindow,
+  SpecialistFunction,
+  ExternalTools,
+  SpecialistBehavior,
+  SpecialistPolicy,
 } from "./types";
+import { assertionToJSON, attestationToJSON, toCreationOptions, toRequestOptions, type CreationOptionsJSON, type RequestOptionsJSON } from "./webauthn.ts";
 
 // Sprint 13 (Sprint 12 Phase 9, plan risk 12) — Settings mounts one panel at
 // a time, so with the 5s telemetry default every section switch refetched
@@ -65,6 +75,7 @@ export const SETTINGS_STALE_MS = 5 * 60_000;
 
 export const qk = {
   status: ["status"] as const,
+  specialists: ["specialists"] as const,
   metrics: ["metrics"] as const,
   schedulerStatus: ["scheduler", "status"] as const,
   notifications: (includeDismissed = false) => ["notifications", includeDismissed] as const,
@@ -91,8 +102,11 @@ export const qk = {
   metricsSettings: ["metrics", "settings"] as const,
   uiSettings: ["ui", "settings"] as const,
   serviceLinks: ["service-links"] as const,
-  voiceSettings: ["voice", "settings"] as const,
+  externalTools: ["external-tools"] as const,
+  speechDefaults: ["speech", "defaults"] as const,
   voiceList: ["voice", "list"] as const,
+  speechReadiness: ["speech", "readiness"] as const,
+  speechRecipes: ["speech", "recipes"] as const,
   dashboardLayout: ["dashboard", "layout"] as const,
   systemSettings: ["system", "settings"] as const,
   schedulerSeed: ["scheduler", "seed"] as const,
@@ -123,6 +137,7 @@ export const qk = {
   catalogArtifacts: ["catalog", "artifacts"] as const,
   catalogArtifactsForVariant: (variantId: number) => ["catalog", "artifacts", "variant", variantId] as const,
   catalogConfigs: ["catalog", "configs"] as const,
+  catalogConfigDetail: (id: number) => ["catalog", "config-detail", id] as const,
   catalogConfigsForVariant: (variantId: number) => ["catalog", "configs", "variant", variantId] as const,
   catalogOfferings: ["catalog", "offerings"] as const,
   catalogOfferingsForModel: (modelId: number) => ["catalog", "offerings", "model", modelId] as const,
@@ -425,25 +440,57 @@ export function useUpdateServiceLinks() {
   });
 }
 
-export function useVoiceSettings() {
-  return useQuery({ queryKey: qk.voiceSettings, queryFn: api.voiceSettings, staleTime: SETTINGS_STALE_MS });
+export function useExternalTools() {
+  return useQuery({ queryKey: qk.externalTools, queryFn: api.externalTools, staleTime: SETTINGS_STALE_MS });
 }
 
-// List all saved voices by engine (Sprint 1 UI papercuts, 2026-08-27).
-// `enabled` lets the caller defer the request until the listing panel is
-// actually opened, rather than fetching it eagerly on every Voice settings
-// page load — forge-tts's own list call is the expensive part, not this one.
+export function useUpdateExternalTools() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: ExternalTools) => api.updateExternalTools(v.tools),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.externalTools });
+      qc.invalidateQueries({ queryKey: qk.infraServices });
+    },
+  });
+}
+
+// The speech engines (with their kind and state) and the default engine per kind. Polled so a loading engine shows its state change.
+export function useSpeechDefaults() {
+  return useQuery({ queryKey: qk.speechDefaults, queryFn: api.speechDefaults, refetchInterval: 5_000 });
+}
+
+export function useSpeechReadiness(enabled = true) {
+  return useQuery({ queryKey: qk.speechReadiness, queryFn: api.speechReadiness, refetchInterval: 5_000, enabled });
+}
+
+export function useSpeechRecipes() {
+  return useQuery({ queryKey: qk.speechRecipes, queryFn: api.speechRecipes, refetchInterval: 15_000 });
+}
+
+export function useRegisterSpeechRecipe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.registerSpeechRecipe(id),
+    // A registration may add a slot, an engine, a default and the router's speech address (which asks for a restart); a refused one may have done part of that.
+    onSettled: () =>
+      Promise.all(
+        [["speech"], qk.specialists, qk.voiceList, qk.status].map((queryKey) => qc.invalidateQueries({ queryKey })),
+      ),
+  });
+}
+
 export function useVoiceList(enabled: boolean) {
   return useQuery({ queryKey: qk.voiceList, queryFn: api.voiceList, enabled, staleTime: SETTINGS_STALE_MS });
 }
 
-export function useUpdateVoiceSettings() {
+export function useUpdateSpeechDefaults() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (patch: VoiceSettingsUpdate) => api.updateVoiceSettings(patch),
+    mutationFn: (d: SpeechDefaultsDraft) => api.updateSpeechDefaults(d).then((r) => normalizeDefaults(r.defaults)),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: qk.voiceSettings });
-      qc.invalidateQueries({ queryKey: qk.infraServices });
+      qc.invalidateQueries({ queryKey: qk.speechDefaults });
+      qc.invalidateQueries({ queryKey: qk.voiceList });
     },
   });
 }
@@ -1062,20 +1109,9 @@ export function useWebAuthnRegister() {
   return useMutation({
     mutationFn: async (label: string) => {
       const begin = await api.webauthnRegisterBegin();
-      const cred = await navigator.credentials.create({ publicKey: begin.options as unknown as PublicKeyCredentialCreationOptions }) as PublicKeyCredential;
-      const resp = cred.response as AuthenticatorAttestationResponse;
-      const finishReq: WebAuthnFinishRegisterRequest = {
-        label,
-        response: {
-          id: cred.id,
-          rawId: btoa(cred.id),
-          type: "public-key",
-          response: {
-            clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(resp.clientDataJSON))),
-            attestationObject: btoa(String.fromCharCode(...new Uint8Array(resp.attestationObject))),
-          },
-        },
-      };
+      const cred = await navigator.credentials.create({ publicKey: toCreationOptions(begin.options as unknown as CreationOptionsJSON) }) as PublicKeyCredential | null;
+      if (!cred) throw new Error("passkey enrollment was cancelled");
+      const finishReq: WebAuthnFinishRegisterRequest = { label, response: attestationToJSON(cred) };
       return api.webauthnRegisterFinish(finishReq);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.webauthnCredentials }),
@@ -1086,21 +1122,9 @@ export function useWebAuthnAssert() {
   return useMutation({
     mutationFn: async () => {
       const begin = await api.webauthnAssertBegin();
-      const cred = await navigator.credentials.get({ publicKey: begin.options as unknown as PublicKeyCredentialRequestOptions }) as PublicKeyCredential;
-      const resp = cred.response as AuthenticatorAssertionResponse;
-      const finishReq: WebAuthnFinishAssertRequest = {
-        response: {
-          id: cred.id,
-          rawId: btoa(cred.id),
-          type: "public-key",
-          response: {
-            clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(resp.clientDataJSON))),
-            authenticatorData: btoa(String.fromCharCode(...new Uint8Array(resp.authenticatorData))),
-            signature: btoa(String.fromCharCode(...new Uint8Array(resp.signature))),
-            userHandle: resp.userHandle ? btoa(String.fromCharCode(...new Uint8Array(resp.userHandle))) : undefined,
-          },
-        },
-      };
+      const cred = await navigator.credentials.get({ publicKey: toRequestOptions(begin.options as unknown as RequestOptionsJSON) }) as PublicKeyCredential | null;
+      if (!cred) throw new Error("passkey assertion was cancelled");
+      const finishReq: WebAuthnFinishAssertRequest = { response: assertionToJSON(cred) };
       return api.webauthnAssertFinish(finishReq);
     },
   });
@@ -1213,6 +1237,20 @@ export function useCatalogConfigs(variantId?: number) {
     staleTime: SETTINGS_STALE_MS,
   });
 }
+// One config with its ETag. The edit form loads from this (not from the list) so the ETag is the version of the
+// data on screen; it must not refresh in the background while the form is open, or a change made elsewhere would
+// be adopted silently and the stale-edit check would never fire.
+export function useCatalogConfigDetail(id: number) {
+  return useQuery({
+    queryKey: qk.catalogConfigDetail(id),
+    queryFn: () => api.catalogConfigDetail(id),
+    staleTime: Infinity,
+    gcTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+}
 export function useCatalogOfferings(modelId?: number) {
   return useQuery({
     queryKey: modelId ? qk.catalogOfferingsForModel(modelId) : qk.catalogOfferings,
@@ -1246,6 +1284,23 @@ export function useCatalogGenealogies() {
 export function useCatalogEngines() {
   return useQuery({ queryKey: qk.catalogEngines, queryFn: api.catalogEngines, staleTime: SETTINGS_STALE_MS });
 }
+export function useCreateCatalogBuild() {
+  const { invalidateAll } = useCatalogMutations();
+  return useMutation({ mutationFn: (b: BuildWritePayload) => api.createCatalogBuild(b), onSuccess: invalidateAll });
+}
+export function useRetireCatalogBuild() {
+  const { invalidateAll } = useCatalogMutations();
+  return useMutation({ mutationFn: (id: number) => api.retireCatalogBuild(id), onSuccess: invalidateAll });
+}
+export function useCreateCatalogArtifact() {
+  const { invalidateAll } = useCatalogMutations();
+  return useMutation({ mutationFn: (a: ArtifactWritePayload) => api.createCatalogArtifact(a), onSuccess: invalidateAll });
+}
+export function useDeleteCatalogArtifact() {
+  const { invalidateAll } = useCatalogMutations();
+  return useMutation({ mutationFn: (id: number) => api.deleteCatalogArtifact(id), onSuccess: invalidateAll });
+}
+
 export function useCatalogBuilds() {
   return useQuery({ queryKey: qk.catalogBuilds, queryFn: api.catalogBuilds, staleTime: SETTINGS_STALE_MS });
 }
@@ -1284,6 +1339,21 @@ function useCatalogMutations() {
     qc.invalidateQueries({ queryKey: qk.providers });
   };
   return { invalidateAll };
+}
+
+// A Config write changes more than the catalog list: the cards for every window (not just 7d), the scheduler's view of config names and
+// defaults, and the jobs that reference a config by name. One map, so a new reader of Config data has one place to be added.
+function useConfigMutations() {
+  const qc = useQueryClient();
+  const { invalidateAll } = useCatalogMutations();
+  const invalidateConfigConsumers = () => {
+    invalidateAll();
+    qc.invalidateQueries({ queryKey: ["models", "cards"] });
+    qc.invalidateQueries({ queryKey: ["configs", "cards"] });
+    qc.invalidateQueries({ queryKey: qk.schedulerStatus });
+    qc.invalidateQueries({ queryKey: qk.schedulerJobs });
+  };
+  return { invalidateConfigConsumers };
 }
 
 // Sprint I — Genealogy/Family were previously either entirely unwrapped
@@ -1438,6 +1508,44 @@ export function useUpdateCatalogModel() {
     onSuccess: invalidateAll,
   });
 }
+// A removal plan is only true for the moment it is read: never cached.
+export function useCatalogRemovalPlan(kind: RemovalKind, id: number, enabled: boolean) {
+  return useQuery({
+    queryKey: ["removal-plan", kind, id],
+    queryFn: () => api.catalogRemovalPlan(kind, id),
+    enabled,
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+}
+export function useCatalogRemove() {
+  const { invalidateAll } = useCatalogMutations();
+  const { invalidateConfigConsumers } = useConfigMutations();
+  return useMutation({
+    mutationFn: ({ kind, id, deleteFiles, token }: { kind: RemovalKind; id: number; deleteFiles: boolean; token: string }) =>
+      api.catalogRemove(kind, id, { delete_files: deleteFiles, token }),
+    onSuccess: () => {
+      invalidateAll();
+      invalidateConfigConsumers();
+    },
+  });
+}
+export function useProfileNight() {
+  return useQuery({
+    queryKey: ["profile-night"],
+    queryFn: api.profileNight,
+    refetchInterval: (q) => (q.state.data?.state.status === "running" ? 10_000 : 60_000),
+  });
+}
+export function useProfileNightArm() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: api.profileNightArm, onSuccess: (d) => qc.setQueryData(["profile-night"], d) });
+}
+export function useProfileNightCancel() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: api.profileNightCancel, onSuccess: (d) => qc.setQueryData(["profile-night"], d) });
+}
 export function useDeleteCatalogModel() {
   const { invalidateAll } = useCatalogMutations();
   return useMutation({
@@ -1476,25 +1584,30 @@ export function useDeleteCatalogVariant() {
 }
 
 export function useCreateCatalogConfig() {
-  const { invalidateAll } = useCatalogMutations();
+  const { invalidateConfigConsumers } = useConfigMutations();
   return useMutation({
     mutationFn: (c: ConfigWritePayload) => api.createCatalogConfig(c),
-    onSuccess: invalidateAll,
+    onSuccess: invalidateConfigConsumers,
   });
 }
 export function useUpdateCatalogConfig() {
-  const { invalidateAll } = useCatalogMutations();
+  const { invalidateConfigConsumers } = useConfigMutations();
+  const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, c, reason }: { id: number; c: ConfigWritePayload; reason?: string }) =>
-      api.updateCatalogConfig(id, c, reason),
-    onSuccess: invalidateAll,
+    mutationFn: ({ id, c, reason, etag }: { id: number; c: ConfigWritePayload; reason?: string; etag?: string | null }) =>
+      api.updateCatalogConfig(id, c, reason, etag),
+    onSuccess: (_data, vars) => {
+      invalidateConfigConsumers();
+      // an open form (icon select/clear keep it open) must pick up the new ETag with the new data
+      void qc.invalidateQueries({ queryKey: qk.catalogConfigDetail(vars.id) });
+    },
   });
 }
 export function useUploadConfigIcon() {
-  const { invalidateAll } = useCatalogMutations();
+  const { invalidateConfigConsumers } = useConfigMutations();
   return useMutation({
     mutationFn: ({ id, file, dark }: { id: number; file: File; dark?: boolean }) => api.uploadConfigIcon(id, file, dark),
-    onSuccess: invalidateAll,
+    onSuccess: invalidateConfigConsumers,
   });
 }
 
@@ -1510,10 +1623,10 @@ export function useAuditLog(actionPrefix: string, target: string, limit = 20) {
   });
 }
 export function useDeleteCatalogConfig() {
-  const { invalidateAll } = useCatalogMutations();
+  const { invalidateConfigConsumers } = useConfigMutations();
   return useMutation({
     mutationFn: ({ id, force }: { id: number; force?: boolean }) => api.deleteCatalogConfig(id, force),
-    onSuccess: invalidateAll,
+    onSuccess: invalidateConfigConsumers,
   });
 }
 
@@ -2259,6 +2372,22 @@ export function useSmithPendingAsk(): {
   };
 }
 
+// ── a0 request concurrency ────────────────────────────────────────────────
+// Operator-only endpoint; `enabled` keeps a viewer from ever issuing it. since/until are computed when the fetch runs,
+// so a refetch slides the window forward.
+export function useUsageConcurrency(model: string, win: ConcurrencyWindow, enabled: boolean) {
+  return useQuery({
+    queryKey: ["usage", "concurrency", model, win] as const,
+    queryFn: () => {
+      const { since, until } = concurrencyRange(win, Date.now() / 1000);
+      return api.usageConcurrency(model, since, until);
+    },
+    enabled: enabled && model !== "",
+    refetchInterval: 60_000,
+    retry: false,
+  });
+}
+
 // ── Context creation ledger (WS-N2) ───────────────────────────────────────
 
 export function useContextCreation(window_: ContextCreationWindow, by: ContextCreationBy) {
@@ -2274,3 +2403,45 @@ export function useContextCreation(window_: ContextCreationWindow, by: ContextCr
   });
 }
 
+
+// ── Specialist slot pool (ADR-0022) ─────────────────────────────────────────
+// Polled fast enough that a starting or restarting member shows its state change without a manual refresh.
+export function useSpecialists() {
+  return useQuery({ queryKey: qk.specialists, queryFn: api.specialists, refetchInterval: 5_000 });
+}
+
+function useSpecialistMutation<V, R = unknown>(fn: (v: V) => Promise<R>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    // Voice & Speech reads the speech engines (and their Behavior) from its own query, so a change made anywhere refreshes it too.
+    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: qk.specialists }), qc.invalidateQueries({ queryKey: qk.speechDefaults })]),
+  });
+}
+
+export function useSpecialistLoad() {
+  return useSpecialistMutation((v: { occupant: string; slot?: string }) => api.specialistLoad(v.occupant, v.slot));
+}
+export function useSpecialistUnload() {
+  return useSpecialistMutation((slot: string) => api.specialistUnload(slot));
+}
+export function useSpecialistPolicy() {
+  return useSpecialistMutation((v: { name: string; policy: SpecialistPolicy; homeSlot: string }) =>
+    api.specialistPolicy(v.name, v.policy, v.homeSlot));
+}
+export function useSpecialistCreate() {
+  return useSpecialistMutation((o: Parameters<typeof api.specialistCreate>[0]) => api.specialistCreate(o));
+}
+export function useSpecialistBehavior() {
+  return useSpecialistMutation((v: { name: string; behavior: SpecialistBehavior }) => api.specialistBehavior(v.name, v.behavior));
+}
+export function useSpecialistAddSlot() {
+  return useSpecialistMutation<void, { slot: string; port: number; label: string }>(() => api.specialistAddSlot());
+}
+/** The last log lines of a specialist slot's process; fetched only while `slot` is set (the log is opened on request, never polled in the background). */
+export function useSpecialistSlotLog(slot: string | null) {
+  return useQuery({ queryKey: ["specialist-log", slot], queryFn: () => api.specialistSlotLog(slot as string), enabled: !!slot, refetchInterval: 4_000 });
+}
+export function useSpecialistDefault() {
+  return useSpecialistMutation((v: { fn: SpecialistFunction; occupant: string }) => api.specialistDefault(v.fn, v.occupant));
+}

@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/jsaigou/the-forge/internal/config"
+	"github.com/jsaigou/the-forge/internal/enginekind"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -251,6 +252,13 @@ func configFromCatalog(
 				"run `forge repair-catalog-backend`", c.Name, c.ID, c.BuildID)
 	}
 
+	// Engine kind comes from the config's engines row (ADR-0025). A kind this binary does not know fails the conversion like a
+	// missing backend does: the mode is omitted loudly rather than launched as something it is not.
+	engineKind := engineByID[c.EngineID].Kind
+	if _, err := enginekind.Resolve(engineKind, build.Backend); err != nil {
+		return config.Mode{}, fmt.Errorf("config %q (id=%d, engine_id=%d): %w", c.Name, c.ID, c.EngineID, err)
+	}
+
 	// Build the Mode. The Services[] slice carries the launch recipe (the
 	// engine reads Services[0] for the model path, context, backend, etc.).
 	// Display fields (Label, Family, Description, Icon, Tags) come from the
@@ -272,14 +280,18 @@ func configFromCatalog(
 		Default:     c.IsDefault,
 		Type:        "", // inference (services are separate)
 		Services: []config.Service{{
-			Model:     modelPath,
-			Alias:     c.Name,
-			Context:   c.NCtx,
-			PortRole:  "a1", // slot is runtime now, but V4 read sites (SwitchMode) expect this
-			Backend:   build.Backend,
-			LlamaBin:  build.BinaryPath,
-			MMProj:    mmprojPath,
-			ExtraArgs: c.ExtraArgs,
+			Model:      modelPath,
+			Alias:      c.Name,
+			Context:    c.NCtx,
+			PortRole:   "a1", // slot is runtime now, but V4 read sites (SwitchMode) expect this
+			Backend:    build.Backend,
+			EngineKind: engineKind,
+			LlamaBin:   build.BinaryPath,
+			MMProj:     mmprojPath,
+			ExtraArgs:  c.ExtraArgs,
+			LaunchEnv:  build.LaunchEnv,
+
+			BuildID: c.BuildID, VariantID: c.VariantID, WeightArtifactID: c.WeightArtifactID,
 			// 120s was too tight for laguna-s-21 (118B-A8B + DFlash draft head,
 			// 262144 ctx): a still-draining GTT pool from the prior slot's
 			// unload (waitGTTDrain only waits 20s before proceeding anyway,

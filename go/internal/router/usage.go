@@ -278,6 +278,12 @@ func nonZeroInt64Ptr(v int64) *int64 {
 }
 
 func (s *Server) recordExternalUsage(resolved ResolvedBackend, model string, buf []byte, streaming bool) {
+	s.recordExternalUsageFor(context.Background(), resolved, model, buf, streaming)
+}
+
+// recordExternalUsageFor is recordExternalUsage for a request that has a flight in ctx: the row is handed to the flight,
+// which writes it once with the request's timing attached (flight.finish); without a flight it is written at once.
+func (s *Server) recordExternalUsageFor(reqCtx context.Context, resolved ResolvedBackend, model string, buf []byte, streaming bool) {
 	if s.deps.Usage == nil {
 		return
 	}
@@ -314,6 +320,10 @@ func (s *Server) recordExternalUsage(resolved ResolvedBackend, model string, buf
 		}
 	}
 
+	if f := flightFrom(reqCtx); f != nil {
+		f.setExternal(&ev)
+		return
+	}
 	// Best-effort: never block or fail the (already-completed) request over
 	// a usage-recording error.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -353,18 +363,25 @@ func (s *Server) ledgerObserve(ctx context.Context, r *http.Request, bodyBytes [
 	return ctx
 }
 
-// ledgerTap wraps a committed 2xx local-slot response so cache_n/prompt_n can
+// ledgerTap wraps a committed 2xx local-slot response so cached/computed prompt tokens can
 // be reported to the ledger once the body has been fully relayed. No-op when
 // there is no ticket or the body is content-encoded (unparseable).
-func (s *Server) ledgerTap(ctx context.Context, resp *http.Response, streaming bool) {
+func (s *Server) ledgerTap(ctx context.Context, resp *http.Response, streaming bool, port int) {
 	t, _ := ctx.Value(ledgerTicketKey{}).(*ctxledger.Ticket)
 	if t == nil || resp.Header.Get("Content-Encoding") != "" {
+		return
+	}
+	// The parser is the one the slot's engine kind names (llama.cpp timings, or OpenAI cached_tokens for Radiance).
+	spec := s.slotSpec(port)
+	parse, ok := ctxledger.ParserFor(spec.Ledger)
+	if !ok {
+		log.Printf("router: kind %q names unknown ledger parser %q; reuse for port %d is not measured", spec.Name, spec.Ledger, port)
 		return
 	}
 	resp.Body = newUsageTap(resp.Body, streaming, func(buf []byte) {
 		go func() {
 			defer func() { _ = recover() }()
-			if c, p, ok := ctxledger.ParseTimings(buf, streaming); ok {
+			if c, p, ok := parse(buf, streaming); ok {
 				t.Reuse(c, p)
 			}
 		}()

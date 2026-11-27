@@ -41,6 +41,7 @@ import (
 	"github.com/jsaigou/the-forge/internal/smith/comfyui"
 	"github.com/jsaigou/the-forge/internal/smith/procedures"
 	"github.com/jsaigou/the-forge/internal/smith/web"
+	"github.com/jsaigou/the-forge/internal/speechsetup"
 	"github.com/jsaigou/the-forge/internal/store"
 )
 
@@ -576,6 +577,13 @@ type Deps struct {
 	// resolution, configured n_ctx for the n_ctx check). nil = the checks
 	// that need it skip themselves; the brain resolves deterministic_only.
 	Catalog store.Catalog
+	// ConfigBuilds repoints a Config at another Build (build_refresh's promote and revert). It is the catalog's narrow write
+	// (store.ConfigWrites.SetBuild): it re-reads the Config and changes only its Build, then clears the config caches. Nothing in smith writes a
+	// whole Config back.
+	ConfigBuilds ConfigBuilds
+	// Builds registers and retires Builds for build_refresh (store.BuildWrites): a candidate build is validated like one registered through the
+	// API, and retiring one re-reads the row, refuses while a Config uses it, and clears the config caches.
+	Builds BuildWriter
 
 	// Registry is the config-card assembler (go/internal/registry) —
 	// family/capabilities/measured performance/memory footprint for the
@@ -698,6 +706,12 @@ type Deps struct {
 	// pure file read, still runs).
 	BinaryVersion func(ctx context.Context, path string) (string, error)
 
+	// CheckBuildBinary is the shared build-binary guard (internal/buildguard, ADR-0020 F8): it returns a reason when
+	// a path may not be registered as a catalog build, "" when it may. build_refresh applies it to the candidate it
+	// is about to register, the same rule the builds API applies. nil ⇒ no check (tests, and a deployment that does
+	// not wire it).
+	CheckBuildBinary func(ctx context.Context, path string) string
+
 	// GitAhead counts how many commits the source tree is AHEAD of a given
 	// ref (e.g. "origin/master") — binary_versions' upstream-drift probe
 	// (2026-08-17 build-refresh addition). Production wires
@@ -725,7 +739,7 @@ type Deps struct {
 	// a tracked fork's remote HEAD against last_built_upstream_sha, and
 	// build_refresh's build_record_upstream_sha step records it mid-run.
 	// The URL comes from operator-editable settings/DB data; production
-	// wiring re-validates it against smith.upstreamURLAllowed before
+	// wiring re-validates it against hostprobe.ValidateUpstreamURL before
 	// exec'ing anything. nil ⇒ tracking-enabled forks fail closed (the op)
 	// or report themselves unmeasurable (the check) — never silently OK.
 	GitLsRemote func(ctx context.Context, url string) (string, error)
@@ -800,6 +814,12 @@ type Deps struct {
 	// "" or an absent file ⇒ the blocked-work KB is honestly empty (a
 	// fresh install has no externally-blocked items yet).
 	BlockedWorkPath string
+
+	// SpecialistProblems lists always-on specialist-pool members that should be running and are not (ADR-0022). nil = no pool.
+	SpecialistProblems func(ctx context.Context) []SpecialistProblem
+
+	// SpeechReport says what the node can do with speech (the speech_readiness check). nil = no engine pool.
+	SpeechReport func(ctx context.Context) (speechsetup.Report, error)
 
 	// JournalErrors reads the last n error lines from forge-* unit
 	// journals (the smith fast-path "what does the error log show?" answer,
@@ -1759,3 +1779,20 @@ func summarizeMetrics(m collector.Metrics) *MetricsSummary {
 
 // ErrNotFound is surfaced by findings reads when the store is not wired.
 var ErrStoreUnwired = errors.New("smith: store not wired")
+
+// ConfigBuilds is the one write smith makes to a Config: pointing it at another Build.
+type ConfigBuilds interface {
+	SetBuild(ctx context.Context, configID, buildID int64) (store.Config, error)
+}
+
+// ErrConfigBuildsUnwired means smith was built without a ConfigBuilds writer, so build_refresh cannot repoint a Config.
+var ErrConfigBuildsUnwired = errors.New("smith: ConfigBuilds not wired (cannot repoint a config at another build)")
+
+// BuildWriter is the Build writes smith makes: registering a candidate and retiring a cleaned-up Build.
+type BuildWriter interface {
+	Create(ctx context.Context, b store.Build) (store.Build, error)
+	Retire(ctx context.Context, id int64, reasonSuffix string) (store.Build, error)
+}
+
+// ErrBuildWritesUnwired means smith was built without a Builds writer, so build_refresh cannot register or retire a Build.
+var ErrBuildWritesUnwired = errors.New("smith: Builds not wired (cannot register or retire a build)")

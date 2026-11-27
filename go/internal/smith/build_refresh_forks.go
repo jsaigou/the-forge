@@ -32,7 +32,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
+
+	"github.com/jsaigou/the-forge/internal/hostprobe"
 )
 
 // buildBackendFlags is one (source tree, backend) pair's real cmake
@@ -260,29 +261,12 @@ func (s *Smith) resolvedForkUpstreams(ctx context.Context) ([]forkUpstreamTrack,
 		}
 		eff := effectiveForkUpstream(fork, rowPtr)
 		if eff.TrackUpstream {
-			if ok, _ := upstreamURLAllowed(eff.UpstreamURL); ok {
+			if ok, _ := hostprobe.ValidateUpstreamURL(eff.UpstreamURL); ok {
 				out = append(out, eff)
 			}
 		}
 	}
 	return out, nil
-}
-
-// upstreamURLAllowed guards every git ls-remote invocation against a URL
-// from settings/DB data (operator-editable, not compile-time constants):
-// https(s) only, no whitespace/control/shell metacharacters — same
-// injection-guard shape as BinaryPathAllowed/gitRootAllowed.
-func upstreamURLAllowed(url string) (bool, string) {
-	if url == "" {
-		return false, "empty url"
-	}
-	if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://") {
-		return false, "only http(s) git URLs are allowed"
-	}
-	if strings.ContainsAny(url, "\t\n\r ;|&$`\"'\\") {
-		return false, "url contains disallowed characters"
-	}
-	return true, ""
 }
 
 // recordForkLastBuiltSha upserts last_built_upstream_sha for one fork's

@@ -37,6 +37,7 @@ func runMintKey(args []string) error {
 		display = fs.String("display-name", "", "preferred human-facing consumer label (slot attribution); optional")
 		bindIP  = fs.String("bind-ip", "", "restrict this key to requests from exactly this client IP; empty (default) = unbound")
 		ttl     = fs.Duration("ttl", 0, "expire this key after the given duration (e.g. 2160h for 90 days); 0 (default) = never expires")
+		scope   = fs.String("scope", "", "narrow a forge key to part of the API: catalog = only /api/v1/catalog/* (-ttl required, at most 24h); speech = only the two speech-engine calls and the reads of the engine list and speech readiness, for forge-tts (-ttl required, at most 8760h, and -bind-ip 127.0.0.1 required); duplex = only the three duplex-engine calls (resolve, renew, release), for forge-duplex (same limits as speech); speech-setup = only listing and registering speech engines and reading speech readiness (-ttl required, at most 24h)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -84,7 +85,15 @@ func runMintKey(args []string) error {
 	}
 
 	auth := authz.New(db)
-	token, err := auth.MintKey(context.Background(), kk, *name, *display, r, *bindIP, expiresAt)
+	var token string
+	if *scope != "" {
+		if kk != authz.KindForge {
+			return fmt.Errorf("-scope applies to -kind forge only")
+		}
+		token, err = auth.MintScopedKey(context.Background(), *name, *display, r, *bindIP, expiresAt, *scope)
+	} else {
+		token, err = auth.MintKey(context.Background(), kk, *name, *display, r, *bindIP, expiresAt)
+	}
 	if err != nil {
 		return fmt.Errorf("mint key: %w", err)
 	}

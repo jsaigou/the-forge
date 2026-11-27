@@ -119,6 +119,7 @@ func newIncidentManager(t *testing.T, cfg *config.Config, sys *fakeSys, gpu *col
 	if err != nil {
 		t.Fatal(err)
 	}
+	m.d.SlotLaunches = seededRowDB(t, cfg).SlotLaunches() // seeded launch rows are what the engine reads back (wired after construction: no adopt step)
 	return m, usage, notify
 }
 
@@ -145,8 +146,9 @@ func TestMemoryBudgetCountsVulkanSlotRSS(t *testing.T) {
 	}
 }
 
-// Kernel-reported headroom caps FreeBytes: never plan into the reserve.
-func TestMemoryBudgetCapsFreeByHostHeadroom(t *testing.T) {
+// The dynamic floor: MemAvailable minus the host floor bounds a new load even when the GTT ceiling and the declared partition say there is
+// room. This is the 2026-08-22 guard; 22d0b34 had replaced it with a constant that never bound (2026-11-17 review).
+func TestMemoryBudgetCapsFreeByHostAvailability(t *testing.T) {
 	cfg := testConfig(t)
 	sys := newFakeSys()
 	gpu := incidentGPU(t, 0, int64(122880)*1024*1024)
@@ -160,9 +162,9 @@ func TestMemoryBudgetCapsFreeByHostHeadroom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantCap := int64(2) * incidentGiB // MemAvailable − 8 GiB reserve
-	if b.FreeBytes > wantCap {
-		t.Errorf("FreeBytes = %d, must be capped at %d by MemAvailable", b.FreeBytes, wantCap)
+	wantCap := int64(2) * incidentGiB // MemAvailable 10 GiB - 8 GiB host floor
+	if b.FreeBytes != wantCap || b.Ledger.Binding != "host" {
+		t.Errorf("FreeBytes = %d (binding %q), want %d bound by the host floor", b.FreeBytes, b.Ledger.Binding, wantCap)
 	}
 }
 

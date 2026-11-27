@@ -1,0 +1,154 @@
+{
+  "title": "Engines",
+  "lede": "Small, purpose-built engines that stay loaded because latency matters, each in its own dedicated slot. Separate from the LLM slots on the Console.",
+  "loading": "Loading engines…",
+  "load_failed": "Couldn’t load the dedicated slots.",
+  "no_slots": "No dedicated slots are set up on this server yet.",
+  "click_hint": "Click a card for details and controls",
+  "policy": {
+    "always_on": "Always on",
+    "on_demand": "On demand"
+  },
+  "state": {
+    "empty": "Empty",
+    "starting": "Starting",
+    "running": "Running",
+    "failed": "Failed",
+    "stopped": "Stopped",
+    "free": "Free slot",
+    "not_loaded": "Not loaded",
+    "stopping": "Stopping"
+  },
+  "function": {
+    "embeddings": "Embeddings",
+    "speech": "Speech",
+    "transcription": "Transcription",
+    "alignment": "Alignment",
+    "duplex": "Speech-to-speech",
+    "decisions": "Decisions"
+  },
+  "card": {
+    "add": "Add",
+    "serves": "Serves",
+    "memory": "Memory",
+    "idle": "Idle",
+    "retry": "Retry now",
+    "failed": "Failed",
+    "start": "Start",
+    "show_log": "Show log",
+    "hide_log": "Hide log",
+    "log": "Recent log lines",
+    "log_loading": "Loading…",
+    "log_empty": "The process has not logged anything recently.",
+    "unload_now": "Unload now"
+  },
+  "add": {
+    "cancel": "Cancel"
+  },
+  "defaults": {
+    "title": "Function defaults",
+    "explainer": "What a0 answers with when a request names no specific member. A request that names a member goes to that member.",
+    "none": "None (use the old route)"
+  },
+  "strip": {
+    "title": "Engines",
+    "open": "Open",
+    "numbered": "{{n}} {{type}}",
+    "type": {
+      "embeddings": "Embedding",
+      "speech": "TTS",
+      "transcription": "STT",
+      "alignment": "Aligner",
+      "duplex": "Speech-to-speech",
+      "decisions": "Decisions",
+      "other": "Engine"
+    }
+  },
+  "behavior": {
+    "label": "Behavior",
+    "always_on": "Always on",
+    "on_demand": "On demand",
+    "disabled": "Disabled"
+  },
+  "say": {
+    "starting": "Starting… This usually takes under a minute. Nothing for you to do.",
+    "stopped": "Stopped. Press Start to bring it back.",
+    "running_always_on": "Running. Reserved for this engine; nothing can push it out.",
+    "running_on_demand": "Running. It loads when used and is unloaded when idle and the space is needed.",
+    "failed": "It could not start: {{error}}",
+    "unknown_error": "no reason was reported",
+    "retrying": "It keeps trying again by itself, a little less often each time (attempt {{n}}).",
+    "stopping": "Stopping… A member that is busy finishes its work first, which can take a minute. Nothing for you to do."
+  },
+  "notice": {
+    "always_on": "{{name}} is now always on.",
+    "on_demand": "{{name}} is now on demand.",
+    "disabled": "{{name}} is disabled: unloaded, and its slot is free.",
+    "slot_added": "Added slot {{slot}}. No restart needed.",
+    "added_always_on": "{{name}} added. It is always on, in slot {{slot}}.",
+    "added_on_demand": "{{name}} added. It loads the first time it is used.",
+    "stopping": "{{name}} is stopping. Its slot frees when it finishes.",
+    "stopping_slot": "{{slot}} is stopping. It frees when the member finishes."
+  },
+  "capacity": {
+    "add_slot": "+ Add a slot",
+    "at_limit": "Slot limit reached"
+  },
+  "free_slots_one": "{{count}} free slot",
+  "free_slots_other": "{{count}} free slots",
+  "yours": {
+    "title": "Your engines"
+  },
+  "standby": {
+    "title": "On standby",
+    "note": "(not holding a slot)",
+    "state_waiting": "Loads when used",
+    "state_disabled": "Disabled",
+    "disabled_catalog": "Disabled as an engine. This model loads into the LLM slots on demand, as any model does.",
+    "disabled_service": "Disabled. Not loaded, and nothing uses it until you enable it."
+  },
+  "explainer_toggle": "What do Always on, On demand and Disabled mean?",
+  "behavior_explainer": "Always on: a slot is reserved for it. It starts with the server, restarts by itself if it stops, and nothing can push it out. On demand: it loads on first use and is unloaded after it has been idle for a while, but only if the space is needed. Disabled: unloaded and its slot is free; it stays registered.",
+  "add_specialist": "+ Add engine",
+  "wizard": {
+    "title": "Add an engine",
+    "step_what": "What",
+    "step_how": "How",
+    "step_confirm": "Confirm",
+    "what_q": "What do you want to keep loaded?",
+    "src_catalog": "A model from the catalog",
+    "src_catalog_d": "Any model you already have: decisions, speech, vision, chat.",
+    "src_service": "A built-in engine",
+    "src_service_d": "Speech, transcription, embeddings and similar engines that are already set up.",
+    "search": "Search by name or what it does",
+    "none_catalog": "Every visible model is already an engine.",
+    "none_service": "No built-in engine is waiting to be turned on.",
+    "how_q": "How should it behave?",
+    "how_always_on": "A slot is reserved for it. It starts with the server, restarts by itself if it stops, and nothing can push it out.",
+    "how_on_demand": "It loads the first time it is used, and is unloaded after it has been idle for a while, but only if the space is needed.",
+    "ready": "Ready to add",
+    "goes_in": "It will go in slot {{slot}}.",
+    "goes_in_new": "It needs a slot of its own.",
+    "loads_on_use": "It loads the first time it is used.",
+    "about": "About {{gb}} GB.",
+    "free": "{{gb}} GB free.",
+    "pool_full": "All {{n}} dedicated slots are in use. Add one more slot to continue.",
+    "pool_limit": "All dedicated slots are in use and the limit is reached. Disable another engine first.",
+    "big": "{{name}} needs about {{gb}} GB, {{pct}}% of this machine’s memory. Keeping it loaded all the time leaves less room for other models. Free now: {{free}} GB.",
+    "cannot_fit": "{{name}} needs about {{gb}} GB, but this machine has {{total}} GB in total, so it cannot be kept loaded.",
+    "one_owner": "From now on this model is managed here. It will not load into an LLM slot, so there is never a second copy.",
+    "back": "Back",
+    "next": "Next",
+    "add": "Add engine",
+    "add_slot_and_go": "Add a slot and continue",
+    "no_match": "Nothing matches that search."
+  },
+  "modelcard": {
+    "label": "Dedicated slot",
+    "badge": "Engine",
+    "running_in": "running in {{slot}}",
+    "open": "Open in Engines",
+    "managed_note": "Managed on the Engines tab. It stays loaded there and never loads into an LLM slot, so there is no second copy.",
+    "disabled_note": "Disabled: this model works as it always has and loads into the LLM slots when needed. Choose On demand or Always on to keep it ready in a dedicated slot."
+  }
+}

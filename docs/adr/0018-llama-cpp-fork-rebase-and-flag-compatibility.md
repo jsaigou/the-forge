@@ -1,6 +1,7 @@
 # Keep the llama.cpp fork thin: rebase onto upstream, drop what upstream absorbed, pick flags per build
 
-Status: accepted (2026-10-23).
+Status: accepted (2026-10-23). **Partly superseded by ADR-0019 (2026-11-01):** the two carried patches were retired
+because plain upstream matched them. The per-build flag spelling and registrar rules below still stand.
 
 ## Context
 

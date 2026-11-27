@@ -1,0 +1,797 @@
+{
+ "reference": "higurashi-ai/Haru 7fe6b76 haru/prompt.py render_card",
+ "fields": [
+  "persona",
+  "name",
+  "gender",
+  "backchannel",
+  "other_name",
+  "relationship",
+  "situation"
+ ],
+ "cases": [
+  {
+   "language": "ja",
+   "case": "full",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "female",
+    "backchannel": "mid"
+   },
+   "text": "あなたは以下の人物として、相手と音声で会話します。\n【あなたの人物設定】\nA calm, professional guide.\nSpeaks plainly.\n【あなたの名前】\nHaru\n【あなたの性別】\n女性\n【あなたの相づち】\n普通\n【相手の名前】\nSam\n【関係性】\ncolleagues\n【状況】\nA quick check-in before a meeting."
+  },
+  {
+   "language": "ja",
+   "case": "full_other_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "male",
+    "backchannel": "low"
+   },
+   "text": "あなたは以下の人物として、相手と音声で会話します。\n【あなたの人物設定】\nA calm, professional guide.\nSpeaks plainly.\n【あなたの名前】\nHaru\n【あなたの性別】\n男性\n【あなたの相づち】\n少なめ\n【相手の名前】\nSam\n【関係性】\ncolleagues\n【状況】\nA quick check-in before a meeting."
+  },
+  {
+   "language": "ja",
+   "case": "persona_only",
+   "card": {
+    "persona": "Only a persona."
+   },
+   "text": "あなたは以下の人物として、相手と音声で会話します。\n【あなたの人物設定】\nOnly a persona."
+  },
+  {
+   "language": "ja",
+   "case": "empty_card",
+   "card": {},
+   "text": "あなたは以下の人物として、相手と音声で会話します。"
+  },
+  {
+   "language": "ja",
+   "case": "whitespace_and_none",
+   "card": {
+    "persona": "  padded  ",
+    "name": null,
+    "gender": "  ",
+    "other_name": "\t"
+   },
+   "text": "あなたは以下の人物として、相手と音声で会話します。\n【あなたの人物設定】\npadded"
+  },
+  {
+   "language": "ja",
+   "case": "unknown_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "nonbinary",
+    "backchannel": "max"
+   },
+   "text": "あなたは以下の人物として、相手と音声で会話します。\n【あなたの人物設定】\nA calm, professional guide.\nSpeaks plainly.\n【あなたの名前】\nHaru\n【相手の名前】\nSam\n【関係性】\ncolleagues\n【状況】\nA quick check-in before a meeting."
+  },
+  {
+   "language": "ja",
+   "case": "unicode_multiline",
+   "card": {
+    "persona": "Line one ☃ 😀\n\nLine three: ü 日本語",
+    "name": "Élodie"
+   },
+   "text": "あなたは以下の人物として、相手と音声で会話します。\n【あなたの人物設定】\nLine one ☃ 😀\n\nLine three: ü 日本語\n【あなたの名前】\nÉlodie"
+  },
+  {
+   "language": "ja",
+   "case": "extra_keys_ignored",
+   "card": {
+    "persona": "x",
+    "language": "ja",
+    "unrelated": "ignored",
+    "situation": "y"
+   },
+   "text": "あなたは以下の人物として、相手と音声で会話します。\n【あなたの人物設定】\nx\n【状況】\ny"
+  },
+  {
+   "language": "en",
+   "case": "full",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "female",
+    "backchannel": "mid"
+   },
+   "text": "You are the person described below, talking with the other person by voice.\n[Your Persona]\nA calm, professional guide.\nSpeaks plainly.\n[Your Name]\nHaru\n[Your Gender]\nfemale\n[Your Backchannels]\nmoderate\n[The Other Person's Name]\nSam\n[Relationship]\ncolleagues\n[Situation]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "en",
+   "case": "full_other_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "male",
+    "backchannel": "low"
+   },
+   "text": "You are the person described below, talking with the other person by voice.\n[Your Persona]\nA calm, professional guide.\nSpeaks plainly.\n[Your Name]\nHaru\n[Your Gender]\nmale\n[Your Backchannels]\nsparse\n[The Other Person's Name]\nSam\n[Relationship]\ncolleagues\n[Situation]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "en",
+   "case": "persona_only",
+   "card": {
+    "persona": "Only a persona."
+   },
+   "text": "You are the person described below, talking with the other person by voice.\n[Your Persona]\nOnly a persona."
+  },
+  {
+   "language": "en",
+   "case": "empty_card",
+   "card": {},
+   "text": "You are the person described below, talking with the other person by voice."
+  },
+  {
+   "language": "en",
+   "case": "whitespace_and_none",
+   "card": {
+    "persona": "  padded  ",
+    "name": null,
+    "gender": "  ",
+    "other_name": "\t"
+   },
+   "text": "You are the person described below, talking with the other person by voice.\n[Your Persona]\npadded"
+  },
+  {
+   "language": "en",
+   "case": "unknown_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "nonbinary",
+    "backchannel": "max"
+   },
+   "text": "You are the person described below, talking with the other person by voice.\n[Your Persona]\nA calm, professional guide.\nSpeaks plainly.\n[Your Name]\nHaru\n[The Other Person's Name]\nSam\n[Relationship]\ncolleagues\n[Situation]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "en",
+   "case": "unicode_multiline",
+   "card": {
+    "persona": "Line one ☃ 😀\n\nLine three: ü 日本語",
+    "name": "Élodie"
+   },
+   "text": "You are the person described below, talking with the other person by voice.\n[Your Persona]\nLine one ☃ 😀\n\nLine three: ü 日本語\n[Your Name]\nÉlodie"
+  },
+  {
+   "language": "en",
+   "case": "extra_keys_ignored",
+   "card": {
+    "persona": "x",
+    "language": "en",
+    "unrelated": "ignored",
+    "situation": "y"
+   },
+   "text": "You are the person described below, talking with the other person by voice.\n[Your Persona]\nx\n[Situation]\ny"
+  },
+  {
+   "language": "zh",
+   "case": "full",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "female",
+    "backchannel": "mid"
+   },
+   "text": "你是下面描述的人物，正在和对方进行语音对话。\n【你的人物设定】\nA calm, professional guide.\nSpeaks plainly.\n【你的名字】\nHaru\n【你的性别】\n女性\n【你的附和】\n适量\n【对方的名字】\nSam\n【关系】\ncolleagues\n【情境】\nA quick check-in before a meeting."
+  },
+  {
+   "language": "zh",
+   "case": "full_other_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "male",
+    "backchannel": "low"
+   },
+   "text": "你是下面描述的人物，正在和对方进行语音对话。\n【你的人物设定】\nA calm, professional guide.\nSpeaks plainly.\n【你的名字】\nHaru\n【你的性别】\n男性\n【你的附和】\n少\n【对方的名字】\nSam\n【关系】\ncolleagues\n【情境】\nA quick check-in before a meeting."
+  },
+  {
+   "language": "zh",
+   "case": "persona_only",
+   "card": {
+    "persona": "Only a persona."
+   },
+   "text": "你是下面描述的人物，正在和对方进行语音对话。\n【你的人物设定】\nOnly a persona."
+  },
+  {
+   "language": "zh",
+   "case": "empty_card",
+   "card": {},
+   "text": "你是下面描述的人物，正在和对方进行语音对话。"
+  },
+  {
+   "language": "zh",
+   "case": "whitespace_and_none",
+   "card": {
+    "persona": "  padded  ",
+    "name": null,
+    "gender": "  ",
+    "other_name": "\t"
+   },
+   "text": "你是下面描述的人物，正在和对方进行语音对话。\n【你的人物设定】\npadded"
+  },
+  {
+   "language": "zh",
+   "case": "unknown_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "nonbinary",
+    "backchannel": "max"
+   },
+   "text": "你是下面描述的人物，正在和对方进行语音对话。\n【你的人物设定】\nA calm, professional guide.\nSpeaks plainly.\n【你的名字】\nHaru\n【对方的名字】\nSam\n【关系】\ncolleagues\n【情境】\nA quick check-in before a meeting."
+  },
+  {
+   "language": "zh",
+   "case": "unicode_multiline",
+   "card": {
+    "persona": "Line one ☃ 😀\n\nLine three: ü 日本語",
+    "name": "Élodie"
+   },
+   "text": "你是下面描述的人物，正在和对方进行语音对话。\n【你的人物设定】\nLine one ☃ 😀\n\nLine three: ü 日本語\n【你的名字】\nÉlodie"
+  },
+  {
+   "language": "zh",
+   "case": "extra_keys_ignored",
+   "card": {
+    "persona": "x",
+    "language": "zh",
+    "unrelated": "ignored",
+    "situation": "y"
+   },
+   "text": "你是下面描述的人物，正在和对方进行语音对话。\n【你的人物设定】\nx\n【情境】\ny"
+  },
+  {
+   "language": "ko",
+   "case": "full",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "female",
+    "backchannel": "mid"
+   },
+   "text": "당신은 아래에 설명된 인물이며, 상대방과 음성으로 대화합니다.\n[당신의 인물 설정]\nA calm, professional guide.\nSpeaks plainly.\n[당신의 이름]\nHaru\n[당신의 성별]\n여성\n[당신의 맞장구]\n보통\n[상대방의 이름]\nSam\n[관계]\ncolleagues\n[상황]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "ko",
+   "case": "full_other_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "male",
+    "backchannel": "low"
+   },
+   "text": "당신은 아래에 설명된 인물이며, 상대방과 음성으로 대화합니다.\n[당신의 인물 설정]\nA calm, professional guide.\nSpeaks plainly.\n[당신의 이름]\nHaru\n[당신의 성별]\n남성\n[당신의 맞장구]\n적음\n[상대방의 이름]\nSam\n[관계]\ncolleagues\n[상황]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "ko",
+   "case": "persona_only",
+   "card": {
+    "persona": "Only a persona."
+   },
+   "text": "당신은 아래에 설명된 인물이며, 상대방과 음성으로 대화합니다.\n[당신의 인물 설정]\nOnly a persona."
+  },
+  {
+   "language": "ko",
+   "case": "empty_card",
+   "card": {},
+   "text": "당신은 아래에 설명된 인물이며, 상대방과 음성으로 대화합니다."
+  },
+  {
+   "language": "ko",
+   "case": "whitespace_and_none",
+   "card": {
+    "persona": "  padded  ",
+    "name": null,
+    "gender": "  ",
+    "other_name": "\t"
+   },
+   "text": "당신은 아래에 설명된 인물이며, 상대방과 음성으로 대화합니다.\n[당신의 인물 설정]\npadded"
+  },
+  {
+   "language": "ko",
+   "case": "unknown_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "nonbinary",
+    "backchannel": "max"
+   },
+   "text": "당신은 아래에 설명된 인물이며, 상대방과 음성으로 대화합니다.\n[당신의 인물 설정]\nA calm, professional guide.\nSpeaks plainly.\n[당신의 이름]\nHaru\n[상대방의 이름]\nSam\n[관계]\ncolleagues\n[상황]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "ko",
+   "case": "unicode_multiline",
+   "card": {
+    "persona": "Line one ☃ 😀\n\nLine three: ü 日本語",
+    "name": "Élodie"
+   },
+   "text": "당신은 아래에 설명된 인물이며, 상대방과 음성으로 대화합니다.\n[당신의 인물 설정]\nLine one ☃ 😀\n\nLine three: ü 日本語\n[당신의 이름]\nÉlodie"
+  },
+  {
+   "language": "ko",
+   "case": "extra_keys_ignored",
+   "card": {
+    "persona": "x",
+    "language": "ko",
+    "unrelated": "ignored",
+    "situation": "y"
+   },
+   "text": "당신은 아래에 설명된 인물이며, 상대방과 음성으로 대화합니다.\n[당신의 인물 설정]\nx\n[상황]\ny"
+  },
+  {
+   "language": "es",
+   "case": "full",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "female",
+    "backchannel": "mid"
+   },
+   "text": "Eres la persona descrita a continuación y conversas de viva voz con la otra persona.\n[Tu perfil]\nA calm, professional guide.\nSpeaks plainly.\n[Tu nombre]\nHaru\n[Tu género]\nmujer\n[Tus respuestas breves]\nmoderadas\n[Nombre de la otra persona]\nSam\n[Relación]\ncolleagues\n[Situación]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "es",
+   "case": "full_other_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "male",
+    "backchannel": "low"
+   },
+   "text": "Eres la persona descrita a continuación y conversas de viva voz con la otra persona.\n[Tu perfil]\nA calm, professional guide.\nSpeaks plainly.\n[Tu nombre]\nHaru\n[Tu género]\nhombre\n[Tus respuestas breves]\npocas\n[Nombre de la otra persona]\nSam\n[Relación]\ncolleagues\n[Situación]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "es",
+   "case": "persona_only",
+   "card": {
+    "persona": "Only a persona."
+   },
+   "text": "Eres la persona descrita a continuación y conversas de viva voz con la otra persona.\n[Tu perfil]\nOnly a persona."
+  },
+  {
+   "language": "es",
+   "case": "empty_card",
+   "card": {},
+   "text": "Eres la persona descrita a continuación y conversas de viva voz con la otra persona."
+  },
+  {
+   "language": "es",
+   "case": "whitespace_and_none",
+   "card": {
+    "persona": "  padded  ",
+    "name": null,
+    "gender": "  ",
+    "other_name": "\t"
+   },
+   "text": "Eres la persona descrita a continuación y conversas de viva voz con la otra persona.\n[Tu perfil]\npadded"
+  },
+  {
+   "language": "es",
+   "case": "unknown_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "nonbinary",
+    "backchannel": "max"
+   },
+   "text": "Eres la persona descrita a continuación y conversas de viva voz con la otra persona.\n[Tu perfil]\nA calm, professional guide.\nSpeaks plainly.\n[Tu nombre]\nHaru\n[Nombre de la otra persona]\nSam\n[Relación]\ncolleagues\n[Situación]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "es",
+   "case": "unicode_multiline",
+   "card": {
+    "persona": "Line one ☃ 😀\n\nLine three: ü 日本語",
+    "name": "Élodie"
+   },
+   "text": "Eres la persona descrita a continuación y conversas de viva voz con la otra persona.\n[Tu perfil]\nLine one ☃ 😀\n\nLine three: ü 日本語\n[Tu nombre]\nÉlodie"
+  },
+  {
+   "language": "es",
+   "case": "extra_keys_ignored",
+   "card": {
+    "persona": "x",
+    "language": "es",
+    "unrelated": "ignored",
+    "situation": "y"
+   },
+   "text": "Eres la persona descrita a continuación y conversas de viva voz con la otra persona.\n[Tu perfil]\nx\n[Situación]\ny"
+  },
+  {
+   "language": "fr",
+   "case": "full",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "female",
+    "backchannel": "mid"
+   },
+   "text": "Vous êtes la personne décrite ci-dessous et vous parlez de vive voix avec l'autre personne.\n[Votre profil]\nA calm, professional guide.\nSpeaks plainly.\n[Votre nom]\nHaru\n[Votre genre]\nfemme\n[Vos réactions d'écoute]\nmodérées\n[Nom de l'autre personne]\nSam\n[Relation]\ncolleagues\n[Situation]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "fr",
+   "case": "full_other_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "male",
+    "backchannel": "low"
+   },
+   "text": "Vous êtes la personne décrite ci-dessous et vous parlez de vive voix avec l'autre personne.\n[Votre profil]\nA calm, professional guide.\nSpeaks plainly.\n[Votre nom]\nHaru\n[Votre genre]\nhomme\n[Vos réactions d'écoute]\npeu\n[Nom de l'autre personne]\nSam\n[Relation]\ncolleagues\n[Situation]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "fr",
+   "case": "persona_only",
+   "card": {
+    "persona": "Only a persona."
+   },
+   "text": "Vous êtes la personne décrite ci-dessous et vous parlez de vive voix avec l'autre personne.\n[Votre profil]\nOnly a persona."
+  },
+  {
+   "language": "fr",
+   "case": "empty_card",
+   "card": {},
+   "text": "Vous êtes la personne décrite ci-dessous et vous parlez de vive voix avec l'autre personne."
+  },
+  {
+   "language": "fr",
+   "case": "whitespace_and_none",
+   "card": {
+    "persona": "  padded  ",
+    "name": null,
+    "gender": "  ",
+    "other_name": "\t"
+   },
+   "text": "Vous êtes la personne décrite ci-dessous et vous parlez de vive voix avec l'autre personne.\n[Votre profil]\npadded"
+  },
+  {
+   "language": "fr",
+   "case": "unknown_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "nonbinary",
+    "backchannel": "max"
+   },
+   "text": "Vous êtes la personne décrite ci-dessous et vous parlez de vive voix avec l'autre personne.\n[Votre profil]\nA calm, professional guide.\nSpeaks plainly.\n[Votre nom]\nHaru\n[Nom de l'autre personne]\nSam\n[Relation]\ncolleagues\n[Situation]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "fr",
+   "case": "unicode_multiline",
+   "card": {
+    "persona": "Line one ☃ 😀\n\nLine three: ü 日本語",
+    "name": "Élodie"
+   },
+   "text": "Vous êtes la personne décrite ci-dessous et vous parlez de vive voix avec l'autre personne.\n[Votre profil]\nLine one ☃ 😀\n\nLine three: ü 日本語\n[Votre nom]\nÉlodie"
+  },
+  {
+   "language": "fr",
+   "case": "extra_keys_ignored",
+   "card": {
+    "persona": "x",
+    "language": "fr",
+    "unrelated": "ignored",
+    "situation": "y"
+   },
+   "text": "Vous êtes la personne décrite ci-dessous et vous parlez de vive voix avec l'autre personne.\n[Votre profil]\nx\n[Situation]\ny"
+  },
+  {
+   "language": "de",
+   "case": "full",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "female",
+    "backchannel": "mid"
+   },
+   "text": "Du bist die unten beschriebene Person und sprichst mit der anderen Person.\n[Deine Persona]\nA calm, professional guide.\nSpeaks plainly.\n[Dein Name]\nHaru\n[Dein Geschlecht]\nweiblich\n[Deine kurzen Rückmeldungen]\nmittel\n[Name der anderen Person]\nSam\n[Beziehung]\ncolleagues\n[Situation]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "de",
+   "case": "full_other_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "male",
+    "backchannel": "low"
+   },
+   "text": "Du bist die unten beschriebene Person und sprichst mit der anderen Person.\n[Deine Persona]\nA calm, professional guide.\nSpeaks plainly.\n[Dein Name]\nHaru\n[Dein Geschlecht]\nmännlich\n[Deine kurzen Rückmeldungen]\nwenige\n[Name der anderen Person]\nSam\n[Beziehung]\ncolleagues\n[Situation]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "de",
+   "case": "persona_only",
+   "card": {
+    "persona": "Only a persona."
+   },
+   "text": "Du bist die unten beschriebene Person und sprichst mit der anderen Person.\n[Deine Persona]\nOnly a persona."
+  },
+  {
+   "language": "de",
+   "case": "empty_card",
+   "card": {},
+   "text": "Du bist die unten beschriebene Person und sprichst mit der anderen Person."
+  },
+  {
+   "language": "de",
+   "case": "whitespace_and_none",
+   "card": {
+    "persona": "  padded  ",
+    "name": null,
+    "gender": "  ",
+    "other_name": "\t"
+   },
+   "text": "Du bist die unten beschriebene Person und sprichst mit der anderen Person.\n[Deine Persona]\npadded"
+  },
+  {
+   "language": "de",
+   "case": "unknown_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "nonbinary",
+    "backchannel": "max"
+   },
+   "text": "Du bist die unten beschriebene Person und sprichst mit der anderen Person.\n[Deine Persona]\nA calm, professional guide.\nSpeaks plainly.\n[Dein Name]\nHaru\n[Name der anderen Person]\nSam\n[Beziehung]\ncolleagues\n[Situation]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "de",
+   "case": "unicode_multiline",
+   "card": {
+    "persona": "Line one ☃ 😀\n\nLine three: ü 日本語",
+    "name": "Élodie"
+   },
+   "text": "Du bist die unten beschriebene Person und sprichst mit der anderen Person.\n[Deine Persona]\nLine one ☃ 😀\n\nLine three: ü 日本語\n[Dein Name]\nÉlodie"
+  },
+  {
+   "language": "de",
+   "case": "extra_keys_ignored",
+   "card": {
+    "persona": "x",
+    "language": "de",
+    "unrelated": "ignored",
+    "situation": "y"
+   },
+   "text": "Du bist die unten beschriebene Person und sprichst mit der anderen Person.\n[Deine Persona]\nx\n[Situation]\ny"
+  },
+  {
+   "language": "pt",
+   "case": "full",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "female",
+    "backchannel": "mid"
+   },
+   "text": "Você é a pessoa descrita abaixo e conversa por voz com a outra pessoa.\n[Seu perfil]\nA calm, professional guide.\nSpeaks plainly.\n[Seu nome]\nHaru\n[Seu gênero]\nmulher\n[Suas respostas curtas]\nmoderadas\n[Nome da outra pessoa]\nSam\n[Relação]\ncolleagues\n[Situação]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "pt",
+   "case": "full_other_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "male",
+    "backchannel": "low"
+   },
+   "text": "Você é a pessoa descrita abaixo e conversa por voz com a outra pessoa.\n[Seu perfil]\nA calm, professional guide.\nSpeaks plainly.\n[Seu nome]\nHaru\n[Seu gênero]\nhomem\n[Suas respostas curtas]\npoucas\n[Nome da outra pessoa]\nSam\n[Relação]\ncolleagues\n[Situação]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "pt",
+   "case": "persona_only",
+   "card": {
+    "persona": "Only a persona."
+   },
+   "text": "Você é a pessoa descrita abaixo e conversa por voz com a outra pessoa.\n[Seu perfil]\nOnly a persona."
+  },
+  {
+   "language": "pt",
+   "case": "empty_card",
+   "card": {},
+   "text": "Você é a pessoa descrita abaixo e conversa por voz com a outra pessoa."
+  },
+  {
+   "language": "pt",
+   "case": "whitespace_and_none",
+   "card": {
+    "persona": "  padded  ",
+    "name": null,
+    "gender": "  ",
+    "other_name": "\t"
+   },
+   "text": "Você é a pessoa descrita abaixo e conversa por voz com a outra pessoa.\n[Seu perfil]\npadded"
+  },
+  {
+   "language": "pt",
+   "case": "unknown_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "nonbinary",
+    "backchannel": "max"
+   },
+   "text": "Você é a pessoa descrita abaixo e conversa por voz com a outra pessoa.\n[Seu perfil]\nA calm, professional guide.\nSpeaks plainly.\n[Seu nome]\nHaru\n[Nome da outra pessoa]\nSam\n[Relação]\ncolleagues\n[Situação]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "pt",
+   "case": "unicode_multiline",
+   "card": {
+    "persona": "Line one ☃ 😀\n\nLine three: ü 日本語",
+    "name": "Élodie"
+   },
+   "text": "Você é a pessoa descrita abaixo e conversa por voz com a outra pessoa.\n[Seu perfil]\nLine one ☃ 😀\n\nLine three: ü 日本語\n[Seu nome]\nÉlodie"
+  },
+  {
+   "language": "pt",
+   "case": "extra_keys_ignored",
+   "card": {
+    "persona": "x",
+    "language": "pt",
+    "unrelated": "ignored",
+    "situation": "y"
+   },
+   "text": "Você é a pessoa descrita abaixo e conversa por voz com a outra pessoa.\n[Seu perfil]\nx\n[Situação]\ny"
+  },
+  {
+   "language": "ru",
+   "case": "full",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "female",
+    "backchannel": "mid"
+   },
+   "text": "Вы — человек, описанный ниже, и разговариваете вслух с собеседником.\n[Ваш образ]\nA calm, professional guide.\nSpeaks plainly.\n[Ваше имя]\nHaru\n[Ваш пол]\nженщина\n[Ваши короткие реплики]\nумеренно\n[Имя собеседника]\nSam\n[Отношения]\ncolleagues\n[Ситуация]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "ru",
+   "case": "full_other_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "male",
+    "backchannel": "low"
+   },
+   "text": "Вы — человек, описанный ниже, и разговариваете вслух с собеседником.\n[Ваш образ]\nA calm, professional guide.\nSpeaks plainly.\n[Ваше имя]\nHaru\n[Ваш пол]\nмужчина\n[Ваши короткие реплики]\nмало\n[Имя собеседника]\nSam\n[Отношения]\ncolleagues\n[Ситуация]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "ru",
+   "case": "persona_only",
+   "card": {
+    "persona": "Only a persona."
+   },
+   "text": "Вы — человек, описанный ниже, и разговариваете вслух с собеседником.\n[Ваш образ]\nOnly a persona."
+  },
+  {
+   "language": "ru",
+   "case": "empty_card",
+   "card": {},
+   "text": "Вы — человек, описанный ниже, и разговариваете вслух с собеседником."
+  },
+  {
+   "language": "ru",
+   "case": "whitespace_and_none",
+   "card": {
+    "persona": "  padded  ",
+    "name": null,
+    "gender": "  ",
+    "other_name": "\t"
+   },
+   "text": "Вы — человек, описанный ниже, и разговариваете вслух с собеседником.\n[Ваш образ]\npadded"
+  },
+  {
+   "language": "ru",
+   "case": "unknown_options",
+   "card": {
+    "persona": "A calm, professional guide.\nSpeaks plainly.",
+    "name": "Haru",
+    "other_name": "Sam",
+    "relationship": "colleagues",
+    "situation": "A quick check-in before a meeting.",
+    "gender": "nonbinary",
+    "backchannel": "max"
+   },
+   "text": "Вы — человек, описанный ниже, и разговариваете вслух с собеседником.\n[Ваш образ]\nA calm, professional guide.\nSpeaks plainly.\n[Ваше имя]\nHaru\n[Имя собеседника]\nSam\n[Отношения]\ncolleagues\n[Ситуация]\nA quick check-in before a meeting."
+  },
+  {
+   "language": "ru",
+   "case": "unicode_multiline",
+   "card": {
+    "persona": "Line one ☃ 😀\n\nLine three: ü 日本語",
+    "name": "Élodie"
+   },
+   "text": "Вы — человек, описанный ниже, и разговариваете вслух с собеседником.\n[Ваш образ]\nLine one ☃ 😀\n\nLine three: ü 日本語\n[Ваше имя]\nÉlodie"
+  },
+  {
+   "language": "ru",
+   "case": "extra_keys_ignored",
+   "card": {
+    "persona": "x",
+    "language": "ru",
+    "unrelated": "ignored",
+    "situation": "y"
+   },
+   "text": "Вы — человек, описанный ниже, и разговариваете вслух с собеседником.\n[Ваш образ]\nx\n[Ситуация]\ny"
+  }
+ ]
+}

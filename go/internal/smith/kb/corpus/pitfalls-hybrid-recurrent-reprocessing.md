@@ -91,3 +91,8 @@ See `docs/modes.md`'s Ornith entry for the full fix/test/deploy writeup. **The "
 patch below was found to be living only as uncommitted working-tree edits on the deployment host** (no git
 history at all, despite the name implying a maintained fork) - now committed
 (`fcd4e598d`/rebased to `52bb51280`) and backed up off-host; see that same `docs/modes.md` entry.
+
+**Update 2026-11-01:** the Kintsugi patches were retired. Plain upstream (`a91eab67`) reuses the
+cross-turn cache on hybrid models exactly as the patched build did (16-30 prompt tokens re-evaluated per
+follow-up turn out of 35K, and 17-20 out of 187K), so the reprocessing described above no longer needs a fork
+patch. See `docs/adr/0019-retire-kintsugi-patches.md`.

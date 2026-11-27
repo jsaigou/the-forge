@@ -16,7 +16,10 @@ package smith
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -145,7 +148,7 @@ func runBinaryPaths(ctx context.Context, env *CheckEnv) Finding {
 // serving real requests right now — the class of bug slot_agreement cannot
 // see, since both its inputs derive from the same env-file reading the
 // running process itself may have silently diverged from.
-func runSlotModelIdentity(_ context.Context, env *CheckEnv) Finding {
+func runSlotModelIdentity(ctx context.Context, env *CheckEnv) Finding {
 	const id = "slot_model_identity"
 	if env.Snap == nil {
 		return skipFinding(id, "no collector snapshot")
@@ -167,17 +170,33 @@ func runSlotModelIdentity(_ context.Context, env *CheckEnv) Finding {
 		if st.Mode == "" {
 			continue
 		}
-		inf, ok := env.Snap.Inference[name]
-		if !ok || inf.ModelAlias == "" {
-			continue // not scraped yet (or an older llama.cpp build without model_alias) — nothing to compare
-		}
 		m, ok := cfg.Modes[st.Mode]
 		if !ok || len(m.Services) == 0 || m.Services[0].Alias == "" {
 			continue // no configured alias to compare against
 		}
-		row := slotIdentity{Slot: name, Mode: st.Mode, ConfiguredAlias: m.Services[0].Alias, ActualAlias: inf.ModelAlias}
+		svc := m.Services[0]
+		inf := env.Snap.Inference[name]
+		actual, served := inf.ModelAlias, inf.ModelAlias != ""
+		if !served {
+			// No /props alias: an engine kind that serves no /props (enginekind ContextFromProps=false) is identified by its /v1/models id instead.
+			// llama.cpp keeps the old behaviour exactly (not scraped yet, or an old build without model_alias: nothing to compare).
+			if spec, err := svc.Engine(); err != nil || spec.ContextFromProps {
+				continue
+			}
+			ids, err := env.modelIDs(ctx, st.Port)
+			if err != nil || len(ids) == 0 {
+				continue // not serving yet, or unreadable: cannot compare, not a mismatch
+			}
+			actual = ids[0]
+			for _, id := range ids {
+				if id == svc.Alias {
+					actual = id // the configured alias is among the served ids
+				}
+			}
+		}
+		row := slotIdentity{Slot: name, Mode: st.Mode, ConfiguredAlias: svc.Alias, ActualAlias: actual}
 		checked = append(checked, row)
-		if inf.ModelAlias != row.ConfiguredAlias {
+		if actual != row.ConfiguredAlias {
 			mismatches = append(mismatches, row)
 		}
 	}
@@ -203,4 +222,39 @@ func runSlotModelIdentity(_ context.Context, env *CheckEnv) Finding {
 		SummaryKey: "checks.slot_model_identity.ok",
 		Params:     map[string]any{"count": len(checked)},
 		Evidence:   ev}
+}
+
+// modelIDs reads the model ids a local engine serves on GET /v1/models (the OpenAI-compatible listing every engine kind exposes), for kinds without
+// /props. The body is size-bounded; a non-200 or unparsable body is an error.
+func (e *CheckEnv) modelIDs(ctx context.Context, port int) ([]string, error) {
+	if e.HTTP == nil || port <= 0 {
+		return nil, fmt.Errorf("no HTTP client or port")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/v1/models", port), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := e.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("/v1/models returned %d", resp.StatusCode)
+	}
+	var body struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(body.Data))
+	for _, d := range body.Data {
+		if d.ID != "" {
+			ids = append(ids, d.ID)
+		}
+	}
+	return ids, nil
 }

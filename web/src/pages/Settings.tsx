@@ -90,7 +90,7 @@ function useSectionComponents(catalogAnchor: string | undefined, onCatalogTabCha
   };
 }
 
-const CATALOG_SUB_TABS: CatalogSubTab[] = ["configs", "offerings", "models", "taxonomy", "notes", "services"];
+const CATALOG_SUB_TABS: CatalogSubTab[] = ["configs", "offerings", "models", "taxonomy", "notes", "services", "builds"];
 function isCatalogSubTab(v: string | undefined): v is CatalogSubTab {
   return !!v && (CATALOG_SUB_TABS as string[]).includes(v);
 }
@@ -137,9 +137,19 @@ export function Settings({ sub, onSubChange }: { sub?: string; onSubChange?: (su
   // the navigation there).
   useEffect(() => {
     if (!anchorPart) return;
-    const raf = requestAnimationFrame(() => {
+    // Data-driven panels (Security, Providers…) render their sections after
+    // their queries resolve, so the anchor may not exist on the first frame.
+    // Retry briefly instead of giving up (found live on 2026-11-04: search
+    // jumps to #security-hf-token and #security-totp never scrolled).
+    let raf = 0;
+    let retry = 0;
+    let tries = 0;
+    const attempt = () => {
       const el = document.getElementById(anchorPart);
-      if (!el) return;
+      if (!el) {
+        if (++tries < 40) retry = window.setTimeout(attempt, 100);
+        return;
+      }
       const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
       // remove→reflow→add restarts the flash on repeat navigation to the
@@ -149,14 +159,18 @@ export function Settings({ sub, onSubChange }: { sub?: string; onSubChange?: (su
       el.classList.add("anchor-flash");
       window.clearTimeout(flashTimer.current);
       flashTimer.current = window.setTimeout(() => el.classList.remove("anchor-flash"), 1700);
-    });
+    };
+    raf = window.requestAnimationFrame(attempt);
     return () => {
-      cancelAnimationFrame(raf);
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(retry);
       window.clearTimeout(flashTimer.current);
     };
   }, [sub, anchorPart]);
 
-  const ActiveComponent = sectionComponents[activeKey];
+  // Called, not rendered as <Component/>: these functions are new on every render, so React would take each for a new component type and rebuild the
+  // panel (losing open dialogs, drafts and messages) whenever anything above re-rendered. What they return has a stable type.
+  const activePanel = sectionComponents[activeKey]();
 
   return (
     <section className="page settings-shell">
@@ -168,6 +182,7 @@ export function Settings({ sub, onSubChange }: { sub?: string; onSubChange?: (su
               <button
                 key={s.key}
                 className={`side-nav-item ${s.danger ? "danger" : ""} ${activeKey === s.key ? "active" : ""}`}
+                aria-current={activeKey === s.key ? "page" : undefined}
                 onClick={() => onSubChange?.(s.key)}
               >
                 {t(`sections.${s.key}`)}
@@ -178,17 +193,18 @@ export function Settings({ sub, onSubChange }: { sub?: string; onSubChange?: (su
       </nav>
       {/* Mobile fallback (≤860px, .settings-shell hides .side-nav there —
           see theme.css) — same sections, flat pill row instead of grouped. */}
-      <div className="tabs">
+      <nav className="tabs" aria-label={t("shell.sections_aria")}>
         {SETTINGS_SECTIONS.map((s) => (
           <button
             key={s.key}
             className={`tab ${activeKey === s.key ? "active" : ""}`}
+            aria-current={activeKey === s.key ? "page" : undefined}
             onClick={() => onSubChange?.(s.key)}
           >
             {t(`sections.${s.key}`)}
           </button>
         ))}
-      </div>
+      </nav>
       <div>
         {/* Sprint 13 (Sprint 12 Phase 8) — search over the whole settings
             registry (fields + landmarks). Cross-section jumps push (Back
@@ -201,7 +217,7 @@ export function Settings({ sub, onSubChange }: { sub?: string; onSubChange?: (su
           }}
         />
         <ErrorBoundary resetKeys={[activeKey]}>
-          <ActiveComponent />
+          {activePanel}
         </ErrorBoundary>
       </div>
     </section>

@@ -52,20 +52,14 @@ func (s *Server) handleProfileRun(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Config != nil {
 		cfg := s.deps.Config()
 		if _, ok := cfg.Modes[req.Mode]; !ok {
-			writeJSON(w, http.StatusBadRequest, map[string]any{
-				"success": false,
-				"message": fmt.Sprintf("Unknown mode: %s", req.Mode),
-			})
+			writeOpError(w, http.StatusBadRequest, "unknown_mode", map[string]any{"mode": req.Mode}, fmt.Sprintf("Unknown mode: %s", req.Mode))
 			return
 		}
 	}
 
 	// Refuse if a run is already in progress (disable concurrent run).
 	if runner.IsRunning() {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"success": false,
-			"message": "A profile run is already in progress",
-		})
+		writeOpError(w, http.StatusConflict, "profile_run_in_progress", nil, "A profile run is already in progress")
 		return
 	}
 
@@ -216,8 +210,11 @@ type profileListItem struct {
 	SafeMemoryMB int64   `json:"safe_memory_bytes"`
 	PrefillTPS   float64 `json:"prefill_tps"`
 	DecodeTPS    float64 `json:"decode_tps"`
-	Stale        bool    `json:"stale"`
-	MeasuredAt   int64   `json:"measured_at"`
+	// State is never | current | outdated | unsupported (profile.State*); Reason qualifies the last two. Stale is State == outdated.
+	State      string `json:"state"`
+	Reason     string `json:"reason,omitempty"`
+	Stale      bool   `json:"stale"`
+	MeasuredAt int64  `json:"measured_at"`
 	// DepthBenchmarks (product/QA sprint, 2026-07-29): included in the list
 	// view too (not just the single-mode GET), cheaply — runner.Get already
 	// fetches them for the staleness check below. Lets the Settings table
@@ -233,40 +230,19 @@ func (s *Server) handleProfilesList(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, profilesListResponse{Profiles: []profileListItem{}})
 		return
 	}
-	// Build the list from the store via the Lookup interface.
-	// We iterate modes from config so the list includes unprofiled modes too.
+	// Every inference config, measured or not, with its measurement state.
 	items := []profileListItem{}
-	if s.deps.Config != nil {
-		cfg := s.deps.Config()
-		for modeName := range cfg.Modes {
-			mode := cfg.Modes[modeName]
-			if mode.Type == "service" || len(mode.Services) == 0 {
-				continue
-			}
-			result, found := runner.Get(modeName)
-			if !found {
-				// ConfigID here comes from the merged-config seam (mode.ConfigID),
-				// not from a stored profile — this is the branch it's easiest to
-				// forget, and forgetting it means every unprofiled config falls
-				// back to name-joining on the FE, exactly the wart config_id
-				// exists to remove.
-				items = append(items, profileListItem{Mode: modeName, ConfigID: mode.ConfigID, Stale: true})
-				continue
-			}
-			items = append(items, profileListItem{
-				Mode:            result.Mode,
-				ConfigID:        result.ConfigID,
-				ModelID:         result.ModelID,
-				NCtx:            result.NCtx,
-				Backend:         result.Backend,
-				SafeMemoryMB:    result.SafeMemoryBytes,
-				PrefillTPS:      result.PrefillTPS,
-				DecodeTPS:       result.DecodeTPS,
-				Stale:           result.Stale,
-				MeasuredAt:      result.MeasuredAt,
-				DepthBenchmarks: toDepthBenchmarksJSON(result.DepthBenchmarks),
-			})
+	for _, st := range runner.Statuses() {
+		// ConfigID comes from the merged-config seam, so an unmeasured config carries it too.
+		item := profileListItem{Mode: st.Mode, ConfigID: st.ConfigID, State: st.State, Reason: st.Reason,
+			Stale: st.State == profile.StateOutdated, NCtx: st.NCtx}
+		if res := st.Result; res != nil {
+			item.ModelID, item.NCtx, item.Backend = res.ModelID, res.NCtx, res.Backend
+			item.SafeMemoryMB, item.PrefillTPS, item.DecodeTPS = res.SafeMemoryBytes, res.PrefillTPS, res.DecodeTPS
+			item.MeasuredAt = res.MeasuredAt
+			item.DepthBenchmarks = toDepthBenchmarksJSON(res.DepthBenchmarks)
 		}
+		items = append(items, item)
 	}
 	writeJSON(w, http.StatusOK, profilesListResponse{Profiles: items})
 }

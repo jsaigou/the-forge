@@ -258,7 +258,7 @@ func TestHTTPFetch_ParsesFrankfurterShape(t *testing.T) {
 
 	s := newFakeSettings()
 	setJSON(t, s, "billing.fx_source_url", srv.URL+"/latest?from=USD")
-	c := fx.New(db.SQL(), s)
+	c := fx.New(db.SQL(), s, fx.WithAllowHost(func(h string) bool { return h == "127.0.0.1" }))
 
 	if err := c.Refresh(context.Background()); err != nil {
 		t.Fatalf("Refresh: %v", err)
@@ -275,4 +275,21 @@ func approx(a, b, tol float64) bool {
 		d = -d
 	}
 	return d <= tol
+}
+
+// The default client refuses a loopback source: a hostile or mistyped billing.fx_source_url must not make the daemon call internal services.
+func TestHTTPFetch_RefusesNonPublicSource(t *testing.T) {
+	db := openDB(t)
+	hit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = true }))
+	t.Cleanup(srv.Close)
+	s := newFakeSettings()
+	setJSON(t, s, "billing.fx_source_url", srv.URL)
+	c := fx.New(db.SQL(), s)
+	if err := c.Refresh(context.Background()); err == nil {
+		t.Fatal("Refresh must fail for a loopback source")
+	}
+	if hit {
+		t.Fatal("the loopback server was contacted")
+	}
 }

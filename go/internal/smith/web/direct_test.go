@@ -176,3 +176,18 @@ func TestValidateFetchURL_AllowOverride(t *testing.T) {
 		t.Fatalf("expected validateFetchURL to allow loopback via override, got: %v", err)
 	}
 }
+
+// IPv6 forms that embed an IPv4 address, and reserved IPv4 space, used to pass the guard; each must be refused end to end (IP literals, no DNS).
+func TestValidateFetchURL_BlocksEmbeddedAndReservedForms(t *testing.T) {
+	for _, u := range []string{
+		"http://[64:ff9b::7f00:1]/", "http://[2002:7f00:1::]/", "http://[2001::1]/", "http://[::ffff:127.0.0.1]/",
+		"http://198.18.0.1/", "http://240.0.0.1/", "http://0.1.2.3/", "http://[ff0e::1]/",
+	} {
+		if err := validateFetchURL(context.Background(), u, nil); err == nil {
+			t.Errorf("validateFetchURL(%s) must be refused", u)
+		}
+	}
+	if err := validateFetchURL(context.Background(), "http://8.8.8.8/", nil); err != nil {
+		t.Errorf("a public literal must pass: %v", err)
+	}
+}

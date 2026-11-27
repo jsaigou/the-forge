@@ -404,3 +404,41 @@ func TestCookieSecureDefaultAndOverride(t *testing.T) {
 		t.Errorf("stored explicit CookieSecure=false was not preserved through LoadFromStore, got %v", stored.Server.CookieSecure)
 	}
 }
+
+// ADR-0022: Config.Slots stays the LLM pool (about forty readers treat every entry as an LLM slot); the specialist pool is separate,
+// and the two share one port space.
+func TestLoadFromStore_SplitsSlotPools(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cat := db.Catalog()
+	for _, sl := range []store.Slot{
+		{Name: "a1", Unit: "forge-a1", Port: 8080, Label: "A1", SortOrder: 1},
+		{Name: "s1", Unit: "forge-pool@s1", Port: 8100, Label: "S1", SortOrder: 1, Pool: store.PoolSpecialist},
+	} {
+		if _, err := cat.CreateSlot(ctx, sl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := LoadFromStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.Slots["s1"]; ok {
+		t.Error("a specialist slot leaked into Config.Slots")
+	}
+	if cfg.Slots["a1"].Port != 8080 || cfg.SpecialistSlots["s1"].Port != 8100 || len(cfg.Slots) != 1 || len(cfg.SpecialistSlots) != 1 {
+		t.Errorf("slots=%v specialist=%v", cfg.Slots, cfg.SpecialistSlots)
+	}
+
+	// A port shared across the pools is refused at load, like two LLM slots sharing one.
+	if _, err := cat.CreateSlot(ctx, store.Slot{Name: "s2", Unit: "forge-pool@s2", Port: 8080, Label: "S2", Pool: store.PoolSpecialist}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFromStore(ctx, db); err == nil {
+		t.Error("a specialist slot sharing an LLM slot's port loaded without error")
+	}
+}

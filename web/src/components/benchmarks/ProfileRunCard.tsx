@@ -12,7 +12,7 @@ import { StepUpModal } from "../StepUpModal";
 // and step-up wiring verbatim — this is the destructive part (evicts
 // A1–A4), so none of it gets "tidied" during the move into the merged
 // Benchmarks & Profiling section. Split into a controller hook +
-// presentational card so per-config Profile buttons (ConfigBenchmarkGroup)
+// presentational card so per-config Profile buttons (BenchmarkTable)
 // can trigger a run without each owning their own confirm/progress state —
 // only one run can be in flight globally (runner.IsRunning() server-side).
 //

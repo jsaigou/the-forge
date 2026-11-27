@@ -166,7 +166,7 @@ func (s *Server) handleSmithActionCreate(w http.ResponseWriter, r *http.Request)
 				handoffErr.ActionID, handoffErr.Handoff.BrainSlot))
 			return
 		}
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	s.audit(r, identity(r).Name, "smith_action_create", fmt.Sprintf("%d:%s", a.ID, a.Kind), "")
@@ -400,7 +400,7 @@ func (s *Server) handleSmithActionHandoff(w http.ResponseWriter, r *http.Request
 		}
 		// Every other ResolveHandoff error is a precondition failure (e.g.
 		// "not awaiting a runbook") rather than a not-found.
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "invalid_request", map[string]any{"detail": err.Error()}, err.Error())
 		return
 	}
 	s.audit(r, identity(r).Name, "smith_handoff_"+b.Resolution, fmt.Sprintf("%d:%s", a.ID, a.Kind), "")
@@ -505,7 +505,7 @@ func (s *Server) handleSmithActionProcedurePreview(w http.ResponseWriter, r *htt
 	preview, err := s.deps.Smith.ProcedurePreview(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, smith.ErrNoProcedureForKind) {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeErrorCode(w, http.StatusBadRequest, "invalid_request", map[string]any{"detail": err.Error()}, err.Error())
 			return
 		}
 		writeActionFetchError(w, err)
@@ -532,7 +532,7 @@ func (s *Server) handleSmithActionProcedurize(w http.ResponseWriter, r *http.Req
 	a, err := s.deps.Smith.Procedurize(r.Context(), id, identity(r).Name)
 	if err != nil {
 		if errors.Is(err, smith.ErrNoProcedureForKind) {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeErrorCode(w, http.StatusBadRequest, "invalid_request", map[string]any{"detail": err.Error()}, err.Error())
 			return
 		}
 		if errors.Is(err, smith.ErrInvalidTransition) {

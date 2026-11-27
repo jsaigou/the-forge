@@ -426,3 +426,48 @@ func TestDeriveServiceName(t *testing.T) {
 		})
 	}
 }
+
+// A unit whose instance is a path must not be treated as a template instance: Teardown removes EnvDir/<instance>.env.
+func TestTeardownRefusesPathInstanceAndKeepsFilesOutsideEnvDir(t *testing.T) {
+	root := t.TempDir()
+	envDir := filepath.Join(root, "env")
+	if err := os.MkdirAll(envDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(root, "victim.env")
+	if err := os.WriteFile(victim, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := &Provisioner{Systemd: &fakeSystemd{}, EnvDir: envDir}
+	for _, unit := range []string{"forge-compress@../victim", "forge-compress@a/b", "forge-compress@", "forge-compress@a b", "forge-compress@.hidden", "forge-compress@a..b", "forge-compress@..", "forge-compress@a/../b"} {
+		if p.isTemplateUnit(unit) {
+			t.Errorf("%q must not be a template instance", unit)
+		}
+	}
+	_ = p.Teardown(context.Background(), "forge-compress@../victim")
+	if _, err := os.Stat(victim); err != nil {
+		t.Fatalf("a file outside EnvDir was removed: %v", err)
+	}
+	if !p.isTemplateUnit("forge-compress@deepseek") || !p.isTemplateUnit("forge-compress@local-2_x") || !p.isTemplateUnit("forge-compress@deepseek-v3.2") {
+		t.Error("ordinary instance names must still be accepted")
+	}
+}
+
+func TestWriteEnvRefusesValuesThatCouldInjectLines(t *testing.T) {
+	p := &Provisioner{Systemd: &fakeSystemd{}, EnvDir: t.TempDir()}
+	for _, target := range []string{"https://x.example/v1\nCOMPRESS_PORT=1", " https://x.example/v1", "https://x.example/v1 ", `https://x.example/"v1`, "https://x.example/\\v1"} {
+		row := store.ProxyRow{Service: "s", Unit: "forge-compress@s", Token: "tok", TargetURL: target, Port: 1}
+		if err := p.writeEnv(row); err == nil {
+			t.Errorf("target %q must be refused", target)
+		}
+	}
+	if err := p.writeEnv(store.ProxyRow{Service: "s", Unit: "forge-compress@s", Token: "tok\nX=1", TargetURL: "https://x.example/v1", Port: 1}); err == nil {
+		t.Error("a token with a newline must be refused")
+	}
+	if err := p.writeEnv(store.ProxyRow{Service: "s", Unit: "forge-compress@s", Token: "tok", TargetURL: "dynamic (per-request via x-compress-base-url)", Port: 1}); err != nil {
+		t.Errorf("the shared proxy's placeholder target must still be written: %v", err)
+	}
+	if err := p.writeEnv(store.ProxyRow{Service: "s", Unit: "forge-compress@s", Token: "tok", TargetURL: "https://x.example/v1?a=b&c=d", Port: 1}); err != nil {
+		t.Errorf("an ordinary URL must still be written: %v", err)
+	}
+}

@@ -16,7 +16,9 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 
+	"github.com/jsaigou/the-forge/internal/hf"
 	"github.com/jsaigou/the-forge/internal/smith"
 )
 
@@ -50,9 +52,13 @@ func (s *Server) handleSmithSourcingEvaluate(w http.ResponseWriter, r *http.Requ
 		writeValidationErrorCodes(w, map[string]string{"hf_repo": "required"}, map[string]string{"hf_repo": "required"})
 		return
 	}
+	if !hf.ValidRepo(strings.Trim(strings.TrimSpace(b.HFRepo), "/")) {
+		writeValidationErrorCodes(w, map[string]string{"hf_repo": "must be owner/name (letters, digits, '.', '_', '-')"}, map[string]string{"hf_repo": "invalid_value"})
+		return
+	}
 	eval, err := s.deps.Smith.Evaluate(r.Context(), b.HFRepo, b.BudgetBytes)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "sourcing evaluate failed: "+err.Error())
+		writeErrorCode(w, http.StatusBadGateway, "sourcing_failed", map[string]any{"detail": "sourcing evaluate failed: "+err.Error()}, "sourcing evaluate failed: "+err.Error())
 		return
 	}
 	s.audit(r, identity(r).Name, "smith_sourcing_evaluate", b.HFRepo, "")

@@ -2,10 +2,12 @@
   "tabs": {
     "console": "Console",
     "dashboard": "Dashboard",
+    "specialists": "Engines",
     "models": "Models",
     "scheduling": "Scheduling",
     "settings": "Settings",
     "help": "Help",
     "attributions": "Attributions"
-  }
+  },
+  "main_label": "Main navigation"
 }

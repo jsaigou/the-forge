@@ -103,3 +103,38 @@ func TestMintKeyRotatesSameName(t *testing.T) {
 		t.Fatalf("second (current) key does not verify: %v", err)
 	}
 }
+
+// ADR-0020 F11: a scoped key needs a scope, a TTL within 24h, and a forge kind; the minted token carries the scope.
+func TestMintKeyScoped(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "state.db")
+	mint := func(args ...string) (string, error) {
+		var err error
+		out := captureStdout(t, func() {
+			err = runMintKey(append([]string{"-db", dbPath}, args...))
+		})
+		return strings.TrimSpace(out), err
+	}
+	for name, args := range map[string][]string{
+		"no ttl":         {"-kind", "forge", "-role", "admin", "-name", "agent", "-scope", "catalog"},
+		"ttl over a day": {"-kind", "forge", "-role", "admin", "-name", "agent", "-scope", "catalog", "-ttl", "25h"},
+		"unknown scope":  {"-kind", "forge", "-role", "admin", "-name", "agent", "-scope", "everything", "-ttl", "1h"},
+		"router kind":    {"-kind", "router", "-name", "agent", "-scope", "catalog", "-ttl", "1h"},
+	} {
+		if _, err := mint(args...); err == nil {
+			t.Errorf("%s: mint-key accepted it", name)
+		}
+	}
+	token, err := mint("-kind", "forge", "-role", "admin", "-name", "agent", "-scope", "catalog", "-ttl", "2h")
+	if err != nil || !strings.HasPrefix(token, "sk-forge-") {
+		t.Fatalf("valid scoped mint: token=%q err=%v", token, err)
+	}
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ident, err := authz.New(db).VerifyBearer(token, authz.KindForge)
+	if err != nil || ident.Scope != authz.ScopeCatalog || ident.Role != authz.RoleAdmin {
+		t.Errorf("verified identity = %+v err=%v, want an admin key scoped to catalog", ident, err)
+	}
+}

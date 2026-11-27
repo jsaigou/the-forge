@@ -4,6 +4,7 @@ package smith
 
 import (
 	"context"
+	"github.com/jsaigou/the-forge/internal/memledger"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -100,7 +101,7 @@ func seedBrainCatalog(t *testing.T, db *store.DB) {
 	}
 	if _, err := cat.CreateConfig(ctx, store.Config{
 		Name: "ornith-35b", VariantID: varID, WeightArtifactID: artID, EngineID: eng.ID,
-		NCtx: 262144, Parallel: 1, Status: "unverified", Visibility: "visible",
+		NCtx: 262144, Status: "unverified", Visibility: "visible",
 	}); err != nil {
 		t.Fatalf("CreateConfig: %v", err)
 	}
@@ -913,9 +914,11 @@ func TestSweepSelection(t *testing.T) {
 		// delete-file proposal must never come from a background sweep the
 		// operator never asked for, only from an explicit selection (the
 		// "explicit check ids" subtest below covers that path).
+		// A check whose Skip suppresses it for this env (radiance_host_prereqs on a catalog with no Radiance) produces no finding either.
 		var manualOnly int
+		env := s.checkEnv(ctx)
 		for _, c := range registry {
-			if c.ManualOnly {
+			if c.ManualOnly || (c.Skip != nil && c.Skip(env)) {
 				manualOnly++
 			}
 		}
@@ -1073,3 +1076,54 @@ func portOf(t *testing.T, rawURL string) int {
 // engine.Stub satisfies the Deps.Engine fallback path — a compile-time
 // proof that SelfContext's Engine-only slot listing stays wired.
 var _ engine.Engine = (*engine.Stub)(nil)
+
+// host_memory and swap_pressure: the 2026-11-17 review found GTT at 76% (ok) while MemAvailable was 12 GiB and swap was full.
+func TestHostMemoryAndSwapChecks(t *testing.T) {
+	const gib = int64(1 << 30)
+	cfg := &config.Config{Memory: config.Memory{HostFloorBytes: 8 * gib, GrowthMarginBytes: 4 * gib, SwapWarnBytes: 1 * gib}}
+	byID := func(id string) Check {
+		for _, c := range registry {
+			if c.ID == id {
+				return c
+			}
+		}
+		t.Fatalf("check %s not registered", id)
+		return Check{}
+	}
+	run := func(id string, m collector.Metrics) Finding {
+		s := newSmith(snapWith(m), nil, func(d *Deps) { d.Cfg = func() *config.Config { return cfg } })
+		return runOne(context.Background(), byID(id), s.checkEnv(context.Background()))
+	}
+	ledger := func(avail int64) memledger.Ledger { return memledger.Ledger{HostTotal: 123 * gib, HostAvail: avail} }
+	for _, tc := range []struct {
+		name  string
+		avail int64
+		want  Severity
+	}{
+		{"ok with 22 GiB", 22 * gib, SeverityOK},
+		{"warn inside the margin", 11 * gib, SeverityWarn},
+		{"crit below the floor", 6 * gib, SeverityCrit},
+	} {
+		if f := run("host_memory", collector.Metrics{Ledger: ledger(tc.avail)}); f.Severity != tc.want {
+			t.Errorf("host_memory %s: %s (%q), want %s", tc.name, f.Severity, f.Summary, tc.want)
+		}
+	}
+	if f := run("host_memory", collector.Metrics{}); f.Severity != SeverityInfo {
+		t.Errorf("host_memory without metrics: %s, want a skip", f.Severity)
+	}
+	for _, tc := range []struct {
+		name        string
+		used, total int64
+		want        Severity
+	}{
+		{"ok when nearly unused", 200 << 20, 8 * gib, SeverityOK},
+		{"warn at 3 GiB", 3 * gib, 8 * gib, SeverityWarn},
+		{"crit when exhausted", 8*gib - 1<<20, 8 * gib, SeverityCrit},
+		{"ok with no swap", 0, 0, SeverityOK},
+	} {
+		m := collector.Metrics{Memory: collector.Memory{SwapUsedBytes: tc.used, SwapTotalBytes: tc.total}}
+		if f := run("swap_pressure", m); f.Severity != tc.want {
+			t.Errorf("swap_pressure %s: %s (%q), want %s", tc.name, f.Severity, f.Summary, tc.want)
+		}
+	}
+}

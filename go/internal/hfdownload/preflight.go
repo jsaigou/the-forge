@@ -100,7 +100,30 @@ func DefaultDestDir(repo string, fileCount int) string {
 // result is always a RELATIVE path: absolute prefixes and "." / ".."
 // components are dropped, keeping every download inside ModelsDir.
 func DestRelPath(destDir, filename string) string {
-	return filepath.Join(safeRelDir(destDir), filepath.Base(filename))
+	base := filepath.Base(filename)
+	if !validBaseName(base) {
+		// filepath.Base("..") is ".." and Join would escape ModelsDir. createJob refuses such names; this keeps the function safe on its own.
+		base = "_"
+	}
+	return filepath.Join(safeRelDir(destDir), base)
+}
+
+// validBaseName reports whether b can be a single file name under ModelsDir.
+func validBaseName(b string) bool {
+	return b != "" && b != "." && b != ".." && !strings.ContainsAny(b, "/\\\x00")
+}
+
+// ValidFilename reports whether a repo file path from the caller is usable: relative, no "." or ".." component, no NUL or backslash.
+func ValidFilename(name string) bool {
+	if name == "" || strings.HasPrefix(name, "/") || strings.ContainsAny(name, "\\\x00") {
+		return false
+	}
+	for _, c := range strings.Split(name, "/") {
+		if c == "" || c == "." || c == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func safeRelDir(destDir string) string {

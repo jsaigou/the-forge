@@ -27,6 +27,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"github.com/jsaigou/the-forge/internal/enginekind"
 	"log"
 	"math"
 	"sort"
@@ -61,6 +62,11 @@ type Registry interface {
 	// exists (the engine falls back to on-disk weight size). Consumed by
 	// engine.can_fit's memory-budget fallback chain.
 	WeightEstimateBytes(configID int64) (int64, bool)
+
+	// CuratedMemory lists the tuple-bound safe_memory_bytes figures recorded for exactly this config (config-scoped benchmark rows that carry a
+	// tuple, migration 0107). A model- or variant-scoped figure never appears here: it cannot name a launch tuple. The fit gate of an engine kind
+	// with Spec.NeedsCuratedMemory admits a load only when one of these has the tuple of the config being loaded.
+	CuratedMemory(configID int64) []CuratedMemory
 
 	// CostPer1k is deprecated (power_cost_per_1k is not stored in the
 	// catalog). Always returns 0. Kept on the interface for back-compat
@@ -135,21 +141,33 @@ type ConfigCard struct {
 	// silently omitted. See registry.resolveModalities.
 	Modalities            []string      `json:"modalities"`
 	ModalitiesUnavailable []ModalityGap `json:"modalities_unavailable"`
+	// OutputModalities (ADR-0021) are what THIS config can produce: text, audio (speech) and/or decisions.
+	// Unlike Modalities, "text" is not forced: a decision model produces only decisions. Audio output needs a
+	// linked mmproj, otherwise it appears in OutputModalitiesUnavailable. See store.ResolveOutputModalities.
+	OutputModalities            []string      `json:"output_modalities"`
+	OutputModalitiesUnavailable []ModalityGap `json:"output_modalities_unavailable"`
 
 	// Sprint B: the load recipe itself, for the config expanded view's
 	// "load options" list. ExtraArgs is the flat llama.cpp argv token array
-	// (one element per launcher-file line, see
-	// go/internal/engine/sysconfig.go's writeServiceFiles) — the only
-	// source of truth for --parallel and friends; store.Config.Parallel is
-	// a dead column (validated/persisted but never read by configToMode)
-	// and is deliberately NOT exposed here to avoid implying it does
-	// anything. Backend is rocm|vulkan|vllm from the linked Build — the
+	// (one element per argv entry of the slot_launches row,
+	// see go/internal/launch) — the only
+	// source of truth for --parallel and friends (the old configs.parallel
+	// column was dropped in migration 0096). Backend is rocm|vulkan|vllm from the linked Build — the
 	// single most load-bearing fact about a config on this hardware (see
 	// CLAUDE.md's Vulkan ceiling note). VariantName disambiguates configs
 	// that share a model (e.g. different quants of the same weights).
-	ExtraArgs   []string `json:"extra_args"`
-	Backend     string   `json:"backend"`
-	VariantName string   `json:"variant_name"`
+	ExtraArgs []string `json:"extra_args"`
+	Backend   string   `json:"backend"`
+	// EngineKind is the runtime that serves this config ("llamacpp" | "vllm" | ...), derived server-side with
+	// enginekind.Resolve(engines.kind, build.Backend) so the legacy backend "vllm" still reads as vLLM. An unknown kind is
+	// passed through raw (the UI shows it as is) rather than hidden.
+	EngineKind  string `json:"engine_kind"`
+	VariantName string `json:"variant_name"`
+
+	// Recommended marks a config the operator should prefer: it runs on the Radiance engine, the operator has verified it (it loaded through the
+	// scheduler and served correct answers) and it is visible. Derived from existing fields, so there is nothing to keep in sync; it is information,
+	// not a ranking and not a performance claim. See docs/radiance-installer-and-catalog-plan.md.
+	Recommended bool `json:"recommended"`
 
 	// Variant quality.
 	Quality Quality `json:"quality"`
@@ -201,10 +219,12 @@ type Card struct {
 	// one config's ability to deliver it (see ConfigCard.Modalities for the
 	// config-scoped, narrowed view).
 	Modalities []string `json:"modalities"`
-	Logo       string   `json:"logo"`
-	LogoDark   string   `json:"logo_dark"` // dark-theme variant; "" = same as Logo
-	HFRepo     string   `json:"hf_repo"`
-	Family     string   `json:"family"`
+	// OutputModalities (ADR-0021) is what the architecture can produce (model-level, independent of any config).
+	OutputModalities []string `json:"output_modalities"`
+	Logo             string   `json:"logo"`
+	LogoDark         string   `json:"logo_dark"` // dark-theme variant; "" = same as Logo
+	HFRepo           string   `json:"hf_repo"`
+	Family           string   `json:"family"`
 	// Genealogy is the level above Family (product/QA sprint, 2026-07-29 —
 	// see store.Genealogy's doc comment): a vendor's own release lineage
 	// (Nemotron, Gemma, Qwen, …), of which Family is one generation. "" when
@@ -360,6 +380,7 @@ type catalogSnapshot struct {
 	variantsByModel     map[int64][]store.Variant
 	weightArtifactByCfg map[int64]store.Artifact
 	buildByID           map[int64]store.Build
+	engineKindByID      map[int64]string
 	capabilityTierByID  map[int64]store.CapabilityTier
 }
 
@@ -423,12 +444,61 @@ func (s *catalogSnapshot) resolveLogos(cfgLogo, cfgLogoDark string, mdl store.Mo
 //     unavailable too ("mmproj file missing on disk") rather than silently
 //     claiming a capability the config can't currently serve.
 func (s *catalogSnapshot) resolveModalities(c store.Config, mdl store.Model) (enabled []string, unavailable []ModalityGap) {
-	a, ok := s.artifactByID[c.MMProjArtifactID]
-	res := store.ResolveModalities(c, mdl, ok && a.Missing)
+	res := s.resolveConfig(c, mdl).Input
 	for _, m := range res.Unavailable {
 		unavailable = append(unavailable, ModalityGap{ID: m, Reason: res.Reason})
 	}
 	return res.Enabled, unavailable
+}
+
+// resolveOutputModalities is the output-side adapter over store.ResolveOutputModalities (ADR-0021), with the same
+// mmproj-missing lookup as resolveModalities.
+func (s *catalogSnapshot) resolveOutputModalities(c store.Config, mdl store.Model) (enabled []string, unavailable []ModalityGap) {
+	res := s.resolveConfig(c, mdl).Output
+	for _, m := range res.Unavailable {
+		unavailable = append(unavailable, ModalityGap{ID: m, Reason: res.Reason})
+	}
+	return res.Enabled, unavailable
+}
+
+// resolveConfig is store.ResolveConfig over this snapshot's rows, the same module a0's gates and /v1/models use. If the join can't be
+// completed (the Config's variant or model is not in the snapshot) the card keeps showing what the model itself says, as before, and the gap is
+// logged instead of passing silently.
+func (s *catalogSnapshot) resolveConfig(c store.Config, mdl store.Model) store.ResolvedConfig {
+	res, err := store.ResolveConfig(context.Background(), s, c)
+	if err != nil {
+		log.Printf("registry: modalities for config %q: %v", c.Name, err)
+		return store.ResolvedConfig{Model: mdl, Input: store.ResolveModalities(c, mdl, false), Output: store.ResolveOutputModalities(c, mdl, false)}
+	}
+	return res
+}
+
+// The snapshot is itself a store.ConfigLookup over its in-memory rows (the snapshot adapter of the shared join).
+func (s *catalogSnapshot) Variant(_ context.Context, id int64) (store.Variant, error) {
+	if v, ok := s.variantByID[id]; ok {
+		return v, nil
+	}
+	return store.Variant{}, fmt.Errorf("%w: variant %d", store.ErrNotFound, id)
+}
+func (s *catalogSnapshot) Model(_ context.Context, id int64) (store.Model, error) {
+	if m, ok := s.modelByID[id]; ok {
+		return m, nil
+	}
+	return store.Model{}, fmt.Errorf("%w: model %d", store.ErrNotFound, id)
+}
+func (s *catalogSnapshot) Artifact(_ context.Context, id int64) (store.Artifact, error) {
+	if a, ok := s.artifactByID[id]; ok {
+		return a, nil
+	}
+	return store.Artifact{}, fmt.Errorf("%w: artifact %d", store.ErrNotFound, id)
+}
+
+// modelOutputModalities returns a model's own output set, defaulting to ["text"] so a card never lists none.
+func modelOutputModalities(mdl store.Model) []string {
+	if len(mdl.OutputModalities) == 0 {
+		return []string{store.OutputText}
+	}
+	return mdl.OutputModalities
 }
 
 // benchesFor unions a model's benchmarks (capability scores — intrinsic to
@@ -525,6 +595,7 @@ func (r *catalogRegistry) loadSnapshot(ctx context.Context) *catalogSnapshot {
 		variantsByModel:     map[int64][]store.Variant{},
 		weightArtifactByCfg: map[int64]store.Artifact{},
 		buildByID:           map[int64]store.Build{},
+		engineKindByID:      map[int64]string{},
 		capabilityTierByID:  map[int64]store.CapabilityTier{},
 	}
 
@@ -623,6 +694,14 @@ func (r *catalogRegistry) loadSnapshot(ctx context.Context) *catalogSnapshot {
 	for _, b := range s.builds {
 		s.buildByID[b.ID] = b
 	}
+	if engines, err := r.cat.ListEngines(ctx); err != nil {
+		// Not fatal: cards then derive the kind from the build's backend alone.
+		log.Printf("registry: list engines: %v", err)
+	} else {
+		for _, e := range engines {
+			s.engineKindByID[e.ID] = e.Kind
+		}
+	}
 	for _, p := range s.capabilityTiers {
 		s.capabilityTierByID[p.ID] = p
 	}
@@ -663,9 +742,12 @@ func (r *catalogRegistry) Cards(ctx context.Context, since time.Time) ([]ConfigC
 		build := snap.buildByID[c.BuildID]
 		logo, logoDark := snap.resolveLogos(c.Logo, c.LogoDark, mdl, fam)
 		modalities, modalitiesUnavailable := snap.resolveModalities(c, mdl)
+		outputs, outputsUnavailable := snap.resolveOutputModalities(c, mdl)
 
 		capabilityTierName := snap.capabilityTierByID[c.CapabilityTierID].Name
-		card := r.assembleConfigCard(c, vt, mdl, fam, build, modelPath, mmprojPath, benches, usageByMode, logo, logoDark, modalities, modalitiesUnavailable, capabilityTierName, ctx)
+		card := r.assembleConfigCard(c, vt, mdl, fam, build, modelPath, mmprojPath, benches, usageByMode, logo, logoDark, modalities, modalitiesUnavailable, outputs, outputsUnavailable, capabilityTierName, ctx)
+		card.EngineKind = snap.cardEngineKind(c, build)
+		card.Recommended = recommendedConfig(card.EngineKind, c.Status, c.Visibility)
 		cards = append(cards, card)
 	}
 
@@ -681,7 +763,8 @@ func (r *catalogRegistry) assembleConfigCard(
 	c store.Config, vt store.Variant, mdl store.Model, fam store.Family, build store.Build,
 	modelPath, mmprojPath string, benches []store.Benchmark,
 	usageByMode map[string]Reliability, logo, logoDark string,
-	modalities []string, modalitiesUnavailable []ModalityGap, capabilityTierName string, ctx context.Context,
+	modalities []string, modalitiesUnavailable []ModalityGap, outputs []string, outputsUnavailable []ModalityGap,
+	capabilityTierName string, ctx context.Context,
 ) ConfigCard {
 	cfg := r.safeConfig()
 	modelPath = resolveArtifactPath(modelPath, cfg)
@@ -750,7 +833,7 @@ func (r *catalogRegistry) assembleConfigCard(
 		LicenseURL:            mdl.LicenseURL,
 		Description:           mdl.Description,
 		KeyFeatures:           orEmptySlice(mdl.KeyFeatures),
-		Badges:                deriveBadges(mdl.KeyFeatures, isAbliterated, modalities),
+		Badges:                deriveBadges(mdl.KeyFeatures, isAbliterated, modalities, outputs),
 		Logo:                  logo,
 		LogoDark:              logoDark,
 		HFRepo:                mdl.HFRepo,
@@ -758,6 +841,9 @@ func (r *catalogRegistry) assembleConfigCard(
 		Capabilities:          capabilitiesFromBenchmarks(benches),
 		Modalities:            modalities,
 		ModalitiesUnavailable: orEmptyModalityGaps(modalitiesUnavailable),
+
+		OutputModalities:            outputs,
+		OutputModalitiesUnavailable: orEmptyModalityGaps(outputsUnavailable),
 
 		ExtraArgs:   orEmptySlice(c.ExtraArgs),
 		Backend:     build.Backend,
@@ -818,25 +904,26 @@ func (r *catalogRegistry) ModelCards(ctx context.Context, since time.Time) ([]Ca
 			logo, logoDark := snap.resolveLogos("", "", mdl, fam)
 			benches := snap.benchesFor(mdl.ID, 0)
 			cards = append(cards, Card{
-				ID:           strconv.FormatInt(mdl.ID, 10),
-				Name:         orDefault(mdl.Name, strconv.FormatInt(mdl.ID, 10)),
-				Creator:      mdl.Creator,
-				LicenseName:  mdl.LicenseName,
-				LicenseURL:   mdl.LicenseURL,
-				Description:  mdl.Description,
-				KeyFeatures:  orEmptySlice(mdl.KeyFeatures),
-				Badges:       deriveBadges(mdl.KeyFeatures, nil, mdl.Modalities),
-				Modalities:   orEmptySlice(mdl.Modalities),
-				Logo:         logo,
-				LogoDark:     logoDark,
-				HFRepo:       mdl.HFRepo,
-				Family:       fam.Name,
-				Genealogy:    snap.genealogyName(fam),
-				Modes:        []string{},
-				Capabilities: capabilitiesFromBenchmarks(benches),
-				Performance:  Performance{},
-				Quality:      Quality{},
-				Derived:      Derived{},
+				ID:               strconv.FormatInt(mdl.ID, 10),
+				Name:             orDefault(mdl.Name, strconv.FormatInt(mdl.ID, 10)),
+				Creator:          mdl.Creator,
+				LicenseName:      mdl.LicenseName,
+				LicenseURL:       mdl.LicenseURL,
+				Description:      mdl.Description,
+				KeyFeatures:      orEmptySlice(mdl.KeyFeatures),
+				Badges:           deriveBadges(mdl.KeyFeatures, nil, mdl.Modalities, modelOutputModalities(mdl)),
+				Modalities:       orEmptySlice(mdl.Modalities),
+				OutputModalities: modelOutputModalities(mdl),
+				Logo:             logo,
+				LogoDark:         logoDark,
+				HFRepo:           mdl.HFRepo,
+				Family:           fam.Name,
+				Genealogy:        snap.genealogyName(fam),
+				Modes:            []string{},
+				Capabilities:     capabilitiesFromBenchmarks(benches),
+				Performance:      Performance{},
+				Quality:          Quality{},
+				Derived:          Derived{},
 			})
 			continue
 		}
@@ -935,21 +1022,22 @@ func (r *catalogRegistry) assembleModelCard(
 	}
 
 	return Card{
-		ID:           strconv.FormatInt(mdl.ID, 10),
-		Name:         orDefault(mdl.Name, strconv.FormatInt(mdl.ID, 10)),
-		Creator:      mdl.Creator,
-		LicenseName:  mdl.LicenseName,
-		LicenseURL:   mdl.LicenseURL,
-		Description:  mdl.Description,
-		KeyFeatures:  orEmptySlice(mdl.KeyFeatures),
-		Badges:       deriveBadges(mdl.KeyFeatures, isAbliterated, mdl.Modalities),
-		Modalities:   orEmptySlice(mdl.Modalities),
-		Logo:         logo,
-		LogoDark:     logoDark,
-		HFRepo:       mdl.HFRepo,
-		Family:       fam.Name,
-		Modes:        orEmptySlice(modes),
-		Capabilities: capabilitiesFromBenchmarks(benches),
+		ID:               strconv.FormatInt(mdl.ID, 10),
+		Name:             orDefault(mdl.Name, strconv.FormatInt(mdl.ID, 10)),
+		Creator:          mdl.Creator,
+		LicenseName:      mdl.LicenseName,
+		LicenseURL:       mdl.LicenseURL,
+		Description:      mdl.Description,
+		KeyFeatures:      orEmptySlice(mdl.KeyFeatures),
+		Badges:           deriveBadges(mdl.KeyFeatures, isAbliterated, mdl.Modalities, modelOutputModalities(mdl)),
+		Modalities:       orEmptySlice(mdl.Modalities),
+		OutputModalities: modelOutputModalities(mdl),
+		Logo:             logo,
+		LogoDark:         logoDark,
+		HFRepo:           mdl.HFRepo,
+		Family:           fam.Name,
+		Modes:            orEmptySlice(modes),
+		Capabilities:     capabilitiesFromBenchmarks(benches),
 		Performance: Performance{
 			MeasuredTS:     perf.MeasuredTS,
 			MemoryReqBytes: registryMemBytes,
@@ -992,6 +1080,28 @@ func (r *catalogRegistry) WeightEstimateBytes(configID int64) (int64, bool) {
 		}
 	}
 	return 0, false
+}
+
+// CuratedMemory is one tuple-bound memory figure: bytes measured at the launch tuple Tuple (launch.MemoryTuple JSON).
+type CuratedMemory struct {
+	Bytes int64
+	Tuple string
+}
+
+func (r *catalogRegistry) CuratedMemory(configID int64) []CuratedMemory {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	snap := r.loadSnapshot(ctx)
+	var out []CuratedMemory
+	for _, b := range snap.benchByConfig[configID] {
+		if b.Metric != "safe_memory_bytes" || b.Tuple == "" {
+			continue
+		}
+		if v, err := strconv.ParseInt(b.Value, 10, 64); err == nil && v > 0 {
+			out = append(out, CuratedMemory{Bytes: v, Tuple: b.Tuple})
+		}
+	}
+	return out
 }
 
 func (r *catalogRegistry) CostPer1k(configID int64) float64 {
@@ -1210,9 +1320,11 @@ var badgePriority = map[string]int{
 	"reasoning":    0,
 	"vision":       1,
 	"hearing":      2,
-	"coding":       3,
-	"uncensored":   4,
-	"long-context": 5,
+	"speech":       3,
+	"decisions":    4,
+	"coding":       5,
+	"uncensored":   6,
+	"long-context": 7,
 }
 
 const maxGlyphBadges = 4
@@ -1222,7 +1334,7 @@ const maxGlyphBadges = 4
 // by badgePriority and capped at maxGlyphBadges, followed by any
 // unrecognized-feature text pills (uncapped — those render only in plain-list
 // contexts, never the capped glyph cluster on a card face).
-func deriveBadges(keyFeatures []string, isAbliterated *bool, modalities []string) []Badge {
+func deriveBadges(keyFeatures []string, isAbliterated *bool, modalities, outputs []string) []Badge {
 	glyphs := []Badge{}
 	pills := []Badge{}
 	seen := map[string]bool{}
@@ -1250,6 +1362,15 @@ func deriveBadges(keyFeatures []string, isAbliterated *bool, modalities []string
 			addGlyph(Badge{ID: "vision", Label: "Vision", Icon: "vision"})
 		case "audio":
 			addGlyph(Badge{ID: "hearing", Label: "Hearing", Icon: "hearing"})
+		}
+	}
+	// Output badges (ADR-0021). Plain "text" output is the default and earns no badge.
+	for _, m := range outputs {
+		switch m {
+		case store.OutputAudio:
+			addGlyph(Badge{ID: "speech", Label: "Speech", Icon: "speech"})
+		case store.OutputDecisions:
+			addGlyph(Badge{ID: "decisions", Label: "Decisions", Icon: "decisions"})
 		}
 	}
 	for _, f := range keyFeatures {
@@ -1525,4 +1646,22 @@ func (s *catalogSnapshot) resolveModelAndMmprojPaths(c store.Config) (string, st
 	modelPath := weight.FilePath
 	mmprojPath := s.resolveMmprojPath(c)
 	return modelPath, mmprojPath
+}
+
+// recommendedConfig is the catalog's "recommended" mark: a verified, visible config on the Radiance engine (1.17 or 2.x). Radiance is chosen per config (not every model has
+// a .rad), so an unverified or hidden Radiance config is not marked.
+func recommendedConfig(engineKind, status, visibility string) bool {
+	return enginekind.IsRadiance(engineKind) && status == "verified" && visibility == "visible"
+}
+
+// cardEngineKind is the config's runtime kind: the engine row's kind resolved against the build's backend. When Resolve refuses
+// (a kind this binary does not know) the raw stored kind is returned so the UI can show it; an empty result means the
+// engine row was not found at all.
+func (s *catalogSnapshot) cardEngineKind(c store.Config, b store.Build) string {
+	kind := s.engineKindByID[c.EngineID]
+	spec, err := enginekind.Resolve(kind, b.Backend)
+	if err != nil {
+		return kind
+	}
+	return spec.Name
 }

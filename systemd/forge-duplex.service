@@ -1,0 +1,33 @@
+# /etc/systemd/system/forge-duplex.service
+# Duplex audio transport (port 8086): the WebSocket session, frame clock and
+# loopback driver. It is NOT forge-tts (text-to-speech, port 8082) and NOT the
+# a0 chat router. Build from the ai-mode integration branch:
+#   cd go && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /opt/forge/forge-duplex ./cmd/forge-duplex
+# The service is tailnet/loopback-only. Everything that varies (the driver, the pool settings, the token) lives in /opt/forge/forge-duplex.env, which is
+# read after the Environment= lines below and so wins; docs/duplex/service.md ("Pool-backed engines") lists the keys. With no env file it runs the
+# loopback echo driver.
+[Unit]
+Description=Forge — duplex audio transport (WebSocket session + loopback driver, port 8086)
+After=network.target
+
+[Service]
+Type=simple
+User=testuser
+Group=testuser
+WorkingDirectory=/opt/forge
+ExecStart=/opt/forge/forge-duplex
+Environment=FORGE_DUPLEX_LISTEN=127.0.0.1:8086
+Environment=FORGE_DUPLEX_MAX_LANES=4
+Environment=FORGE_DUPLEX_MAX_MINUTES=30
+Environment=FORGE_DUPLEX_IDLE_TIMEOUT_S=10
+Environment=FORGE_DUPLEX_STATS_INTERVAL_S=10
+EnvironmentFile=-/opt/forge/forge-duplex.env
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=forge-duplex
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,13 +1,17 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { capLabel, dedupedCapEntries } from "../../lib/chatTemplateCaps";
 import { translatedFlagWhy } from "../../lib/flagI18n";
 import { formatGB, formatCurrency, formatRelativeTime } from "../../lib/format";
 import { translatedHazardsFor } from "../../lib/hazardLabels";
-import { canonicalFlag, parseLoadOptions, VLLM_FLAGS } from "../../lib/llamaFlags";
+import { canonicalFlag, parseLoadOptions } from "../../lib/llamaFlags";
+import { flagTableForKind, resolveRuntimeKind, runtimeLabel } from "../../lib/runtime";
 import { findProfileForConfig } from "../../lib/profileJoin";
 import { useCatalogConfigs, useCatalogModelAliases, useProfiles } from "../../lib/queries";
 import { useSession } from "../../lib/session";
+import { RemovalDialog } from "../RemovalDialog";
 import { useLoadConfig } from "../../lib/useLoadConfig";
+import { SpecialistSection, useCardSpecialist } from "../ConfigSpecialist";
 import type { ConfigCard, SchedulerStatus, Status } from "../../lib/types";
 import { BadgeIcon } from "../BadgeIcon";
 import { CapabilityBar } from "../CapabilityBar";
@@ -17,6 +21,7 @@ import { Icon } from "../Icon";
 import { InfoTip } from "../InfoTip";
 import { LoadConfirmModal } from "../LoadConfirmModal";
 import { NotesInline } from "./NotesInline";
+import { safeHref } from "../../lib/safeHref";
 
 // ConfigDetailView — the redesigned config expanded view (Sprint B):
 // 128×128 logo, a justified spec table (replacing the old flat
@@ -33,6 +38,7 @@ export function ConfigDetailView({
   displayCurrency = "USD",
   onViewModel,
   onEdit,
+  onDeleted,
 }: {
   card: ConfigCard;
   status: Status;
@@ -40,15 +46,19 @@ export function ConfigDetailView({
   displayCurrency?: string;
   onViewModel: (modelId: string) => void;
   onEdit: () => void;
+  /** Called after this config (or its whole model) was deleted from here. */
+  onDeleted: () => void;
 }) {
   const { t } = useTranslation("models");
   const { canOperate, canAdmin } = useSession();
+  const [removing, setRemoving] = useState(false);
   const loadState = useLoadConfig(card, status);
+  const spec = useCardSpecialist(card);
   const { state, activeSlot, busy, openConfirm, confirming } = loadState;
 
   const { data: profilesResp } = useProfiles();
   const profile = findProfileForConfig(profilesResp?.profiles ?? [], card);
-  const hasFreshProfile = !!profile && !profile.stale;
+  const hasFreshProfile = profile?.state === "current";
   const memReqBytes = hasFreshProfile ? profile.safe_memory_bytes : card.derived.memory_req_bytes;
   const fits =
     memReqBytes != null && schedulerStatus
@@ -61,11 +71,11 @@ export function ConfigDetailView({
         ? card.performance.power_cost_per_1k * 1000
         : null;
 
-  // carbon-8b/hy-mt2 are vLLM, not llama.cpp (ConfigCard.backend) — offering
-  // llama.cpp's flag explanations for those would be actively wrong, so
-  // this looks up VLLM_FLAGS instead for those two.
-  const isVllm = card.backend === "vllm";
-  const loadOptions = parseLoadOptions(card.extra_args, isVllm ? VLLM_FLAGS : undefined);
+  // The runtime (llama.cpp / vLLM / Radiance) comes from the server-derived
+  // ConfigCard.engine_kind; offering one runtime's flag explanations for
+  // another would be actively wrong, so the table is selected by kind.
+  const kind = resolveRuntimeKind(card.engine_kind, card.backend);
+  const loadOptions = parseLoadOptions(card.extra_args, flagTableForKind(kind));
   const hazards = translatedHazardsFor(t, card);
   const hazardByFlag = new Map(hazards.map((h) => [h.flag, h.translated]));
   const capEntries = dedupedCapEntries(card.chat_template_caps);
@@ -124,6 +134,7 @@ export function ConfigDetailView({
       <div className="spec-table">
         <div className="spec-row"><span className="k">{t("spec.model")}</span><span className="v">{card.model_name}</span></div>
         {card.variant_name && <div className="spec-row"><span className="k">{t("spec.variant")}</span><span className="v">{card.variant_name}</span></div>}
+        <div className="spec-row"><span className="k">{t("spec.runtime")}</span><span className="v">{runtimeLabel(kind)}</span></div>
         {card.backend && <div className="spec-row"><span className="k">{t("spec.backend")}</span><span className="v">{card.backend}</span></div>}
         {card.derived.arch && <div className="spec-row"><span className="k">{t("spec.architecture")}</span><span className="v">{card.derived.arch}</span></div>}
         {(card.modalities.length > 0 || card.modalities_unavailable.length > 0) && (
@@ -135,6 +146,21 @@ export function ConfigDetailView({
                 <InfoTip key={g.id} text={g.reason}>
                   <span style={{ textDecoration: "line-through", opacity: 0.5, marginLeft: 8, cursor: "help" }}>
                     {g.id[0].toUpperCase() + g.id.slice(1)}
+                  </span>
+                </InfoTip>
+              ))}
+            </span>
+          </div>
+        )}
+        {(card.output_modalities.some((m) => m !== "text") || card.output_modalities_unavailable.length > 0) && (
+          <div className="spec-row">
+            <span className="k">{t("spec.outputs")}</span>
+            <span className="v">
+              {card.output_modalities.map((m) => t(`spec.output_kind.${m}`, { defaultValue: m[0].toUpperCase() + m.slice(1) })).join(", ")}
+              {card.output_modalities_unavailable.map((g) => (
+                <InfoTip key={g.id} text={g.reason}>
+                  <span style={{ textDecoration: "line-through", opacity: 0.5, marginLeft: 8, cursor: "help" }}>
+                    {t(`spec.output_kind.${g.id}`, { defaultValue: g.id[0].toUpperCase() + g.id.slice(1) })}
                   </span>
                 </InfoTip>
               ))}
@@ -165,7 +191,7 @@ export function ConfigDetailView({
           <div className="spec-row">
             <span className="k">{t("spec.license")}</span>
             <span className="v">
-              {card.license_url ? <a href={card.license_url} target="_blank" rel="noreferrer">{card.license_name}</a> : card.license_name}
+              {safeHref(card.license_url) ? <a href={safeHref(card.license_url)} target="_blank" rel="noreferrer">{card.license_name}</a> : card.license_name}
             </span>
           </div>
         )}
@@ -218,7 +244,7 @@ export function ConfigDetailView({
                 <div className={`load-opt ${hazard ? "hazard" : ""}`} key={`${opt.flag}-${i}`}>
                   <span className="flag">{opt.flag}</span>
                   <span className="val">{opt.value ?? <span className="unprofiled">on</span>}</span>
-                  {opt.ref && <InfoTip text={translatedFlagWhy(t, isVllm, canonicalFlag(opt.flag), opt.ref.why)} />}
+                  {opt.ref && <InfoTip text={translatedFlagWhy(t, kind, canonicalFlag(opt.flag), opt.ref.why)} />}
                   {hazard && <InfoTip text={hazard} className="hazard-tip" />}
                   {opt.malformed && (
                     <InfoTip
@@ -286,6 +312,9 @@ export function ConfigDetailView({
         </div>
       )}
 
+      <SpecialistSection card={card} />
+      {removing && <RemovalDialog kind="config" id={card.id} onClose={() => setRemoving(false)} onRemoved={onDeleted} />}
+
       <div className="form-actions" style={{ marginTop: 20, justifyContent: "flex-start" }}>
         {/* Sprint B: edit-in-place button visually matches Load (.go —
             the same heat-gradient treatment), distinguished only by label,
@@ -295,7 +324,12 @@ export function ConfigDetailView({
             {t("detail.edit")}
           </button>
         )}
-        {canOperate && (
+        {canAdmin && (
+          <button type="button" className="btn danger" style={{ marginRight: "auto" }} onClick={() => setRemoving(true)}>
+            {t("common:removal.open_config")}
+          </button>
+        )}
+        {canOperate && !spec.isSpecialist && (
           state === "loaded" ? (
             <button className="go loaded" disabled>
               {t("detail.loaded")}{activeSlot ? t("detail.loaded_slot_suffix", { slot: status.slot_labels[activeSlot] }) : ""}

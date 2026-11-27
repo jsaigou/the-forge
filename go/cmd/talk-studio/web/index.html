@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Talk Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script>try { const t = localStorage.getItem('talk-studio.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) { /* storage may be blocked */ }</script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="stripes" aria-hidden="true"><i></i><i></i><i></i></div>
+<div class="app">
+<header class="top">
+  <div class="brand">Talk Studio<span class="dot">.</span></div>
+  <div class="header-actions">
+    <a id="vsLink" class="btn small" href="#" target="_blank" rel="noopener" hidden>Voice Studio</a>
+    <span id="status" class="pill" role="status" aria-live="polite">idle</span>
+    <button type="button" id="themeBtn" class="small btn-icon" aria-label="Switch between the light and the dark theme" title="Light or dark">◐</button>
+  </div>
+</header>
+
+<main>
+  <div id="banner" class="banner" role="alert" hidden><span id="bannerText"></span><button type="button" id="bannerClose" class="small" aria-label="Dismiss this message">Dismiss</button></div>
+
+  <section id="setup" class="card" aria-labelledby="setupTitle">
+    <h2 id="setupTitle">Set up a conversation</h2>
+    <p id="setupSummary" class="hint" hidden></p>
+    <div id="setupBody">
+      <p class="lead">A live voice conversation: you talk, the model answers, no typing. Say who it is and what is going on, then press Start. Use headphones, or it will hear itself.</p>
+
+      <div id="modelRow" class="row" hidden>
+        <label>Model <select id="model"></select></label>
+        <span id="modelNotes" class="hint"></span>
+      </div>
+
+      <div id="cardBox" hidden>
+        <div class="row scenario">
+          <label>Scenario <select id="preset"></select></label>
+          <button type="button" id="presetSave" class="small">Save as…</button>
+          <button type="button" id="presetDelete" class="small danger" hidden>Delete</button>
+        </div>
+        <div id="presetNameRow" class="row" hidden>
+          <input id="presetName" type="text" maxlength="128" placeholder="Name for this scenario" aria-label="Scenario name">
+          <button type="button" id="presetNameOk" class="small primary">Save scenario</button>
+          <button type="button" id="presetNameCancel" class="small">Cancel</button>
+        </div>
+        <p class="hint">A scenario is a character, a scene and a voice kept together under one name.</p>
+
+        <div class="cols">
+          <div>
+        <div class="grid haruOnly" hidden>
+          <label>Their name <input id="cName" type="text" maxlength="200" placeholder="Haru"></label>
+          <label>Language <select id="cLanguage"></select></label>
+        </div>
+
+        <div id="voiceBox" class="refOnly" hidden>
+          <label class="wide">Their voice
+            <span class="row nogap"><select id="voice"></select><button type="button" id="voiceDelete" class="small danger" hidden>Delete</button></span>
+          </label>
+          <audio id="voicePreview" controls preload="none" hidden></audio>
+          <p id="voiceHint" class="hint"></p>
+          <div id="voiceLangRow" class="row" hidden>
+            <label>Language spoken in this recording <select id="voiceLang"></select></label>
+          </div>
+        </div>
+
+          </div>
+          <div>
+        <fieldset class="scene haruOnly" hidden>
+          <legend>What is going on?</legend>
+          <div id="starters" class="chips" role="group" aria-label="Starting points"></div>
+          <label class="wide"><span class="sr">Scene</span>
+            <textarea id="cSituation" rows="3" maxlength="2000" placeholder="A sentence or two: where they are and what is happening"></textarea>
+          </label>
+          <label>What they call you <input id="cOther" type="text" maxlength="200" placeholder="Your name or a nickname (optional)"></label>
+        </fieldset>
+
+          </div>
+        </div>
+
+        <label id="textCard" class="wide" hidden>Prompt <textarea id="cText" rows="5" maxlength="7000"></textarea></label>
+
+        <details id="cMore" class="more">
+          <summary>More options</summary>
+          <div class="haruOnly" hidden>
+            <label class="wide">Who they are <textarea id="cPersona" rows="2" maxlength="2000" placeholder="How they are and how they talk, in a sentence or two"></textarea></label>
+            <label class="wide">How you know each other <input id="cRelationship" type="text" maxlength="500" placeholder="friends who talk most evenings"></label>
+            <div class="grid">
+              <label>Gender <select id="cGender"><option value="">(not stated)</option><option value="female">female</option><option value="male">male</option></select></label>
+              <label>Backchannels <select id="cBackchannel"><option value="">(not stated)</option><option value="low">few</option><option value="mid">some</option><option value="high">many</option></select></label>
+            </div>
+          </div>
+          <div id="sampleBox" class="block-inner" hidden>
+            <label class="wide">What the voice says in its sample
+              <textarea id="sampleText" rows="3" maxlength="600"></textarea>
+            </label>
+            <p class="hint">voice-studio speaks this in the chosen voice and the model hears it as something it already said. It is written from the name and what they call you; edit it to steer how the conversation starts.</p>
+            <div class="row">
+              <button type="button" id="samplePreview" class="small">Make and hear the sample</button>
+              <audio id="samplePlayer" controls preload="none" hidden></audio>
+              <span id="sampleInfo" class="hint" aria-live="polite"></span>
+            </div>
+            <p id="sampleLangNote" class="hint warn" hidden></p>
+          </div>
+          <div id="voiceManage" class="refOnly" hidden>
+            <h3>Add a voice from a recording</h3>
+            <p class="hint">10 to 40 seconds of plain speech. The model can repeat words from a recording, so avoid names and introductions; a voice from voice-studio is safer.</p>
+            <div class="row">
+              <label class="btn small">Add a recording…<input id="voiceFile" type="file" accept="audio/*" hidden></label>
+              <button type="button" id="voiceRec" class="small">Record my voice</button>
+              <span id="voiceRecInfo" class="hint" aria-live="polite"></span>
+            </div>
+            <div id="voiceSave" class="row" hidden>
+              <input id="voiceName" type="text" maxlength="128" placeholder="Name for this voice" aria-label="Voice name">
+              <select id="voiceNewLang" aria-label="Language spoken in this clip"></select>
+              <button type="button" id="voiceSaveBtn" class="small primary">Save voice</button>
+              <button type="button" id="voiceDiscard" class="small">Discard</button>
+              <audio id="voiceNew" controls hidden></audio>
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+    <div class="startbar" id="startRow">
+      <p id="startBlock" class="hint warn" role="alert" hidden></p>
+      <button type="button" id="start" class="primary big">Start conversation</button>
+    </div>
+  </section>
+
+  <section id="live" class="card" aria-labelledby="liveTitle" hidden>
+    <h2 id="liveTitle">Now</h2>
+    <div class="live-grid">
+    <div class="live-main">
+    <div class="row actions live-actions">
+      <button type="button" id="stop" class="big danger-solid" hidden>End conversation</button>
+      <button type="button" id="mute" class="big" aria-pressed="false" disabled>Mute my microphone</button>
+      <span id="muteNote" class="hint" aria-live="polite"></span>
+    </div>
+    <p id="engineMsg" class="hint" aria-live="polite"></p>
+    <h3>What the model says</h3>
+    <div id="transcript" class="transcript" aria-live="off"></div>
+    </div>
+    <aside class="live-side" aria-label="Levels and timing">
+    <div class="meters">
+      <div><span class="k">You</span><div class="bar" role="img" aria-label="Your microphone level"><i id="micBar"></i></div></div>
+      <div><span class="k">Model</span><div class="bar" role="img" aria-label="The model's voice level"><i id="modelBar"></i></div></div>
+    </div>
+    <dl class="stats">
+      <div><dt>Reply latency</dt><dd id="lat">—</dd></div>
+      <div><dt>Frames</dt><dd id="frames">—</dd></div>
+      <div><dt>Gaps / underruns</dt><dd id="gaps">—</dd></div>
+      <div><dt>Time</dt><dd id="uptime">—</dd></div>
+      <div><dt>Saved</dt><dd id="saved">—</dd></div>
+    </dl>
+    </aside>
+    </div>
+  </section>
+
+  <section id="recSection" class="card" aria-labelledby="recTitle">
+    <h2 id="recTitle">Recordings</h2>
+    <p class="hint">Every conversation is saved while it runs: your audio, the model's audio, its text and the timing.</p>
+    <div id="recordings"></div>
+  </section>
+</main>
+</div>
+<script type="module" src="backdrop.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

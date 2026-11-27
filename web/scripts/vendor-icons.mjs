@@ -101,6 +101,8 @@ const LOBEHUB_SLUGS = {
   poolside: "poolside-color.svg",
   openrouter: "openrouter-color.svg",
   fireworks: "fireworks-color.svg",
+  // ibm — the Granite models' maker (design feedback 2026-11-27). Mono (currentColor), so it follows the theme.
+  ibm: "ibm.svg",
   // Operator feedback 2026-08-14 — prep icons (not all in use yet): a color
   // Claude mark alongside svgl's mono `anthropic`; Gemini's own mark (svgl
   // gemini.svg, distinct from google.svg); Grok (xAI); Bedrock (AWS).
@@ -122,6 +124,8 @@ const LOBEHUB_SLUGS = {
   alibaba: "alibaba-color.svg",
   nvidia: "nvidia-color.svg",
   huggingscience: "huggingface-color.svg",
+  // LFM3 integration (2026-11-02): Liquid AI's mark for the LFM3 family, genealogy and models.
+  liquid: "liquid.svg",
 };
 
 // Slugs whose vendored mark is a flat mono-black glyph (e.g. lobehub's grok).
@@ -131,6 +135,14 @@ const LOBEHUB_SLUGS = {
 // Without this, classifyEdge returns "dark" and a contrasting ring is added —
 // but a ring alone can't rescue a black glyph on a dark panel.
 const CURRENTCOLOR_SLUGS = new Set(["grok"]);
+
+// Single-color marks that ship as `fill="currentColor"`. <Icon> renders every mark through an <img>, where currentColor is always
+// black, so such a mark is invisible on the default dark theme. Derive an explicit black light variant and a white dark variant
+// (the same svgDark/edgeDark pairing svgl's nvidia/qwen/openai use) instead of relying on the page's text color.
+const DERIVED_DARK_SLUGS = new Set(["liquid"]);
+function deriveLightDark(svg) {
+  return { light: svg.replace(/currentColor/g, "#000"), dark: svg.replace(/currentColor/g, "#fff") };
+}
 function coerceCurrentColor(svg) {
   return svg.replace(/(fill|stroke)\s*=\s*"(#000000|#000|black)"/gi, '$1="currentColor"');
 }
@@ -187,6 +199,11 @@ const INLINE_SVGS = {
   // border-radius, not baked in here) plus the glyph scaled 0.6 and centered
   // (translate(4.8 4.8) — (24 - 24*0.6)/2 — matches lobehub's own Avatar
   // layout math).
+  // voicestudio / talkstudio (2026-11-26, design/QA): the two link-only Console tools on Core got icons that match ComfyUI's
+  // look — the same full-bleed #162DD4 tile with a #F0FF41 glyph. Authored here (no brand mark exists): a waveform for
+  // voice-studio, a speech bubble for talk-studio.
+  voicestudio: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="#162DD4"/><path fill="none" stroke="#F0FF41" stroke-width="2" stroke-linecap="round" d="M6 10v4M9 7.5v9M12 5.5v13M15 8.5v7M18 10.5v3"/></svg>`,
+  talkstudio: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="#162DD4"/><path fill="none" stroke="#F0FF41" stroke-width="1.8" stroke-linejoin="round" d="M6.5 6.5h11a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H12l-4 3.2v-3.2H6.5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z"/><circle cx="9" cy="11.5" r="1.1" fill="#F0FF41"/><circle cx="12" cy="11.5" r="1.1" fill="#F0FF41"/><circle cx="15" cy="11.5" r="1.1" fill="#F0FF41"/></svg>`,
   comfyui: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="#162DD4"/><path fill="#F0FF41" transform="translate(4.8 4.8) scale(0.6)" d="M5.485 23.76c-.568 0-1.026-.207-1.325-.598-.307-.402-.387-.964-.22-1.54l.672-2.315a.605.605 0 00-.1-.536.622.622 0 00-.494-.243H2.085c-.568 0-1.026-.207-1.325-.598-.307-.403-.387-.964-.22-1.54l2.31-7.917.255-.87c.343-1.18 1.592-2.14 2.786-2.14h2.313c.276 0 .519-.18.595-.442l.764-2.633C9.906 1.208 11.155.249 12.35.249l4.945-.008h3.62c.568 0 1.027.206 1.325.597.307.402.387.964.22 1.54l-1.035 3.566c-.343 1.178-1.593 2.137-2.787 2.137l-4.956.01H11.37a.618.618 0 00-.594.441l-1.928 6.604a.605.605 0 00.1.537c.118.153.3.243.495.243l3.275-.006h3.61c.568 0 1.026.206 1.325.598.307.402.387.964.22 1.54l-1.036 3.565c-.342 1.179-1.592 2.138-2.786 2.138l-4.957.01h-3.61z"/></svg>`,
 
   // Carbon 8B (HuggingFaceBio genomic foundation model) — the real brand mark,
@@ -211,6 +228,10 @@ const INLINE_SVGS = {
   coding: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5"/><path d="M16 7l5 5-5 5"/></svg>`,
   vision: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`,
   hearing: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.5a6.5 6.5 0 1 1 13 0c0 4.5-4 5.5-4 9a3 3 0 1 1-6 0"/><path d="M14.5 9.5a2.5 2.5 0 0 0-5 0v1a2 2 0 1 1 0 4"/></svg>`,
+  // Output-modality badges (ADR-0021, 2026-11-02): `speech` (speaker + waves) for models that speak, `decisions` (flowchart
+  // diamond + check) for native decision models. Synthesized from a card's output_modalities, not a key_feature string.
+  speech: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18.2 6.5a8 8 0 0 1 0 11"/></svg>`,
+  decisions: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 21 12 12 21 3 12z"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/></svg>`,
   "long-context": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="8" width="19" height="8" rx="1"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4"/></svg>`,
 };
 
@@ -323,7 +344,7 @@ function attrFor(slug, source, sourceFile) {
 // every other vendored slug is a selectable "vendor" mark.
 
 const BADGE_SLUGS = new Set([
-  "reasoning", "coding", "vision", "hearing", "uncensored", "long-context",
+  "reasoning", "coding", "vision", "hearing", "speech", "decisions", "uncensored", "long-context",
 ]);
 
 function kindFor(slug) {
@@ -483,9 +504,17 @@ async function main() {
       const raw = await resp.text();
       let svg = normalizeSvg(raw.trim());
       if (CURRENTCOLOR_SLUGS.has(slug)) svg = coerceCurrentColor(svg);
+      let svgDark, edgeDark;
+      if (DERIVED_DARK_SLUGS.has(slug)) {
+        const pair = deriveLightDark(svg);
+        svg = pair.light;
+        svgDark = pair.dark;
+        edgeDark = classifyEdge(svgDark);
+        await writeFile(resolve(ICONS_DIR, `${slug}-dark.svg`), svgDark, "utf8");
+      }
       const edge = classifyEdge(svg);
       await writeFile(resolve(ICONS_DIR, `${slug}.svg`), svg, "utf8");
-      entries.push([slug, svg, edge, kindFor(slug), undefined, undefined]);
+      entries.push([slug, svg, edge, kindFor(slug), svgDark, edgeDark]);
       attributions.push(attrFor(slug, "lobehub", filename));
       console.log(`[vendor-icons] lobehub ${slug.padEnd(12)} ← ${filename}  edge=${edge}`);
     } catch (e) {

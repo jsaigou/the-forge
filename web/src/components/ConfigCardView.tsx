@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { useCardSpecialist } from "./ConfigSpecialist";
 import { apiErrorMessage } from "../lib/api";
 import { formatGB, formatCurrency } from "../lib/format";
 import { translatedHazardsFor } from "../lib/hazardLabels";
@@ -45,8 +46,12 @@ export function ConfigCardView({
   interactive?: boolean;
 }) {
   const { t } = useTranslation("common");
+  const { t: ts } = useTranslation("specialists");
   const { canOperate } = useSession();
   const [showDetail, setShowDetail] = useState(false);
+  // A catalog model that is a specialist never loads into an LLM slot (one owner), so its Load button gives way to a badge. The control itself
+  // lives on the model's detail view: the square card face has no room for another row.
+  const spec = useCardSpecialist(card);
   const loadState = useLoadConfig(card, status);
   const { state, activeSlot, busy, openConfirm, confirming } = loadState;
 
@@ -81,7 +86,7 @@ export function ConfigCardView({
   // A1 bytes retrofit: the budget figure is bytes too; no MB↔GB conversions.
   const { data: profilesResp } = useProfiles();
   const profile = profilesResp?.profiles.find((p) => p.mode === card.name);
-  const hasFreshProfile = !!profile && !profile.stale;
+  const hasFreshProfile = profile?.state === "current";
   const memReqBytes = hasFreshProfile ? profile.safe_memory_bytes : card.derived.memory_req_bytes;
   const fits =
     memReqBytes != null && schedulerStatus
@@ -155,6 +160,11 @@ export function ConfigCardView({
               </span>
             )}
           </div>
+          {card.recommended && (
+            <div style={{ marginTop: 3 }}>
+              <span className="chip" style={{ whiteSpace: "nowrap", fontSize: 10, padding: "1px 6px" }} title={t("card.recommended_title")}>★ {t("card.recommended")}</span>
+            </div>
+          )}
           {/* Operator feedback (2026-09-14): an "aka" chip requiring a hover
               to learn anything failed "clear and easy to understand" — this
               says the real name in plain text, always visible, no
@@ -179,7 +189,8 @@ export function ConfigCardView({
           <button
             className={`icon-btn star-btn ${isStarred ? "starred" : ""}`.trim()}
             style={{ color: starError ? "var(--crit)" : undefined }}
-            title={starError ?? (isStarred ? "Unstar" : "Star this config")}
+            title={starError ?? (isStarred ? t("card.star_remove") : t("card.star_add"))}
+            aria-label={starError ?? (isStarred ? t("card.star_remove") : t("card.star_add"))}
             disabled={addFavorite.isPending || removeFavorite.isPending}
             onClick={(e) => { e.stopPropagation(); toggleStar(); }}
           >
@@ -216,7 +227,11 @@ export function ConfigCardView({
             ~{formatCurrency(powerEstPer1m, displayCurrency)}
           </div>
         )}
-        {interactive && (!canOperate ? null : state === "loaded" ? (
+        {interactive && (spec.isSpecialist ? (
+          <a className="go loaded" href="#specialists" title={ts(`behavior.${spec.behavior}`)} onClick={(e) => e.stopPropagation()}>
+            {ts("modelcard.badge")}
+          </a>
+        ) : !canOperate ? null : state === "loaded" ? (
           <button className="go loaded" disabled>
             Loaded{activeSlot ? ` · ${status.slot_labels[activeSlot]}` : ""}
           </button>

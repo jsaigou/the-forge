@@ -144,6 +144,16 @@ func TestRegisteredConfigCarriesTheFlagItsBuildUnderstands(t *testing.T) {
 			if !has(tc.wantFlag) || has(tc.notFlag) {
 				t.Errorf("ExtraArgs = %v, want %s and not %s", cfg.ExtraArgs, tc.wantFlag, tc.notFlag)
 			}
+			// The documented hard rule is --parallel 1; the configs.parallel column is dead, so it has to be a flag.
+			n := 0
+			for i, a := range cfg.ExtraArgs {
+				if a == "--parallel" && i+1 < len(cfg.ExtraArgs) && cfg.ExtraArgs[i+1] == "1" {
+					n++
+				}
+			}
+			if n != 1 {
+				t.Errorf("ExtraArgs = %v, want exactly one --parallel 1 (found %d)", cfg.ExtraArgs, n)
+			}
 		})
 	}
 }

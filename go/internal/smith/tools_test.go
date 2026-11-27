@@ -24,7 +24,9 @@ import (
 // every tool's Run through *ToolEnv instead of *Smith (tools.go's doc
 // comment).
 func TestToolEnv_ShapeFrozen(t *testing.T) {
-	want := []string{"RunSelected", "KBSearch", "ListFindings", "Catalog", "Web", "HF", "HFDownload", "Now"}
+	// OperatorURLs and fetchable are data, not capabilities: the URL sets web_fetch checks against (the operator's own URLs and this turn's search
+	// results). They narrow what a tool may do; they hand it no way to mutate anything.
+	want := []string{"RunSelected", "KBSearch", "ListFindings", "Catalog", "Web", "HF", "HFDownload", "Now", "OperatorURLs", "fetchable"}
 	got := fieldNames(reflect.TypeOf(ToolEnv{}))
 	sort.Strings(want)
 	sort.Strings(got)

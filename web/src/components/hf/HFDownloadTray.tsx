@@ -98,7 +98,7 @@ function DownloadRow({ job }: { job: HFDownload }) {
               )}
             </span>
             <div className="rb-track">
-              <div className="rb-fill" style={{ width: `${pct}%`, background: job.state === "paused" ? "var(--text-mute)" : "#FF006E" }} />
+              <div className="rb-fill" style={{ width: `${pct}%`, background: job.state === "paused" ? "var(--text-mute)" : "var(--prog-accent)" }} />
             </div>
           </div>
         </div>

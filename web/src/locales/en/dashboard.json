@@ -41,7 +41,7 @@
     "compressor_loading": "Loading Compressor summary…",
     "compressor_none": "No Compressor proxies reporting this window.",
     "virtual_spend_section_title": "Virtual spend · local models · {{range}}",
-    "virtual_spend_note": "Priced off curated catalog throughput, not measured per-model power — no profiling run has been executed against this hardware yet (destructive; needs a coordinated window).",
+    "virtual_spend_note": "Priced off curated catalog throughput, not from power measured while each request ran.",
     "no_local_usage": "No local usage recorded yet.",
     "tok_suffix": "tok",
     "per_model_title": "Per-model reliability & spend · {{range}}"
@@ -59,7 +59,7 @@
     "saved_suffix": " · {{amount}} saved",
     "compressor_saved_measured": "Compressor saved (measured)",
     "compressor_saved_detail": "{{amount}} · {{tokens}} tokens compressed out of the prompt before it reached {{proxy}}",
-    "no_tokens_compressed": "No tokens compressed out of the prompt this window — usually 0 under --lossless, though not always (a real 950-token delta was recorded live 2026-07-31).",
+    "no_tokens_compressed": "No tokens compressed out of the prompt this window.",
     "provider_cache_discount": "Provider cache discount (not a Compressor saving — applies with or without Compressor in the path):",
     "provider_cache_discount_detail": " {{amount}} · {{tokens}} tokens billed at {{proxy}}'s discounted rate",
     "no_cacheable": "No cacheable requests (or no TPS basis) this window — no time-saved estimate."
@@ -85,7 +85,9 @@
     "temp_junction": "junction {{deg}}°C",
     "temp_nvme": "NVMe {{deg}}°C",
     "network_k": "Network",
-    "storage_k": "Storage · {{name}}"
+    "storage_k": "Storage · {{name}}",
+    "power_k": "Power",
+    "power_d": "package"
   },
   "per_model_spend": {
     "col_model": "Model",
@@ -114,7 +116,20 @@
     "est_suffix": " (~est)",
     "other": "other",
     "other_legend": "Other (kernel / driver / untracked)",
-    "free": "{{amount}} GB free"
+    "free": "{{amount}} GB free",
+    "title_host": "Memory · {{total}} GB host (unified)",
+    "other_models": "models · host-side memory",
+    "reserved_specialists": "Reserved · always-on engines",
+    "reserved_os": "Reserved · OS",
+    "reserved_margin": "Reserved · growth margin",
+    "held_by": "held back ({{bound}})",
+    "bound_partition": "model budget",
+    "bound_host": "host floor",
+    "bound_gtt": "GTT ceiling",
+    "swap_in_use": "Swap in use (compressed RAM)",
+    "unit_pool": "Engine {{slot}} (in use)",
+    "other_models_legend": "Models · host-side memory (RSS) and untracked",
+    "free_legend": "Free for a new model (limited by {{bound}})"
   },
   "resource_trend": {
     "series_mem": "Memory (GTT)",
@@ -156,10 +171,10 @@
     "loading": "Loading energy summary…"
   },
   "activity_heatmap": {
-    "title": "Token activity · last year",
+    "title": "Token activity · 6 months",
     "loading": "Loading activity…",
     "none": "No activity data yet.",
-    "aria_label": "Token activity by day, last year — {{scope}}",
+    "aria_label": "Token activity by day, last 6 months — {{scope}}",
     "scope_all": "All",
     "scope_local": "Local",
     "scope_external": "External"
@@ -227,5 +242,41 @@
     "approx_note": "Percentiles are approximate (about ±10%). Detection is a heuristic and can give false suspects when two conversations start identically.",
     "partial_dropped": "Partial data: the ledger dropped {{count}} requests under load.",
     "partial_errors": "The ledger also recorded {{count}} internal errors."
+  },
+  "concurrency": {
+    "title": "Concurrency",
+    "intro": "How many requests a model really served at the same time. Use it to size parallel slots and capacity.",
+    "model": "Model",
+    "window_1h": "1h",
+    "window_24h": "24h",
+    "window_7d": "7d",
+    "window_31d": "31d",
+    "requests": "Requests",
+    "outcomes": "{{ok}} ok · {{error}} error · {{aborted}} aborted",
+    "in_flight": "In flight p50 / p90 / p99",
+    "max_of": "max {{max}}",
+    "busy": "Busy time",
+    "busy_d": "time with at least one request running",
+    "unit_s": "s",
+    "unit_min": "min",
+    "unit_h": "h",
+    "overlap": "Overlap",
+    "overlap_d_one": "{{count}} request ran alongside another",
+    "overlap_d_other": "{{count}} requests ran alongside another",
+    "prompt_tokens": "Prompt tokens p50 / p90 / p99",
+    "output_tokens": "Output tokens p50 / p90 / p99",
+    "live": "In flight now / peak",
+    "live_d": "peak over the last 15 minutes",
+    "live_none": "no a0 requests lately",
+    "token_samples_one": "Token figures come from {{count}} request whose upstream reported usage.",
+    "token_samples_other": "Token figures come from {{count}} requests whose upstream reported usage.",
+    "untimed_one": "{{count}} older request is left out because it has no timing recorded.",
+    "untimed_other": "{{count}} older requests are left out because they have no timing recorded.",
+    "untimed_only_one": "{{count}} older request in this window has no timing recorded, so it cannot be counted.",
+    "untimed_only_other": "{{count}} older requests in this window have no timing recorded, so they cannot be counted.",
+    "empty": "No timed requests for this model in this window.",
+    "no_models": "No models have served requests in this window.",
+    "load_error": "Could not load concurrency figures.",
+    "caption": "In flight is how many requests were being served at the same moment, measured only while at least one was running (p90 = at or below this level for 90% of that time). Overlap is the share of requests that ran together with another. Figures cover requests proxied by a0 only; clients that talk to a slot directly are not counted."
   }
 }

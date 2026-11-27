@@ -15,8 +15,10 @@ package authz
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -70,17 +72,17 @@ type WebAuthnService struct {
 	users WebAuthnUserStore
 
 	// challengeMu guards the in-memory challenge sessions.
-	challengeMu   sync.Mutex
-	challenges     map[string]*challengeEntry
-	challengeTTL   time.Duration
-	now            func() time.Time
+	challengeMu  sync.Mutex
+	challenges   map[string]*challengeEntry
+	challengeTTL time.Duration
+	now          func() time.Time
 }
 
 // challengeEntry is one stored challenge session between begin and finish.
 type challengeEntry struct {
-	session  *webauthn.SessionData
-	userID   int64
-	expires  time.Time
+	session *webauthn.SessionData
+	userID  int64
+	expires time.Time
 }
 
 const defaultChallengeTTL = 5 * time.Minute
@@ -106,9 +108,9 @@ func (s *WebAuthnService) WithClock(now func() time.Time) *WebAuthnService {
 
 // RPConfig holds the Relying Party configuration for WebAuthn.
 type RPConfig struct {
-	RPID         string
+	RPID          string
 	RPDisplayName string
-	RPOrigins    []string
+	RPOrigins     []string
 }
 
 // NewWebAuthnInstance creates a go-webauthn WebAuthn instance from RP config.
@@ -170,10 +172,10 @@ func toWebAuthnCredential(c WebAuthnCredentialRecord) webauthn.Credential {
 		}
 	}
 	return webauthn.Credential{
-		ID:          []byte(c.ID),
-		PublicKey:   c.PublicKey,
+		ID:              credentialIDBytes(c.ID),
+		PublicKey:       c.PublicKey,
 		AttestationType: "none",
-		Transport:   transports,
+		Transport:       transports,
 		Authenticator: webauthn.Authenticator{
 			SignCount: c.SignCount,
 		},
@@ -259,7 +261,7 @@ func (s *WebAuthnService) pruneLocked() {
 
 // BeginRegistrationResult is the output of BeginRegistration.
 type BeginRegistrationResult struct {
-	Creation  *protocol.CredentialCreation
+	Creation       *protocol.CredentialCreation
 	ChallengeToken string
 }
 
@@ -312,7 +314,7 @@ func (s *WebAuthnService) FinishRegistration(ctx context.Context, wa *webauthn.W
 	}
 	// Store the credential.
 	transportsJSON, _ := encodeTransportsStr(credential.Transport)
-	credID := string(credential.ID)
+	credID := credentialIDString(credential.ID)
 	err = s.creds.Save(ctx, WebAuthnCredentialRecord{
 		ID:         credID,
 		UserID:     userID,
@@ -389,9 +391,11 @@ func (s *WebAuthnService) FinishAssertion(ctx context.Context, wa *webauthn.WebA
 	if err != nil {
 		return nil, fmt.Errorf("authz: webauthn: validate login: %w", err)
 	}
-	credID := string(credential.ID)
-	// Update the sign count + last_used_at.
-	_ = s.creds.UpdateSignCount(ctx, credID, credential.Authenticator.SignCount, s.now())
+	credID := s.storedCredentialID(ctx, credential.ID)
+	// Update the sign count + last_used_at. A failure is not fatal to this login but it blunts clone detection, so it is logged, not dropped.
+	if err := s.creds.UpdateSignCount(ctx, credID, credential.Authenticator.SignCount, s.now()); err != nil {
+		log.Printf("authz: webauthn: could not record the sign count for a credential: %v", err)
+	}
 	return &FinishAssertionResult{
 		CredentialID: credID,
 		SignCount:    credential.Authenticator.SignCount,
@@ -463,4 +467,31 @@ func transportsFromProtocol(ts []protocol.AuthenticatorTransport) []string {
 		out[i] = string(t)
 	}
 	return out
+}
+
+// Credential ids are opaque bytes chosen by the authenticator. They are stored, listed and put in URLs as unpadded base64url; string(bytes)
+// would store invalid UTF-8 in a TEXT column and json.Marshal would then destroy it on the way to the UI.
+func credentialIDString(id []byte) string { return base64.RawURLEncoding.EncodeToString(id) }
+
+// credentialIDBytes is the inverse. A value that is not base64url (a row written before ids were encoded) is used as its own bytes.
+func credentialIDBytes(s string) []byte {
+	if b, err := base64.RawURLEncoding.DecodeString(s); err == nil {
+		return b
+	}
+	return []byte(s)
+}
+
+// storedCredentialID returns the id under which the credential's row is stored: the base64url form for rows written since ids were encoded, or
+// the raw-byte string for a row written before. The row is found by lookup, so a legacy passkey keeps its sign count and last-used time.
+func (s *WebAuthnService) storedCredentialID(ctx context.Context, id []byte) string {
+	enc := credentialIDString(id)
+	if _, err := s.creds.Get(ctx, enc); err == nil {
+		return enc
+	}
+	if raw := string(id); raw != enc {
+		if _, err := s.creds.Get(ctx, raw); err == nil {
+			return raw
+		}
+	}
+	return enc
 }

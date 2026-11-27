@@ -98,7 +98,7 @@ func seedLocalConfig(t *testing.T, db *store.DB, name, visibility string) {
 	}
 	if _, err := cat.CreateConfig(ctx, store.Config{
 		Name: name, VariantID: varID, WeightArtifactID: artID, EngineID: engines[0].ID,
-		NCtx: 4096, Parallel: 1, Status: "verified", Visibility: visibility,
+		NCtx: 4096, Status: "verified", Visibility: visibility,
 	}); err != nil {
 		t.Fatalf("CreateConfig: %v", err)
 	}

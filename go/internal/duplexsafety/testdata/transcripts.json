@@ -1,0 +1,271 @@
+{
+  "_note": "Synthetic transcripts only. Each case is a streaming sequence of text.delta values. clear_after (loops only) is the 1-based delta index at which at least MinRepeats back-to-back copies of a >= MinPhraseRunes unit have streamed; tests require a stop within a small number of deltas after that.",
+  "cases": [
+    {
+      "name": "exact_phrase",
+      "label": "loop",
+      "why": "one short phrase repeated five times",
+      "clear_after": 4,
+      "deltas": ["I think it is ", "I think it is ", "I think it is ", "I think it is ", "I think it is "]
+    },
+    {
+      "name": "sentence_repeat",
+      "label": "loop",
+      "why": "the same complete sentence repeated back to back",
+      "clear_after": 4,
+      "deltas": ["The weather is nice today. ", "The weather is nice today. ", "The weather is nice today. ", "The weather is nice today. ", "The weather is nice today. "]
+    },
+    {
+      "name": "stutter_one_word",
+      "label": "loop",
+      "why": "a stutter on one word long enough to clear the phrase floor",
+      "clear_after": 4,
+      "deltas": ["unfortunately ", "unfortunately ", "unfortunately ", "unfortunately ", "unfortunately ", "unfortunately "]
+    },
+    {
+      "name": "filler_between_repeats",
+      "label": "loop",
+      "why": "the phrase repeats with hesitation fillers between copies; fillers are removed before analysis",
+      "clear_after": 7,
+      "deltas": ["I don't know ", "um ", "I don't know ", "uh ", "I don't know ", "um ", "I don't know "]
+    },
+    {
+      "name": "two_phrase_alternation",
+      "label": "loop",
+      "why": "a two-phrase unit (A then B) repeated four times",
+      "clear_after": 8,
+      "deltas": ["I want to go ", "I do not want to go ", "I want to go ", "I do not want to go ", "I want to go ", "I do not want to go ", "I want to go ", "I do not want to go "]
+    },
+    {
+      "name": "loop_after_normal_speech",
+      "label": "loop",
+      "why": "normal preamble, then the loop; the detector must not be confused by the preamble",
+      "clear_after": 5,
+      "deltas": ["Hello there, how are you today? ", "I am fine. ", "I am fine. ", "I am fine. ", "I am fine. "]
+    },
+    {
+      "name": "slow_loop_with_silence_spaces",
+      "label": "loop",
+      "why": "repeats separated by silent frames, which arrive as lone spaces",
+      "clear_after": 10,
+      "deltas": ["It is okay. ", " ", " ", "It is okay. ", " ", " ", "It is okay. ", " ", " ", "It is okay. "]
+    },
+    {
+      "name": "near_repeat_small_difference",
+      "label": "loop",
+      "why": "four copies of one phrase with a single differing rune in each later copy",
+      "clear_after": 4,
+      "deltas": ["the door is open now ", "the door is open wow ", "the door is open pow ", "the door is open cow "]
+    },
+    {
+      "name": "same_sentence_over_and_over",
+      "label": "loop",
+      "why": "the same plea repeated over and over",
+      "clear_after": 4,
+      "deltas": ["Please help me now. ", "Please help me now. ", "Please help me now. ", "Please help me now. ", "Please help me now. "]
+    },
+    {
+      "name": "long_phrase_repeat",
+      "label": "loop",
+      "why": "a longer phrase repeated four times",
+      "clear_after": 4,
+      "deltas": ["The quick brown fox jumps over the lazy dog. ", "The quick brown fox jumps over the lazy dog. ", "The quick brown fox jumps over the lazy dog. ", "The quick brown fox jumps over the lazy dog. "]
+    },
+    {
+      "name": "repeated_question",
+      "label": "loop",
+      "why": "a question repeated five times",
+      "clear_after": 4,
+      "deltas": ["Why are you doing this to me? ", "Why are you doing this to me? ", "Why are you doing this to me? ", "Why are you doing this to me? ", "Why are you doing this to me? "]
+    },
+    {
+      "name": "japanese_no_space_loop",
+      "label": "loop",
+      "why": "a repeated Japanese phrase with no spaces, so only rune windows can align",
+      "clear_after": 4,
+      "deltas": ["きょうはいいてんきですね", "きょうはいいてんきですね", "きょうはいいてんきですね", "きょうはいいてんきですね", "きょうはいいてんきですね"]
+    },
+    {
+      "name": "split_words_across_deltas",
+      "label": "loop",
+      "why": "one repeated phrase whose words are split across the tiny streaming deltas",
+      "clear_after": 8,
+      "deltas": ["I thi", "nk it ", "is I t", "hink it ", "is I thi", "nk it is ", "I think ", "it is "]
+    },
+    {
+      "name": "loop_after_full_sentence",
+      "label": "loop",
+      "why": "a complete unrelated sentence, then four identical answers",
+      "clear_after": 5,
+      "deltas": ["Okay so let me think about that for a second. ", "The answer is yes. ", "The answer is yes. ", "The answer is yes. ", "The answer is yes. "]
+    },
+    {
+      "name": "no_no_no",
+      "label": "normal",
+      "why": "short repeated word, below the phrase floor",
+      "deltas": ["no ", "no ", "no"]
+    },
+    {
+      "name": "yes_yes",
+      "label": "normal",
+      "why": "short repeated word, below the phrase floor",
+      "deltas": ["yes ", "yes"]
+    },
+    {
+      "name": "phrase_twice_for_emphasis",
+      "label": "normal",
+      "why": "a phrase said twice for emphasis, below the repeat floor",
+      "deltas": ["I really mean it. ", "I really mean it."]
+    },
+    {
+      "name": "backchannels",
+      "label": "normal",
+      "why": "listening backchannels, below the phrase floor even when repeated",
+      "deltas": ["mm-hm", " ... ", "mm-hm", " right ", "mm-hm"]
+    },
+    {
+      "name": "counting",
+      "label": "normal",
+      "why": "counting has no repeated multi-word unit",
+      "deltas": ["one ", "two ", "three ", "four ", "five ", "six ", "seven ", "eight ", "nine ", "ten"]
+    },
+    {
+      "name": "long_monologue_a",
+      "label": "normal",
+      "why": "an ordinary multi-sentence monologue",
+      "deltas": ["I woke up early and made a pot of coffee. ", "The kitchen was quiet, so I read the news for a while. ", "After that I walked to the corner and bought some bread. ", "It was a normal morning and nothing unusual happened."]
+    },
+    {
+      "name": "long_monologue_b",
+      "label": "normal",
+      "why": "an ordinary phone-call narrative with no repeated unit",
+      "deltas": ["My sister called me yesterday to ask about the trip. ", "She wants to know whether we should take the train or drive. ", "I told her the train is cheaper and much less tiring. ", "We agreed to decide after checking the schedule on Friday."]
+    },
+    {
+      "name": "long_monologue_c",
+      "label": "normal",
+      "why": "a recipe description with sequence words, not repetition",
+      "deltas": ["First you heat the pan and add a little oil. ", "Then you put in the onions and cook them until soft. ", "Next add the tomatoes, salt, and pepper, and let it simmer. ", "Serve it with rice or bread, whichever you prefer."]
+    },
+    {
+      "name": "french",
+      "label": "normal",
+      "why": "non-English text with no repeated phrase",
+      "deltas": ["je ne sais pas quoi dire ", "mais je vais essayer de repondre calmement"]
+    },
+    {
+      "name": "japanese_no_spaces",
+      "label": "normal",
+      "why": "unspaced Japanese must not break window alignment or fire",
+      "deltas": ["きょうはいいてんきですねそうですねありがとうございます"]
+    },
+    {
+      "name": "japanese_repeat_twice",
+      "label": "normal",
+      "why": "a short Japanese phrase said twice, below both floors",
+      "deltas": ["そうですね", "そうですね"]
+    },
+    {
+      "name": "empty",
+      "label": "normal",
+      "why": "no text at all",
+      "deltas": []
+    },
+    {
+      "name": "space_only",
+      "label": "normal",
+      "why": "silence spaces and whitespace carry no text",
+      "deltas": [" ", "  ", "\t", "\n"]
+    },
+    {
+      "name": "silence_interspersed",
+      "label": "normal",
+      "why": "short natural utterance with silent frames around it",
+      "deltas": ["", " ", "hello", " ", " ", "there"]
+    },
+    {
+      "name": "short_thanks_twice",
+      "label": "normal",
+      "why": "a short courtesy said twice",
+      "deltas": ["thank you very much. ", "thank you very much."]
+    },
+    {
+      "name": "three_times_for_emphasis",
+      "label": "normal",
+      "why": "a phrase said three times for emphasis, below the repeat floor",
+      "deltas": ["I love you. ", "I love you. ", "I love you."]
+    },
+    {
+      "name": "repeated_word_with_gaps",
+      "label": "normal",
+      "why": "a short word repeated three times with pauses",
+      "deltas": ["really", " ... ", "really", " ... ", "really"]
+    },
+    {
+      "name": "daily_routine",
+      "label": "normal",
+      "why": "an ordinary description of a routine",
+      "deltas": ["I woke up at seven, ", "made coffee, ", "and read the news before work."]
+    },
+    {
+      "name": "question_answer",
+      "label": "normal",
+      "why": "a question followed by a different answer",
+      "deltas": ["Do you want tea? ", "No, I would prefer water."]
+    },
+    {
+      "name": "days_of_the_week",
+      "label": "normal",
+      "why": "a list of days is not a repeated phrase",
+      "deltas": ["The meeting is on Monday, ", "Tuesday, ", "and Wednesday at ten."]
+    },
+    {
+      "name": "names_and_places",
+      "label": "normal",
+      "why": "an ordinary sentence with several names",
+      "deltas": ["Alice met Bob at the station ", "and they walked to the park."]
+    },
+    {
+      "name": "near_repeat_three_times",
+      "label": "normal",
+      "why": "three similar openings but below the repeat floor",
+      "deltas": ["I want to go to the store. ", "I want to go to the park. ", "I want to go to the beach."]
+    },
+    {
+      "name": "apostrophes_and_punctuation",
+      "label": "normal",
+      "why": "contractions and punctuation must not create a false unit",
+      "deltas": ["Don't worry, ", "it's going to be fine; ", "we'll figure it out."]
+    },
+    {
+      "name": "numbers_math",
+      "label": "normal",
+      "why": "number words repeat but not as a multi-word unit four times",
+      "deltas": ["Two plus two is four, ", "four plus four is eight, ", "eight plus eight is sixteen."]
+    },
+    {
+      "name": "self_correction",
+      "label": "normal",
+      "why": "fillers and a repeated article in ordinary self-correcting speech",
+      "deltas": ["I went to the, um, the market yesterday. ", "It was busy, but, uh, fine."]
+    },
+    {
+      "name": "japanese_with_punctuation",
+      "label": "normal",
+      "why": "unspaced Japanese sentences separated by punctuation",
+      "deltas": ["今日はいい天気ですね。", "そうですね。", "ありがとうございます。"]
+    },
+    {
+      "name": "short_okay",
+      "label": "normal",
+      "why": "a short acknowledgement repeated twice",
+      "deltas": ["okay ", "okay ", "let's go"]
+    },
+    {
+      "name": "bilingual",
+      "label": "normal",
+      "why": "mixed English and Japanese without repetition",
+      "deltas": ["I said ありがとう, ", "and then we left."]
+    }
+  ]
+}

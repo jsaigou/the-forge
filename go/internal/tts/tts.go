@@ -9,6 +9,10 @@ package tts
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+
+	"github.com/jsaigou/the-forge/internal/tts/style"
 )
 
 type Engine interface {
@@ -55,11 +59,41 @@ type SpeechRequest struct {
 	RefText        string  `json:"ref_text"`
 	Speed          float64 `json:"speed"`
 	Seed           int     `json:"seed"`
+	// Style carries the client's style defaults for this request (age, baseline mood, per-tag multipliers, rate); inline tags in Input override them. Tags is
+	// false for a client that wants "<" read as text.
+	Style *style.Defaults `json:"style,omitempty"`
+	Tags  *bool           `json:"tags,omitempty"`
+
+	// styled is Input with its tags taken out (applyTags); it is how the engine that can steer receives them.
+	styled *styledInput
 }
 
 type SpeechResult struct {
 	Audio  []byte
 	Format string
+	// Notes are response headers about what the style handling did (X-Style-Applied, X-Style-Warnings).
+	Notes map[string]string
+}
+
+// SpeechStream is audio still being made: 24 kHz mono signed 16-bit little-endian PCM ("pcm", what OpenAI's format of that name is). Closing Body gives
+// back whatever the engine lent for the request, so it must be closed whether or not it was read to the end.
+type SpeechStream struct {
+	Body   io.ReadCloser
+	Format string
+	Notes  map[string]string
+}
+
+// ErrNoStream means this request cannot be streamed (a fast-tier voice, a backend without a stream): the caller answers it the buffered way.
+var ErrNoStream = errors.New("tts: this request cannot be streamed")
+
+// StreamEngine is implemented by an Engine that can hand audio back while it is being made. Only "pcm" is streamed: a WAV file needs its length first.
+type StreamEngine interface {
+	SpeechStream(ctx context.Context, req SpeechRequest) (*SpeechStream, error)
+}
+
+// StreamBackend is a Backend that can stream a synthesis.
+type StreamBackend interface {
+	SpeechStream(ctx context.Context, spec SynthSpec, text string) (*SpeechStream, error)
 }
 
 type VoiceMode string
@@ -81,15 +115,22 @@ type SynthSpec struct {
 	Instruct string // ModeVoiceDesign: style instruction
 	RefAudio []byte // ModeBase: reference WAV bytes
 	RefText  string // ModeBase: reference transcript (enables ICL clone)
+	// Engine names the engine this voice is bound to ("" = the default for its kind). A bound voice is only ever rendered by that engine.
+	Engine   string
 	Language string
+	// VoiceLanguage is the language the voice itself was made in ("" = unknown, as for a preview). Zonos uses it to tell speech in the voice's own language
+	// from speech in another one.
+	VoiceLanguage string
+	// Style is the request's text with its tags taken out and the client's defaults; only an engine that can steer uses it.
+	Style *styledInput
 	Format   string // "wav" (default) or "pcm"
 	Speed    float64
 	Tier     string // "fast" (Kokoro) or "premium" (Qwen)
 }
 
 // Backend performs raw synthesis for a resolved SynthSpec. Two implementations
-// exist: cliBackend (shells the qwen-tts CLI, model reloaded per call) and
-// serverBackend (proxies a resident tts-server process, model kept in GPU RAM).
+// exist: serverBackend (proxies the Qwen tts-server engine the Forge daemon resolves for each request) and kokoroBackend (the fast tier, likewise
+// resolved by the daemon).
 type Backend interface {
 	Speech(ctx context.Context, spec SynthSpec, text string) (*SpeechResult, error)
 	Health(ctx context.Context) (map[string]any, error)
@@ -112,6 +153,8 @@ type VoiceEntry struct {
 	Type       string            `json:"type"`
 	Language   string            `json:"language"`
 	Tier       string            `json:"tier,omitempty"`
+	// Engine is the engine this voice was created and sampled with (voice-studio records it); "" = the default engine for the voice's kind.
+	Engine     string            `json:"engine,omitempty"`
 	Design     *DesignSpec       `json:"design,omitempty"`
 	Clone      *CloneSpec        `json:"clone,omitempty"`
 	SampleText string            `json:"sample_text,omitempty"`

@@ -84,6 +84,65 @@ func scanErrorCodes(t *testing.T) map[string]bool {
 	return codes
 }
 
+// moduleErrorFiles are the non-HTTP modules whose errors the handlers turn into API codes. They never call writeErrorCode, so the scan above
+// can't see their codes; this list is what keeps them under the same translation guard. A new module that returns coded errors goes here.
+var moduleErrorFiles = []string{
+	filepath.Join("..", "specialist", "occupants.go"), // ConflictError{Code: ...}, ValidationError{Codes: ...}
+	filepath.Join("..", "store", "config_writes.go"),
+	filepath.Join("..", "store", "build_writes.go"),
+	filepath.Join("..", "store", "artifact_writes.go"), // ConfigInvalid codes: codes["field"] = "code"
+}
+
+// scanModuleErrorCodes collects the literal codes the modules in moduleErrorFiles hand to the handlers: the Code field of a ConflictError
+// literal, the values of a Codes map literal, and string literals assigned into a map variable named codes.
+func scanModuleErrorCodes(t *testing.T) map[string]bool {
+	t.Helper()
+	codes := map[string]bool{}
+	fset := token.NewFileSet()
+	for _, path := range moduleErrorFiles {
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.KeyValueExpr:
+				key, ok := x.Key.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				switch key.Name {
+				case "Code":
+					if lit, ok := x.Value.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+						if s, err := stringLitValue(lit); err == nil {
+							codes[s] = true
+						}
+					}
+				case "Codes":
+					collectMapLiteralValues(x.Value, codes)
+				}
+			case *ast.AssignStmt:
+				for i, lhs := range x.Lhs {
+					idx, ok := lhs.(*ast.IndexExpr)
+					if !ok {
+						continue
+					}
+					if id, ok := idx.X.(*ast.Ident); !ok || id.Name != "codes" || i >= len(x.Rhs) {
+						continue
+					}
+					if lit, ok := x.Rhs[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+						if s, err := stringLitValue(lit); err == nil {
+							codes[s] = true
+						}
+					}
+				}
+			}
+			return true
+		})
+	}
+	return codes
+}
+
 func stringLitValue(lit *ast.BasicLit) (string, error) {
 	return strconv.Unquote(lit.Value)
 }
@@ -139,6 +198,16 @@ func loadErrorCatalogKeys(t *testing.T, lang string) map[string]bool {
 // literal used anywhere in this package must exist in both locale catalogs.
 func TestErrorCodesHaveTranslations(t *testing.T) {
 	used := scanErrorCodes(t)
+	modules := scanModuleErrorCodes(t)
+	// Guard the guard: if the module scan finds nothing, a refactor moved the code and this list is stale.
+	for _, want := range []string{"default_engine_in_use", "engine_must_be_always_on", "specialist_no_free_slot", "already_exists", "must_be_non_negative_integer"} {
+		if !modules[want] {
+			t.Errorf("module scan did not find %q: moduleErrorFiles is stale or the scan is broken", want)
+		}
+	}
+	for code := range modules {
+		used[code] = true
+	}
 	if len(used) == 0 {
 		t.Fatal("scanned zero error codes — the AST scan is probably broken (expected at least \"internal\")")
 	}

@@ -25,6 +25,7 @@ func (f *fakeVirtualModelRegistry) ModelCards(context.Context, time.Time) ([]reg
 	return nil, nil
 }
 func (f *fakeVirtualModelRegistry) WeightEstimateBytes(int64) (int64, bool) { return 0, false }
+func (f *fakeVirtualModelRegistry) CuratedMemory(int64) []registry.CuratedMemory { return nil }
 func (f *fakeVirtualModelRegistry) CostPer1k(int64) float64                 { return 0 }
 func (f *fakeVirtualModelRegistry) PowerEstPer1m(int64) (float64, bool)     { return 0, false }
 
@@ -59,7 +60,7 @@ func seedVirtualModelConfig(t *testing.T, db *store.DB, name string, tierID, ran
 	}
 	cfgID, err := cat.CreateConfig(ctx, store.Config{
 		Name: name, VariantID: varID, WeightArtifactID: artID, EngineID: eng.ID,
-		NCtx: 8192, Parallel: 1, Status: "unverified", Visibility: "visible",
+		NCtx: 8192, Status: "unverified", Visibility: "visible",
 	})
 	if err != nil {
 		t.Fatalf("CreateConfig: %v", err)

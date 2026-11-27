@@ -318,3 +318,90 @@ func TestCreateConflict(t *testing.T) {
 		t.Fatalf("expected 409 for existing id, got %d", resp.StatusCode)
 	}
 }
+
+func importWithEngine(t *testing.T, tsURL, id, engine string) (int, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("id", id)
+	_ = mw.WriteField("name", id)
+	_ = mw.WriteField("type", "clone")
+	_ = mw.WriteField("ref_text", "transcript")
+	if engine != "" {
+		_ = mw.WriteField("engine", engine)
+	}
+	w, _ := mw.CreateFormFile("ref_audio", "ref.wav")
+	w.Write([]byte("refwav"))
+	mw.Close()
+	req, _ := http.NewRequest(http.MethodPost, tsURL+"/v1/voices/import", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("X-Forge-Internal-Token", "secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func TestImportEngineFieldIsStoredAndValidated(t *testing.T) {
+	srv, fe := newTestServer("secret")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	if code, body := importWithEngine(t, ts.URL, "bound", " qwen3-tts-base "); code != http.StatusCreated {
+		t.Fatalf("import with engine: %d %s", code, body)
+	}
+	if len(fe.voices) != 1 || fe.voices[0].Engine != "qwen3-tts-base" {
+		t.Fatalf("engine not stored trimmed: %+v", fe.voices)
+	}
+	if code, _ := importWithEngine(t, ts.URL, "unbound", ""); code != http.StatusCreated {
+		t.Fatalf("import without engine: %d", code)
+	}
+	if code, _ := importWithEngine(t, ts.URL, "bad", "evil engine; rm -rf"); code != http.StatusBadRequest {
+		t.Fatalf("invalid engine name must be 400, got %d", code)
+	}
+}
+
+// An id that is a path must be refused before anything is written, and nothing may land outside AudioDir.
+func TestImportRefusesPathShapedIDAndWritesNothing(t *testing.T) {
+	srv, fe := newTestServer("secret")
+	root := t.TempDir()
+	srv.AudioDir = root + "/audio"
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	for _, id := range []string{"../escape", "a/b", "..", "A", "x y", "a\\b"} {
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		_ = mw.WriteField("id", id)
+		_ = mw.WriteField("name", "N")
+		_ = mw.WriteField("type", "clone")
+		w, _ := mw.CreateFormFile("ref_audio", "ref.wav")
+		w.Write([]byte("refwav"))
+		mw.Close()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/voices/import", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		req.Header.Set("X-Forge-Internal-Token", "secret")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("id %q: status %d, want 400", id, resp.StatusCode)
+		}
+	}
+	if len(fe.voices) != 0 {
+		t.Errorf("a refused import saved a voice: %+v", fe.voices)
+	}
+	entries, _ := os.ReadDir(root)
+	for _, e := range entries {
+		if e.Name() != "audio" {
+			t.Errorf("unexpected file outside AudioDir: %s", e.Name())
+		}
+	}
+	if _, err := os.Stat(root + "/escape.wav"); err == nil {
+		t.Error("escape.wav was written outside AudioDir")
+	}
+}

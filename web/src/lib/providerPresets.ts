@@ -15,6 +15,8 @@
 // the generic DeepSeek-shape fallback (genericCreditsClient), which is
 // worse than admitting the provider has no balance API. As of 2026-08-04
 // the real parsers are: deepseek, aiand (spend, not balance), openrouter.
+import { own } from "./own.ts";
+
 export type CreditsSupport = "deepseek" | "aiand" | "openrouter" | "none";
 
 export interface ProviderPreset {
@@ -213,8 +215,10 @@ export function providerIconSlug(name: string): string {
     anthropic: "anthropic", claude: "anthropic",
     "moonshot ai": "moonshot", moonshot: "moonshot", kimi: "moonshot",
   };
-  if (aliases[s]) return aliases[s];
+  const direct = own(aliases, s);
+  if (direct) return direct;
   const stripped = s.replace(/[\s\-_/]+/g, "");
-  if (aliases[stripped]) return aliases[stripped];
+  const viaStripped = own(aliases, stripped);
+  if (viaStripped) return viaStripped;
   return s;
 }

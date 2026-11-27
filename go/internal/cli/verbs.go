@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -59,7 +60,11 @@ func StatusVerb() error {
 	}
 	if sc != nil {
 		bd := sc.MemoryBudget
-		fmt.Println(i18n.T("cli.status.budget", humanBytes(bd.UsedBytes), humanBytes(bd.TotalBytes)))
+		if p := bd.Partition; p != nil {
+			fmt.Println(i18n.T("cli.status.partition", humanBytes(p.ModelUsedBytes), humanBytes(p.ModelBudgetBytes), humanBytes(p.FreeBytes), p.Binding))
+		} else {
+			fmt.Println(i18n.T("cli.status.budget", humanBytes(bd.UsedBytes), humanBytes(bd.TotalBytes)))
+		}
 	}
 	mt, _ := c.Metrics()
 	if mt != nil && mt.GTTUsedBytes != nil && mt.GTTTotalBytes != nil {
@@ -88,11 +93,64 @@ func ModelsVerb() error {
 	return nil
 }
 
-// LoadVerb loads a config onto a slot (slot optional → server default).
-func LoadVerb(mode, slot string) error {
+// opPollSeconds is how long each long-poll for an operation waits server-side. It stays well under the client's
+// 30s HTTP timeout.
+const opPollSeconds = 20
+
+// opWaitLimit is the CLI's overall patience for one load or unload. The engine has its own, longer, startup
+// timeout per service; this only bounds how long the command keeps waiting before telling the user to look.
+var opWaitLimit = 20 * time.Minute
+
+var errOpTimeout = errors.New("cli: operation still running")
+
+// waitOperation follows an operation to its end with long-polls, returning errOpTimeout (and the last state) if
+// it is still running after limit.
+func (c *Client) waitOperation(id string, limit time.Duration) (*Operation, error) {
+	deadline := time.Now().Add(limit)
+	for {
+		t0 := time.Now()
+		op, err := c.Operation(id, opPollSeconds)
+		if err != nil {
+			return nil, err
+		}
+		if op.State != "running" {
+			return op, nil
+		}
+		if time.Now().After(deadline) {
+			return op, errOpTimeout
+		}
+		if time.Since(t0) < time.Second {
+			time.Sleep(time.Second) // a daemon that ignores wait= must not be hammered
+		}
+	}
+}
+
+// LoadVerb loads a config onto a slot (slot optional → server default). With wait it follows the load to its
+// end: it prints the actual context on success, and on failure the reason and the unit's last log lines, and
+// returns an error (so the process exits non-zero). Without wait it starts the load and returns.
+func LoadVerb(mode, slot string, wait bool) error {
 	c, err := New()
 	if err != nil {
 		return err
+	}
+	return loadWith(c, mode, slot, wait, os.Stdout, os.Stderr)
+}
+
+func loadWith(c *Client, mode, slot string, wait bool, out, errOut io.Writer) error {
+	if slot == "" {
+		st, err := c.Status()
+		if err != nil {
+			return err
+		}
+		for _, name := range []string{"a1", "a2", "a3", "a4"} {
+			if m, ok := st.Slots[name]; !ok || m == nil || *m == "" {
+				slot = name
+				break
+			}
+		}
+		if slot == "" {
+			return fmt.Errorf("no empty slot for %s", mode)
+		}
 	}
 	r, err := c.Load(mode, slot)
 	if err != nil {
@@ -101,7 +159,36 @@ func LoadVerb(mode, slot string) error {
 	if !r.Success {
 		return fmt.Errorf("%s", i18n.T("cli.load.failed", r.Message))
 	}
-	fmt.Println(i18n.T("cli.load.result", mode, orSlot(slot), r.NCtx))
+	if r.Operation == nil || r.Operation.ID == "" {
+		// A daemon that does not track operations: all we know is that it started.
+		fmt.Fprintln(out, i18n.T("cli.load.started", mode, orSlot(slot), "-"))
+		return nil
+	}
+	if !wait {
+		fmt.Fprintln(out, i18n.T("cli.load.started", mode, orSlot(slot), r.Operation.ID))
+		return nil
+	}
+	op, err := c.waitOperation(r.Operation.ID, opWaitLimit)
+	if errors.Is(err, errOpTimeout) {
+		return fmt.Errorf("%s", i18n.T("cli.load.timeout", opWaitLimit.String()))
+	}
+	if err != nil {
+		return err
+	}
+	if op.State == "failed" {
+		if op.Detail != "" {
+			fmt.Fprintln(errOut, i18n.T("cli.load.failed_detail"))
+			for _, l := range strings.Split(op.Detail, "\n") {
+				fmt.Fprintln(errOut, "  "+l)
+			}
+		}
+		return fmt.Errorf("%s", i18n.T("cli.load.failed", op.Message))
+	}
+	if op.NCtx > 0 {
+		fmt.Fprintln(out, i18n.T("cli.load.result", mode, orSlot(slot), op.NCtx))
+	} else {
+		fmt.Fprintln(out, i18n.T("cli.load.result_unknown_ctx", mode, orSlot(slot)))
+	}
 	return nil
 }
 
@@ -112,12 +199,17 @@ func orSlot(s string) string {
 	return s
 }
 
-// UnloadVerb empties a slot.
-func UnloadVerb(slot string) error {
+// UnloadVerb empties a slot. Like LoadVerb it follows a single-slot unload to its end unless wait is false;
+// "all" is not tracked as an operation by the daemon, so it reports only that it started.
+func UnloadVerb(slot string, wait bool) error {
 	c, err := New()
 	if err != nil {
 		return err
 	}
+	return unloadWith(c, slot, wait, os.Stdout)
+}
+
+func unloadWith(c *Client, slot string, wait bool, out io.Writer) error {
 	r, err := c.Unload(slot)
 	if err != nil {
 		return err
@@ -125,7 +217,25 @@ func UnloadVerb(slot string) error {
 	if !r.Success {
 		return fmt.Errorf("%s", i18n.T("cli.unload.failed", r.Message))
 	}
-	fmt.Println(i18n.T("cli.unload.result", slot))
+	if r.Operation == nil || r.Operation.ID == "" {
+		fmt.Fprintln(out, i18n.T("cli.unload.started", slot, "-"))
+		return nil
+	}
+	if !wait {
+		fmt.Fprintln(out, i18n.T("cli.unload.started", slot, r.Operation.ID))
+		return nil
+	}
+	op, err := c.waitOperation(r.Operation.ID, opWaitLimit)
+	if errors.Is(err, errOpTimeout) {
+		return fmt.Errorf("%s", i18n.T("cli.load.timeout", opWaitLimit.String()))
+	}
+	if err != nil {
+		return err
+	}
+	if op.State == "failed" {
+		return fmt.Errorf("%s", i18n.T("cli.unload.failed", op.Message))
+	}
+	fmt.Fprintln(out, i18n.T("cli.unload.result", slot))
 	return nil
 }
 

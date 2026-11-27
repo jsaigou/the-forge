@@ -4,6 +4,8 @@
 // map gives the "dashboard" translation namespace key (ranges.*, same
 // catalog Dashboard.tsx's own range toggles use) for any given window string.
 
+import { own } from "./own.ts";
+
 const RANGE_LABEL_KEYS: Record<string, string> = {
   "24h": "ranges.24h",
   "72h": "ranges.72h",
@@ -16,6 +18,6 @@ const RANGE_LABEL_KEYS: Record<string, string> = {
 
 // t must be a "dashboard"-namespaced translate function (useTranslation("dashboard")).
 export function rangeLabel(window_: string, t: (key: string) => string): string {
-  const key = RANGE_LABEL_KEYS[window_];
+  const key = own(RANGE_LABEL_KEYS, window_);
   return key ? t(key) : window_;
 }

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jsaigou/the-forge/internal/activity"
+	"github.com/jsaigou/the-forge/internal/engine"
 )
 
 // handleStatus returns the full dashboard status payload (Contract 1 §2
@@ -46,6 +47,7 @@ func (s *Server) buildStatusResponse() statusResponse {
 		UI:            map[string]any{},
 		SlotLoading:   map[string]slotStateJSON{},
 		SlotUnloading: map[string]slotStateJSON{},
+		SlotStates:    map[string]slotOpStateJSON{},
 		SlotActivity:  map[string]bool{},
 	}
 
@@ -159,6 +161,10 @@ func (s *Server) buildStatusResponse() statusResponse {
 		}
 	}
 
+	if o, ok := s.deps.Engine.(engine.SlotOrderer); ok {
+		resp.LoadOrder = o.LoadOrder()
+	}
+
 	// Switch + slot loading/unloading overlay from in-process state.
 	s.mu.Lock()
 	resp.Switch = switchStateJSON{
@@ -214,6 +220,7 @@ func (s *Server) buildStatusResponse() statusResponse {
 			resp.Slots[slot] = ptrString(st.mode)
 		}
 	}
+	resp.SlotStates = s.slotOpStatesLocked(resp)
 	s.mu.Unlock()
 
 	// ui: from store.Settings (JSON KV).
@@ -260,7 +267,22 @@ func (s *Server) buildStatusResponse() statusResponse {
 		}
 	}
 
+	if s.deps.InFlight != nil {
+		snap := s.deps.InFlight.Snapshot()
+		resp.A0InFlight = &snap
+	}
+
 	return resp
+}
+
+// handleInFlightMetrics — GET /api/v1/a0/in-flight/metrics: Prometheus text exposition of the in-flight gauge.
+func (s *Server) handleInFlightMetrics(w http.ResponseWriter, _ *http.Request) {
+	if s.deps.InFlight == nil {
+		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "in-flight gauge"}, "in-flight gauge not wired")
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	s.deps.InFlight.WriteMetrics(w)
 }
 
 // handleSchedulerStatus returns the fleet/queue/memory-budget snapshot
@@ -303,6 +325,7 @@ func (s *Server) handleSchedulerStatus(w http.ResponseWriter, _ *http.Request) {
 		TotalBytes: st.MemoryBudget.TotalBytes,
 		UsedBytes:  st.MemoryBudget.UsedBytes,
 		FreeBytes:  st.MemoryBudget.FreeBytes,
+		Partition:  partitionJSON(st.MemoryBudget.Ledger),
 	}
 	for _, t := range st.Queue {
 		resp.Queue = append(resp.Queue, queueTicketJSON{

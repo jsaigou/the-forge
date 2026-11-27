@@ -11,6 +11,12 @@
   "spec": {
     "architecture": "Architecture",
     "modalities": "Modalities",
+    "outputs": "Outputs",
+    "output_kind": {
+      "text": "Text",
+      "audio": "Speech",
+      "decisions": "Decisions"
+    },
     "trained_context": "Trained context",
     "file_size": "File size",
     "memory": "Memory",
@@ -30,7 +36,8 @@
     "status_default_suffix": " · default",
     "default_reasoning": "Default reasoning",
     "last_load": "Last load",
-    "last_load_avg_suffix": " · avg {{avg}}s"
+    "last_load_avg_suffix": " · avg {{avg}}s",
+    "runtime": "Runtime"
   },
   "caps": {
     "reasoning_effort": "Reasoning effort",
@@ -68,7 +75,7 @@
   "detail": {
     "copy_config_title": "Copy config name",
     "alias_prefix": "Alias: {{names}}",
-    "alias_infotip": "Other model names that route to this same config, each forcing its own settings regardless of what the caller sends — see Settings → Routing & Compressor → Model aliases.",
+    "alias_infotip": "Other model names that route to this same config, each forcing its own settings regardless of what the caller sends — see Settings → Routing → Model aliases.",
     "view_model": "View model →",
     "load_options": "Load options",
     "copy_args_title": "Copy full llama.cpp argument list",
@@ -131,7 +138,7 @@
     "context": "Context (n_ctx)",
     "capability_tier": "Capability tier",
     "capability_tier_none": "— none (never substitutes) —",
-    "capability_tier_hint": "Lets an already-loaded config stand in for this one — see Settings → Routing & Compressor → Model Behavior.",
+    "capability_tier_hint": "Lets an already-loaded config stand in for this one — see Settings → Routing → Model Behavior.",
     "capability_rank": "Rank within class",
     "capability_rank_hint": "Lower = more capable. Equal ranks are freely interchangeable.",
     "default_reasoning_effort": "Default reasoning effort",
@@ -234,7 +241,29 @@
     "download_started": "Download started — see the Downloads list above.",
     "starting": "Starting…",
     "download_and_repoint": "Download & repoint {{target}}",
-    "download": "Download"
+    "download": "Download",
+    "sourcing": {
+      "description": "Evaluate a HuggingFace repo's real GGUF files against a memory budget — ranked by the documented 1.2× VRAM rule and quant-preference heuristics (modelselection.md). Read-only; nothing is downloaded or added to the catalog.",
+      "repo_placeholder": "org/repo (e.g. Qwen/Qwen2.5-Coder-7B-Instruct-GGUF)",
+      "budget_placeholder": "budget GB (auto)",
+      "evaluating": "Evaluating…",
+      "evaluate": "Evaluate",
+      "result_summary": "{{repo}} — budget {{budget}} GB",
+      "cached_suffix": " (cached)",
+      "no_gguf": "No GGUF files found in this repo.",
+      "col_file": "file",
+      "col_quant": "quant",
+      "col_size": "size",
+      "col_vram": "est. VRAM",
+      "col_fits": "fits",
+      "recommended_title": "Recommended",
+      "fits_yes": "yes",
+      "fits_no": "no",
+      "download_heading": "Download the recommended file",
+      "heading": "Check whether a repo fits",
+      "repo_label": "Hugging Face repo to evaluate (org/repo)",
+      "budget_label": "Memory budget in GB (blank = automatic)"
+    }
   },
   "downloads": {
     "repointing": "→ repointing ",

@@ -126,7 +126,7 @@ func (s *Server) handleCatalogVirtualModelCreate(w http.ResponseWriter, r *http.
 		return
 	}
 	var b virtualModelBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
@@ -162,7 +162,7 @@ func (s *Server) handleCatalogVirtualModelUpdate(w http.ResponseWriter, r *http.
 		return
 	}
 	var b virtualModelBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}

@@ -1,4 +1,8 @@
 {
+  "smith_tray": {
+    "title": "SMITH",
+    "expand_hint": "(click to expand)"
+  },
   "provider": {
     "source": "source: {{source}}",
     "no_api": "no API",
@@ -23,9 +27,11 @@
   },
   "gallery": {
     "title": "Choose a config",
+    "sort_favorites": "favorites",
     "sort_alpha": "A–Z",
     "sort_most_used": "most used",
     "sort_newest": "newest",
+    "no_favorites": "No favorites yet. Star a config, or switch to another sort to see them all.",
     "loading": "Loading config registry…"
   },
   "bay": {
@@ -46,7 +52,10 @@
     "active": "active",
     "footprint": "footprint",
     "context": "context",
-    "badges": "badges"
+    "badges": "badges",
+    "load_failed_mode": "{{mode}} did not load",
+    "load_failed_logs": "Last log lines",
+    "dismiss": "Dismiss"
   },
   "services": {
     "loading": "Loading services…",

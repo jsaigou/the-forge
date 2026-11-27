@@ -11,6 +11,12 @@
   "spec": {
     "architecture": "アーキテクチャ",
     "modalities": "モダリティ",
+    "outputs": "出力",
+    "output_kind": {
+      "text": "テキスト",
+      "audio": "音声",
+      "decisions": "判定"
+    },
     "trained_context": "学習時コンテキスト",
     "file_size": "ファイルサイズ",
     "memory": "メモリ",
@@ -30,7 +36,8 @@
     "status_default_suffix": " · デフォルト",
     "default_reasoning": "デフォルト推論",
     "last_load": "最終読み込み",
-    "last_load_avg_suffix": " · 平均 {{avg}}秒"
+    "last_load_avg_suffix": " · 平均 {{avg}}秒",
+    "runtime": "ランタイム"
   },
   "caps": {
     "reasoning_effort": "推論の強度",
@@ -68,7 +75,7 @@
   "detail": {
     "copy_config_title": "コンフィグ名をコピー",
     "alias_prefix": "エイリアス: {{names}}",
-    "alias_infotip": "このコンフィグに同じくルーティングされる他のモデル名です。呼び出し元が送信する内容に関わらず、それぞれ独自の設定を強制します — 詳細は 設定 → ルーティングと圧縮 → モデルエイリアス を参照してください。",
+    "alias_infotip": "このコンフィグに同じくルーティングされる他のモデル名です。呼び出し元が送信する内容に関わらず、それぞれ独自の設定を強制します — 詳細は 設定 → ルーティング → モデルエイリアス を参照してください。",
     "view_model": "モデルを表示 →",
     "load_options": "読み込みオプション",
     "copy_args_title": "llama.cppの引数リストを全てコピー",
@@ -131,7 +138,7 @@
     "context": "コンテキスト (n_ctx)",
     "capability_tier": "能力ティア",
     "capability_tier_none": "— なし (代替されません) —",
-    "capability_tier_hint": "既に読み込み済みのコンフィグをこのコンフィグの代わりに使えるようにします — 詳細は 設定 → ルーティングと圧縮 → モデルの挙動 を参照してください。",
+    "capability_tier_hint": "既に読み込み済みのコンフィグをこのコンフィグの代わりに使えるようにします — 詳細は 設定 → ルーティング → モデルの挙動 を参照してください。",
     "capability_rank": "クラス内の順位",
     "capability_rank_hint": "値が低いほど能力が高いことを示します。同順位は自由に入れ替え可能です。",
     "default_reasoning_effort": "デフォルトの推論の強度",
@@ -234,7 +241,29 @@
     "download_started": "ダウンロードを開始しました — 上のダウンロード一覧を参照してください。",
     "starting": "開始中…",
     "download_and_repoint": "{{target}} をダウンロードして紐付け直す",
-    "download": "ダウンロード"
+    "download": "ダウンロード",
+    "sourcing": {
+      "description": "HuggingFaceリポジトリの実際のGGUFファイルをメモリ予算と照合して評価します — 定義済みの1.2倍VRAMルールと量子化の優先順位に基づいてランク付けされます(modelselection.md参照)。読み取り専用であり、ダウンロードやカタログへの追加は行われません。",
+      "repo_placeholder": "org/repo (例: Qwen/Qwen2.5-Coder-7B-Instruct-GGUF)",
+      "budget_placeholder": "予算 GB (自動)",
+      "evaluating": "評価中…",
+      "evaluate": "評価",
+      "result_summary": "{{repo}} — 予算 {{budget}} GB",
+      "cached_suffix": " (キャッシュ済み)",
+      "no_gguf": "このリポジトリにGGUFファイルが見つかりませんでした。",
+      "col_file": "ファイル",
+      "col_quant": "量子化",
+      "col_size": "サイズ",
+      "col_vram": "推定VRAM",
+      "col_fits": "収まるか",
+      "recommended_title": "推奨",
+      "fits_yes": "はい",
+      "fits_no": "いいえ",
+      "download_heading": "推奨ファイルをダウンロード",
+      "heading": "リポジトリが収まるか確認",
+      "repo_label": "評価するHugging Faceリポジトリ(org/repo)",
+      "budget_label": "メモリ予算(GB、空欄で自動)"
+    }
   },
   "downloads": {
     "repointing": "→ 紐付け先: ",

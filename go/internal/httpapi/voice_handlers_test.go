@@ -3,8 +3,9 @@
 package httpapi
 
 import (
-	"bytes"
-	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/jsaigou/the-forge/internal/authz"
@@ -14,7 +15,6 @@ import (
 	"github.com/jsaigou/the-forge/internal/engine"
 	"github.com/jsaigou/the-forge/internal/sched"
 	"github.com/jsaigou/the-forge/internal/store"
-	"github.com/jsaigou/the-forge/internal/ttsctl"
 )
 
 func serverWithVoiceSettings(t *testing.T) (*Server, *store.DB) {
@@ -43,104 +43,92 @@ func serverWithVoiceSettings(t *testing.T) (*Server, *store.DB) {
 	return s, db
 }
 
-func TestVoiceSettingsGetPut(t *testing.T) {
-	s, _ := serverWithVoiceSettings(t)
-
-	w := do(t, s, authedRequest("GET", "/api/v1/voice/settings", nil))
-	if w.Code != 200 {
-		t.Fatalf("get = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	var got ttsctl.Engines
-	decodeJSON(t, w.Body, &got)
-	if got.Kokoro.Mode != ttsctl.ModeResident {
-		t.Errorf("default kokoro mode = %q, want resident", got.Kokoro.Mode)
-	}
-	if got.VoiceDesign.Mode != ttsctl.ModeAvailable {
-		t.Errorf("default voicedesign mode = %q, want available", got.VoiceDesign.Mode)
-	}
-
-	body := `{"kokoro":{"enabled":true,"mode":"resident","unit":"kokoro","url":"http://127.0.0.1:8880"},` +
-		`"customvoice":{"enabled":true,"mode":"resident","unit":"forge-tts-custom","url":"http://127.0.0.1:8091"},` +
-		`"voicedesign":{"enabled":false,"mode":"disabled","unit":"","url":""},` +
-		`"base":{"enabled":true,"mode":"available","unit":"forge-tts-base","url":""}}`
-	w = do(t, s, authedRequest("PUT", "/api/v1/voice/settings", bytes.NewBufferString(body)))
-	if w.Code != 200 {
-		t.Fatalf("put = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	var updated ttsctl.Engines
-	decodeJSON(t, w.Body, &updated)
-	if updated.VoiceDesign.Mode != ttsctl.ModeDisabled || updated.VoiceDesign.Enabled {
-		t.Errorf("voicedesign after PUT = %+v, want disabled/false", updated.VoiceDesign)
-	}
-	if updated.CustomVoice.URL != "http://127.0.0.1:8091" {
-		t.Errorf("customvoice.url = %q, want http://127.0.0.1:8091", updated.CustomVoice.URL)
-	}
-
-	// A GET afterwards must reflect the PUT.
-	w = do(t, s, authedRequest("GET", "/api/v1/voice/settings", nil))
-	var reread ttsctl.Engines
-	decodeJSON(t, w.Body, &reread)
-	if reread.VoiceDesign.Mode != ttsctl.ModeDisabled {
-		t.Errorf("reread voicedesign mode = %q, want disabled", reread.VoiceDesign.Mode)
+// putRouterTTSURL points the voice list at a fake forge-tts, the way Settings -> Routing does (infra.router.tts_url).
+func putRouterTTSURL(t *testing.T, db *store.DB, url string) {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]any{"tts_url": url})
+	if err := db.Settings().Set(t.Context(), "infra.router", raw); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestVoiceSettingsPut_ValidatesAllOrNothing(t *testing.T) {
-	s, _ := serverWithVoiceSettings(t)
-
-	bad := `{"kokoro":{"enabled":true,"mode":"resident","unit":"Kokoro Bad!","url":""},` +
-		`"customvoice":{"enabled":true,"mode":"bogus-mode","unit":"","url":""},` +
-		`"voicedesign":{"enabled":true,"mode":"available","unit":"","url":"not-a-url"},` +
-		`"base":{"enabled":true,"mode":"resident","unit":"","url":""}}`
-	w := do(t, s, authedRequest("PUT", "/api/v1/voice/settings", bytes.NewBufferString(bad)))
-	if w.Code != 422 {
-		t.Fatalf("put(bad body) = %d, want 422; body=%s", w.Code, w.Body.String())
-	}
-
-	// Nothing should have been written — a GET still shows defaults.
-	w = do(t, s, authedRequest("GET", "/api/v1/voice/settings", nil))
-	var got ttsctl.Engines
-	decodeJSON(t, w.Body, &got)
-	if got.Kokoro.Mode != ttsctl.ModeResident || got.Kokoro.Unit != "" {
-		t.Errorf("settings after a rejected PUT = %+v, want unchanged defaults", got)
-	}
-}
-
-func TestVoiceSettingsPut_AppliesLiveWhenProvisionerWired(t *testing.T) {
+// GET /api/v1/voice/list: every voice gets its kind (derived from forge-tts's type) and the engine forge-tts says it is bound to, empty when it has none.
+func TestVoiceList_CarriesKindAndEngine(t *testing.T) {
 	s, db := serverWithVoiceSettings(t)
-	fs := &fakeVoiceSystemd{}
-	s.deps.TTSProvisioner = &ttsctl.Provisioner{Systemd: fs, EnvDir: t.TempDir()}
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/voices" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"voices":[
+		 {"id":"af_heart","name":"Heart","type":"kokoro","language":"English","tier":"fast","builtin":true},
+		 {"id":"sana","name":"Sana","type":"clone","engine":"qwen3-tts-base","language":"English"},
+		 {"id":"susan","name":"Susan","type":"design","language":"English"},
+		 {"id":"serena","name":"Serena","type":"customvoice","engine":"my-custom","language":"English"},
+		 {"id":"odd","name":"Odd","type":"mystery"}]}`))
+	}))
+	defer up.Close()
+	putRouterTTSURL(t, db, up.URL)
 
-	body := `{"kokoro":{"enabled":true,"mode":"resident","unit":"kokoro","url":""},` +
-		`"customvoice":{"enabled":true,"mode":"resident","unit":"forge-tts-custom","url":""},` +
-		`"voicedesign":{"enabled":true,"mode":"available","unit":"","url":""},` +
-		`"base":{"enabled":true,"mode":"resident","unit":"forge-tts-base","url":""}}`
-	w := do(t, s, authedRequest("PUT", "/api/v1/voice/settings", bytes.NewBufferString(body)))
-	if w.Code != 200 {
-		t.Fatalf("put = %d, want 200; body=%s", w.Code, w.Body.String())
+	w := do(t, s, authedRequest("GET", "/api/v1/voice/list", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("list = %d: %s", w.Code, w.Body.String())
 	}
-	if len(fs.restarts) != 1 || fs.restarts[0] != "forge-tts" {
-		t.Fatalf("Provisioner.Apply should have restarted forge-tts, got restarts=%v", fs.restarts)
+	var got struct {
+		Voices []map[string]any `json:"voices"`
 	}
-	if len(fs.started) != 3 {
-		t.Fatalf("Provisioner.Apply should have started all 3 resident units, got %v", fs.started)
+	decodeJSON(t, w.Body, &got)
+	type ke struct{ kind, engine string }
+	want := map[string]ke{
+		"af_heart": {"kokoro", ""},
+		"sana": {"base", "qwen3-tts-base"}, // a clone voice is "base"; the engine is the one the voice is bound to
+		"susan":    {"voicedesign", ""},        // no engine: the default for its kind applies
+		"serena":   {"customvoice", "my-custom"},
+		"odd":      {"mystery", ""}, // an unknown type is passed through as its own kind rather than hidden
 	}
-	_ = db
+	if len(got.Voices) != len(want) {
+		t.Fatalf("voices = %v", got.Voices)
+	}
+	for _, v := range got.Voices {
+		id, _ := v["id"].(string)
+		k, _ := v["kind"].(string)
+		e, _ := v["engine"].(string)
+		if w := want[id]; k != w.kind || e != w.engine {
+			t.Errorf("%s: kind=%q engine=%q, want kind=%q engine=%q", id, k, e, w.kind, w.engine)
+		}
+	}
 }
 
-type fakeVoiceSystemd struct {
-	started, stopped, restarts []string
+func TestVoiceList_ErrorsAreNotSwallowed(t *testing.T) {
+	s, db := serverWithVoiceSettings(t)
+	// No TTS URL configured.
+	putRouterTTSURL(t, db, "")
+	if w := do(t, s, authedRequest("GET", "/api/v1/voice/list", nil)); w.Code != http.StatusServiceUnavailable {
+		t.Errorf("no tts_url: %d, want 503", w.Code)
+	}
+	// forge-tts answers 500, then something that is not the voice list.
+	for _, c := range []struct {
+		status int
+		body   string
+	}{{500, "boom"}, {200, "not json"}} {
+		up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(c.status)
+			_, _ = w.Write([]byte(c.body))
+		}))
+		putRouterTTSURL(t, db, up.URL)
+		if w := do(t, s, authedRequest("GET", "/api/v1/voice/list", nil)); w.Code != http.StatusBadGateway {
+			t.Errorf("upstream %d %q: %d, want 502", c.status, c.body, w.Code)
+		}
+		up.Close()
+	}
 }
 
-func (f *fakeVoiceSystemd) Start(_ context.Context, unit string) error {
-	f.started = append(f.started, unit)
-	return nil
-}
-func (f *fakeVoiceSystemd) Stop(_ context.Context, unit string) error {
-	f.stopped = append(f.stopped, unit)
-	return nil
-}
-func (f *fakeVoiceSystemd) Restart(_ context.Context, unit string) error {
-	f.restarts = append(f.restarts, unit)
-	return nil
+// The settings routes of the old four-row model are gone: Voice & Speech settings are the pool's behaviors and the tts.defaults setting.
+func TestVoiceSettingsRoutesAreGone(t *testing.T) {
+	s, _ := serverWithVoiceSettings(t)
+	for _, m := range []string{"GET", "PUT"} {
+		if w := do(t, s, authedRequest(m, "/api/v1/voice/settings", nil)); w.Code != http.StatusNotFound && w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s /api/v1/voice/settings = %d, want it gone", m, w.Code)
+		}
+	}
 }

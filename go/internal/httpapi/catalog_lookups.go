@@ -35,6 +35,8 @@ type artifactJSON struct {
 type engineJSON struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
+	// Kind is engines.kind (internal/enginekind): which runtime this engine is. The config editor picks its flag help from it.
+	Kind string `json:"kind"`
 }
 
 type buildJSON struct {
@@ -44,6 +46,13 @@ type buildJSON struct {
 	BinaryPath string `json:"binary_path"`
 	Backend    string `json:"backend"`
 	Reason     string `json:"reason"`
+	Retired    bool   `json:"retired"`
+	// LaunchEnv is the build's host launch environment (migration 0106); omitted when the build adds none.
+	LaunchEnv map[string]string `json:"launch_env,omitempty"`
+	// LoadModeSupported is what the binary's own --help says about the --load-mode flag family (true: takes
+	// --load-mode, false: only the old --no-mmap spelling). Present only on the write responses, which run the
+	// probe; absent when the binary could not be probed.
+	LoadModeSupported *bool `json:"load_mode_supported,omitempty"`
 }
 
 func artifactToJSON(a store.Artifact) artifactJSON {
@@ -58,12 +67,12 @@ func artifactToJSON(a store.Artifact) artifactJSON {
 }
 
 func engineToJSON(e store.Engine) engineJSON {
-	return engineJSON{ID: e.ID, Name: e.Name}
+	return engineJSON{ID: e.ID, Name: e.Name, Kind: e.Kind}
 }
 
 func buildToJSON(b store.Build) buildJSON {
 	return buildJSON{ID: b.ID, EngineID: b.EngineID, Name: b.Name,
-		BinaryPath: b.BinaryPath, Backend: b.Backend, Reason: b.Reason}
+		BinaryPath: b.BinaryPath, Backend: b.Backend, Reason: b.Reason, Retired: b.Retired, LaunchEnv: b.LaunchEnv}
 }
 
 func (s *Server) handleCatalogQuantizationsList(w http.ResponseWriter, r *http.Request) {

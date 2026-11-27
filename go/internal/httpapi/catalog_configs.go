@@ -8,9 +8,10 @@ package httpapi
 // route table.
 
 import (
-	"context"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/jsaigou/the-forge/internal/store"
 )
@@ -24,7 +25,6 @@ type configJSON struct {
 	BuildID          int64    `json:"build_id"`
 	MMProjArtifactID int64    `json:"mmproj_artifact_id"`
 	NCtx             int      `json:"n_ctx"`
-	Parallel         int      `json:"parallel"`
 	ExtraArgs        []string `json:"extra_args"`
 	Status           string   `json:"status"`
 	Visibility       string   `json:"visibility"`
@@ -43,6 +43,9 @@ type configJSON struct {
 	// emitting a literal `"modalities":null` on every card-adjacent config
 	// read.
 	Modalities *[]string `json:"modalities,omitzero"`
+	// OutputModalities overrides the model's output set (ADR-0021). nil = derive via store.ResolveOutputModalities
+	// (the model's outputs; "audio" additionally needs a linked mmproj); omitzero keeps derive-mode responses clean.
+	OutputModalities *[]string `json:"output_modalities,omitzero"`
 	// CapabilityTierID groups this config with others that may substitute for
 	// each other under capability-tier substitution (Sprint P1, 2026-09-13);
 	// 0 = no class, never substitutes or is substituted for. CapabilityRank is
@@ -73,10 +76,11 @@ func configToJSON(c store.Config) configJSON {
 	return configJSON{
 		ID: c.ID, Name: c.Name, VariantID: c.VariantID,
 		WeightArtifactID: c.WeightArtifactID, EngineID: c.EngineID, BuildID: c.BuildID,
-		MMProjArtifactID: c.MMProjArtifactID, NCtx: c.NCtx, Parallel: c.Parallel,
+		MMProjArtifactID: c.MMProjArtifactID, NCtx: c.NCtx,
 		ExtraArgs: c.ExtraArgs, Status: c.Status, Visibility: c.Visibility,
 		IsDefault: c.IsDefault, Fingerprint: c.Fingerprint, Logo: c.Logo, LogoDark: c.LogoDark,
-		Modalities: c.Modalities, CapabilityTierID: c.CapabilityTierID, CapabilityRank: c.CapabilityRank,
+		Modalities: c.Modalities, OutputModalities: c.OutputModalities,
+		CapabilityTierID: c.CapabilityTierID, CapabilityRank: c.CapabilityRank,
 		ChatTemplateCaps: c.ChatTemplateCaps, ChatTemplateCapsProbedAt: probedAt,
 		ChatTemplateCapsOverride: c.ChatTemplateCapsOverride,
 		ReasoningEffortDefault:   c.ReasoningEffortDefault,
@@ -144,45 +148,28 @@ func (s *Server) handleCatalogConfigGet(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleCatalogConfigCreate(w http.ResponseWriter, r *http.Request) {
-	cat := s.deps.Catalog
-	if cat == nil {
+	if s.deps.Catalog == nil {
 		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b configBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
-		return
-	}
-	if fields, codes := s.validateConfig(r.Context(), b, 0); len(fields) > 0 {
-		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
-	id, err := cat.CreateConfig(ctx, store.Config{
-		Name: b.Name, VariantID: b.VariantID, WeightArtifactID: b.WeightArtifactID,
-		EngineID: b.EngineID, BuildID: b.BuildID, MMProjArtifactID: b.MMProjArtifactID,
-		NCtx: b.NCtx, Parallel: b.Parallel, ExtraArgs: b.ExtraArgs,
-		Status: b.Status, Visibility: b.Visibility, IsDefault: b.IsDefault,
-		Fingerprint: b.Fingerprint, Logo: b.Logo, LogoDark: b.LogoDark, Modalities: b.Modalities,
-		CapabilityTierID: b.CapabilityTierID, CapabilityRank: b.CapabilityRank,
-		ChatTemplateCapsOverride: b.ChatTemplateCapsOverride,
-		ReasoningEffortDefault:   b.ReasoningEffortDefault,
-	})
+	c, err := s.configWrites().Create(ctx, b.toStore(0))
 	if err != nil {
-		writeInternalError(w, err)
+		writeConfigError(w, err, c.Name)
 		return
 	}
-	s.audit(r, identity(r).Name, "catalog_config_create", strconv.FormatInt(id, 10), withReason(b.Name, b.Reason))
-	s.invalidateCfg()
-	c, _ := cat.GetConfig(ctx, id)
+	s.audit(r, identity(r).Name, "catalog_config_create", strconv.FormatInt(c.ID, 10), withReason(b.Name, b.Reason))
 	writeJSON(w, http.StatusCreated, configToJSON(c))
 }
 
 func (s *Server) handleCatalogConfigUpdate(w http.ResponseWriter, r *http.Request) {
-	cat := s.deps.Catalog
-	if cat == nil {
+	if s.deps.Catalog == nil {
 		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
@@ -192,43 +179,23 @@ func (s *Server) handleCatalogConfigUpdate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var b configBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
-		return
-	}
-	if fields, codes := s.validateConfig(r.Context(), b, id); len(fields) > 0 {
-		writeValidationErrorCodes(w, fields, codes)
 		return
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
-	err := cat.UpdateConfig(ctx, store.Config{
-		ID: id, Name: b.Name, VariantID: b.VariantID, WeightArtifactID: b.WeightArtifactID,
-		EngineID: b.EngineID, BuildID: b.BuildID, MMProjArtifactID: b.MMProjArtifactID,
-		NCtx: b.NCtx, Parallel: b.Parallel, ExtraArgs: b.ExtraArgs,
-		Status: b.Status, Visibility: b.Visibility, IsDefault: b.IsDefault,
-		Fingerprint: b.Fingerprint, Logo: b.Logo, LogoDark: b.LogoDark, Modalities: b.Modalities,
-		CapabilityTierID: b.CapabilityTierID, CapabilityRank: b.CapabilityRank,
-		ChatTemplateCapsOverride: b.ChatTemplateCapsOverride,
-		ReasoningEffortDefault:   b.ReasoningEffortDefault,
-	})
+	c, err := s.configWrites().Update(ctx, b.toStore(id))
 	if err != nil {
-		if isNotFound(err) {
-			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "config"}, "config not found")
-			return
-		}
-		writeInternalError(w, err)
+		writeConfigError(w, err, b.Name)
 		return
 	}
 	s.audit(r, identity(r).Name, "catalog_config_update", strconv.FormatInt(id, 10), withReason(b.Name, b.Reason))
-	s.invalidateCfg()
-	c, _ := cat.GetConfig(ctx, id)
 	writeJSON(w, http.StatusOK, configToJSON(c))
 }
 
 func (s *Server) handleCatalogConfigDelete(w http.ResponseWriter, r *http.Request) {
-	cat := s.deps.Catalog
-	if cat == nil {
+	if s.deps.Catalog == nil {
 		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
@@ -239,53 +206,59 @@ func (s *Server) handleCatalogConfigDelete(w http.ResponseWriter, r *http.Reques
 	}
 	ctx, cancel := catalogCtx(r)
 	defer cancel()
-	c, err := cat.GetConfig(ctx, id)
+	// Refuse to delete a Config currently loaded unless force is truthy: ?force=false (or an unparseable value) must not force.
+	force := queryFlag(r, "force")
+	c, err := s.configWrites().Delete(ctx, id, force)
 	if err != nil {
-		if isNotFound(err) {
-			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "config"}, "config not found")
-			return
-		}
-		writeInternalError(w, err)
-		return
-	}
-	// Delete semantics (Q4): refuse to delete a Config currently loaded unless
-	// force=true is set.
-	if !r.URL.Query().Has("force") && s.isConfigLoaded(c.Name) {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error":  "config is currently loaded",
-			"config": c.Name,
-		})
-		return
-	}
-	if err := cat.DeleteConfig(ctx, id); err != nil {
-		if isNotFound(err) {
-			writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "config"}, "config not found")
-			return
-		}
-		writeInternalError(w, err)
+		writeConfigError(w, err, c.Name)
 		return
 	}
 	s.audit(r, identity(r).Name, "catalog_config_delete", strconv.FormatInt(id, 10), withReason(c.Name, r.URL.Query().Get("reason")))
-	s.invalidateCfg()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) handleCatalogConfigValidate(w http.ResponseWriter, r *http.Request) {
-	cat := s.deps.Catalog
-	if cat == nil {
+	if s.deps.Catalog == nil {
 		writeErrorCode(w, http.StatusServiceUnavailable, "not_wired", map[string]any{"resource": "catalog"}, "catalog not wired")
 		return
 	}
 	var b configBody
-	if fields := decodeJSONBody(r, &b); fields != nil {
+	if fields := decodeCatalogBody(r, &b); fields != nil {
 		writeValidationError(w, fields)
 		return
 	}
-	if fields, codes := s.validateConfig(r.Context(), b, 0); len(fields) > 0 {
-		writeValidationErrorCodes(w, fields, codes)
+	ctx, cancel := catalogCtx(r)
+	defer cancel()
+	inv, err := s.configWrites().Validate(ctx, b.toStore(0), validateExcludeID(r))
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	if inv != nil {
+		writeValidationErrorCodes(w, inv.Fields, inv.Codes)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"valid": true})
+}
+
+// configWrites builds the Config write module from the live dependencies: every create, update and delete of a Config goes through it.
+func (s *Server) configWrites() store.ConfigWrites {
+	return store.ConfigWrites{Cat: s.deps.Catalog, Changed: s.invalidateCfg, Loaded: s.isConfigLoaded}
+}
+
+// writeConfigError maps the Config write module's errors onto the API's codes. name is the Config's name, for the "currently loaded" answer.
+func writeConfigError(w http.ResponseWriter, err error, name string) {
+	var inv *store.ConfigInvalid
+	switch {
+	case errors.As(err, &inv):
+		writeValidationErrorCodes(w, inv.Fields, inv.Codes)
+	case errors.Is(err, store.ErrConfigLoaded):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "config is currently loaded", "config": name})
+	case isNotFound(err):
+		writeErrorCode(w, http.StatusNotFound, "not_found", map[string]any{"resource": "config"}, "config not found")
+	default:
+		writeInternalError(w, err)
+	}
 }
 
 // isConfigLoaded checks whether the collector snapshot shows any slot with
@@ -314,7 +287,6 @@ type configBody struct {
 	BuildID          int64    `json:"build_id"`
 	MMProjArtifactID int64    `json:"mmproj_artifact_id"`
 	NCtx             int      `json:"n_ctx"`
-	Parallel         int      `json:"parallel"`
 	ExtraArgs        []string `json:"extra_args"`
 	Status           string   `json:"status"`
 	Visibility       string   `json:"visibility"`
@@ -327,6 +299,8 @@ type configBody struct {
 	// Modalities overrides the model default; nil = derive. See
 	// configJSON.Modalities.
 	Modalities *[]string `json:"modalities,omitzero"`
+	// OutputModalities overrides the model's output set; nil = derive. See configJSON.OutputModalities.
+	OutputModalities *[]string `json:"output_modalities,omitzero"`
 	// CapabilityTierID/CapabilityRank — see configJSON's doc comment.
 	CapabilityTierID int64 `json:"capability_tier_id"`
 	CapabilityRank   int   `json:"capability_rank"`
@@ -341,126 +315,30 @@ type configBody struct {
 	Reason string `json:"reason"`
 }
 
-// validateConfig checks field constraints + referential integrity + name
-// uniqueness. The second return value is codes' i18n Phase 2 companion
-// (field -> stable error code). must_be_one_of is deliberately NOT used
-// anywhere in this function for the status/visibility/reasoning_effort_default
-// enum checks below: writeValidationErrorCodes' codes map is field -> single
-// code string with no way to carry a per-field {{allowed}} param, so a
-// must_be_one_of code here would render the frontend's raw, unresolved
-// "This must be one of: {{allowed}}." template — worse than the untouched
-// English text. Those three fields keep their plain English message with no
-// code until a params-carrying mechanism exists for field-level codes.
-func (s *Server) validateConfig(ctx context.Context, b configBody, excludeID int64) (map[string]string, map[string]string) {
-	fields := map[string]string{}
-	codes := map[string]string{}
-	cat := s.deps.Catalog
+// toStore is the one place a request body becomes a store.Config (id is 0 for a create).
+func (b configBody) toStore(id int64) store.Config {
+	return store.Config{
+		ID: id, Name: b.Name, VariantID: b.VariantID, WeightArtifactID: b.WeightArtifactID,
+		EngineID: b.EngineID, BuildID: b.BuildID, MMProjArtifactID: b.MMProjArtifactID,
+		NCtx: b.NCtx, ExtraArgs: b.ExtraArgs,
+		Status: b.Status, Visibility: b.Visibility, IsDefault: b.IsDefault,
+		Fingerprint: b.Fingerprint, Logo: b.Logo, LogoDark: b.LogoDark, Modalities: b.Modalities,
+		OutputModalities: b.OutputModalities, CapabilityTierID: b.CapabilityTierID, CapabilityRank: b.CapabilityRank,
+		ChatTemplateCapsOverride: b.ChatTemplateCapsOverride,
+		ReasoningEffortDefault:   b.ReasoningEffortDefault,
+	}
+}
 
-	if !modeNameRE.MatchString(b.Name) {
-		fields["name"] = "must match " + modeNamePattern
+// queryFlag reports whether the query parameter is present AND not explicitly off. A bare "?force" and "?force=yes/on/true/1" mean on, as they
+// did when presence alone counted; "?force=false/0/no/off" and anything unrecognised mean off, so ?force=false can never force a delete.
+func queryFlag(r *http.Request, key string) bool {
+	q := r.URL.Query()
+	if !q.Has(key) {
+		return false
 	}
-	if b.Modalities != nil {
-		if msg := validateModalityList(*b.Modalities); msg != "" {
-			fields["modalities"] = msg
-		}
+	switch strings.ToLower(strings.TrimSpace(q.Get(key))) {
+	case "", "1", "t", "true", "y", "yes", "on":
+		return true
 	}
-	if cat != nil {
-		// Name uniqueness (unless updating the same config).
-		if existing, err := cat.ConfigByName(ctx, b.Name); err == nil && existing.ID != excludeID {
-			fields["name"] = "already exists"
-			codes["name"] = "already_exists"
-		}
-		// Variant existence.
-		if b.VariantID == 0 {
-			fields["variant_id"] = "is required"
-			codes["variant_id"] = "required"
-		} else if _, err := cat.GetVariant(ctx, b.VariantID); err != nil {
-			fields["variant_id"] = "does not exist"
-		}
-		// Weight artifact existence + type check.
-		if b.WeightArtifactID == 0 {
-			fields["weight_artifact_id"] = "is required"
-			codes["weight_artifact_id"] = "required"
-		} else if a, err := cat.GetArtifact(ctx, b.WeightArtifactID); err != nil {
-			fields["weight_artifact_id"] = "does not exist"
-		} else if a.ArtifactType != "weight" {
-			fields["weight_artifact_id"] = "must be a weight artifact"
-		}
-		// Engine existence.
-		if b.EngineID == 0 {
-			fields["engine_id"] = "is required"
-			codes["engine_id"] = "required"
-		} else {
-			engines, _ := cat.ListEngines(ctx)
-			found := false
-			for _, e := range engines {
-				if e.ID == b.EngineID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				fields["engine_id"] = "does not exist"
-			}
-		}
-		// Build existence — required, not optional. A Config with no Build
-		// has no defined backend/binary; historically this silently defaulted
-		// to launching the vulkan binary regardless of what the model
-		// actually needed (see store.Build's Backend doc comment). Every
-		// Config must reference a real Build explicitly.
-		if b.BuildID == 0 {
-			fields["build_id"] = "is required"
-			codes["build_id"] = "required"
-		} else {
-			builds, _ := cat.ListBuilds(ctx)
-			found := false
-			for _, bd := range builds {
-				if bd.ID == b.BuildID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				fields["build_id"] = "does not exist"
-			}
-		}
-		// MMProj artifact existence + type check (optional).
-		if b.MMProjArtifactID != 0 {
-			if a, err := cat.GetArtifact(ctx, b.MMProjArtifactID); err != nil {
-				fields["mmproj_artifact_id"] = "does not exist"
-			} else if a.ArtifactType != "mmproj" {
-				fields["mmproj_artifact_id"] = "must be an mmproj artifact"
-			}
-		}
-		// CapabilityTier existence (optional — 0 means no class).
-		if b.CapabilityTierID != 0 {
-			if _, err := cat.GetCapabilityTier(ctx, b.CapabilityTierID); err != nil {
-				fields["capability_tier_id"] = "does not exist"
-			}
-		}
-	}
-	if b.NCtx < 0 {
-		fields["n_ctx"] = "must be ≥ 0"
-		codes["n_ctx"] = "must_be_non_negative_integer"
-	}
-	if b.Parallel < 0 {
-		fields["parallel"] = "must be ≥ 0"
-		codes["parallel"] = "must_be_non_negative_integer"
-	}
-	switch b.Status {
-	case "", "unverified", "verified":
-	default:
-		fields["status"] = "must be unverified or verified"
-	}
-	switch b.Visibility {
-	case "", "visible", "hidden":
-	default:
-		fields["visibility"] = "must be visible or hidden"
-	}
-	switch b.ReasoningEffortDefault {
-	case "", "none", "low", "medium", "high":
-	default:
-		fields["reasoning_effort_default"] = "must be none, low, medium, or high"
-	}
-	return fields, codes
+	return false
 }

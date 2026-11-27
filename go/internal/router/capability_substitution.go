@@ -29,6 +29,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/jsaigou/the-forge/internal/store"
 )
@@ -256,23 +257,12 @@ func (s *Server) resolveConfigModalities(ctx context.Context, c store.Config) (s
 	if cat == nil {
 		return store.ModalityResolution{}, false
 	}
-	v, err := cat.GetVariant(ctx, c.VariantID)
+	res, err := store.ResolveConfig(ctx, store.CatalogLookup(cat), c)
 	if err != nil {
+		log.Printf("router: modality gate: %v (failing open)", err)
 		return store.ModalityResolution{}, false
 	}
-	mdl, err := cat.GetModel(ctx, v.ModelID)
-	if err != nil {
-		return store.ModalityResolution{}, false
-	}
-	mmprojMissing := false
-	if c.MMProjArtifactID != 0 {
-		a, err := cat.GetArtifact(ctx, c.MMProjArtifactID)
-		if err != nil {
-			return store.ModalityResolution{}, false
-		}
-		mmprojMissing = a.Missing
-	}
-	return store.ResolveModalities(c, mdl, mmprojMissing), true
+	return res.Input, true
 }
 
 // decideSubstitute picks a substitute from already-gathered, already-gated

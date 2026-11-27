@@ -20,10 +20,10 @@ func (d *DB) Keys() Keys { return keysView{d} }
 func (v keysView) Create(ctx context.Context, k APIKey) error {
 	_, err := v.d.sql.ExecContext(ctx,
 		`INSERT INTO api_keys (keyid, kind, name, secret_hash, role, display_name,
-		                       bound_ip, created_at, last_used_at, revoked_at, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                       bound_ip, created_at, last_used_at, revoked_at, expires_at, scope)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		k.KeyID, k.Kind, k.Name, k.SecretHash, nullStr(k.Role), k.DisplayName, k.BoundIP,
-		unixOf(orNow(k.CreatedAt)), nullUnix(k.LastUsedAt), nullUnix(k.RevokedAt), nullUnix(k.ExpiresAt),
+		unixOf(orNow(k.CreatedAt)), nullUnix(k.LastUsedAt), nullUnix(k.RevokedAt), nullUnix(k.ExpiresAt), k.Scope,
 	)
 	if err != nil {
 		return fmt.Errorf("store: keys.create: %w", err)
@@ -38,10 +38,10 @@ func (v keysView) Get(ctx context.Context, keyid string) (APIKey, error) {
 	var lastUsed, revoked, expires sql.NullInt64
 	err := v.d.sql.QueryRowContext(ctx,
 		`SELECT keyid, kind, name, secret_hash, role, display_name, bound_ip,
-		        created_at, last_used_at, revoked_at, expires_at
+		        created_at, last_used_at, revoked_at, expires_at, scope
 		 FROM api_keys WHERE keyid = ?`, keyid,
 	).Scan(&k.KeyID, &k.Kind, &k.Name, &k.SecretHash, &role, &displayName, &k.BoundIP,
-		&created, &lastUsed, &revoked, &expires)
+		&created, &lastUsed, &revoked, &expires, &k.Scope)
 	if errors.Is(err, sql.ErrNoRows) {
 		return APIKey{}, ErrNotFound
 	}
@@ -60,7 +60,7 @@ func (v keysView) Get(ctx context.Context, keyid string) (APIKey, error) {
 // List returns keys of one kind, or all kinds when kind == "".
 func (v keysView) List(ctx context.Context, kind string) ([]APIKey, error) {
 	query := `SELECT keyid, kind, name, secret_hash, role, display_name, bound_ip,
-	                 created_at, last_used_at, revoked_at, expires_at
+	                 created_at, last_used_at, revoked_at, expires_at, scope
 	          FROM api_keys`
 	args := []any{}
 	if kind != "" {
@@ -80,7 +80,7 @@ func (v keysView) List(ctx context.Context, kind string) ([]APIKey, error) {
 		var created int64
 		var lastUsed, revoked, expires sql.NullInt64
 		if err := rows.Scan(&k.KeyID, &k.Kind, &k.Name, &k.SecretHash, &role, &displayName, &k.BoundIP,
-			&created, &lastUsed, &revoked, &expires); err != nil {
+			&created, &lastUsed, &revoked, &expires, &k.Scope); err != nil {
 			return nil, fmt.Errorf("store: keys.list: %w", err)
 		}
 		k.Role = strOf(role)

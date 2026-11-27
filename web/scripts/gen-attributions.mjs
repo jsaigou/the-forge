@@ -82,6 +82,21 @@ const RUNTIME_STACK = [
   },
 ];
 
+// ── Curated: fonts shipped with the web app ──────────────────────────────────
+// Font files in web/src/assets/fonts that Vite bundles into the PWA (the CSP
+// only allows same-origin fonts). Nothing declares them in a manifest, so they are listed
+// here. The copyright, designer and license text below were read from the
+// font file's own name table, not written from memory.
+const FONTS = [
+  {
+    name: "Archivo Black",
+    role: "Title typeface for the \"THE FORGE\" header, bundled with the app (v1.006, designed by Hector Gatti)",
+    license: "SIL OFL 1.1",
+    projectUrl: "https://github.com/Omnibus-Type/ArchivoBlack",
+    copyright: "Copyright 2017 The Archivo Black Project Authors (https://github.com/Omnibus-Type/ArchivoBlack)",
+  },
+];
+
 // ── npm deps ─────────────────────────────────────────────────────────────
 
 function firstString(...vals) {
@@ -256,6 +271,10 @@ export interface RuntimeComponent {
   projectUrl: string;
 }
 
+export interface FontAsset extends RuntimeComponent {
+  copyright: string;
+}
+
 export const NPM_DEPS: NpmDep[] = ${JSON.stringify(npm, null, 2)};
 
 export const GO_DEPS: GoDep[] = ${JSON.stringify(go, null, 2)};
@@ -263,10 +282,13 @@ export const GO_DEPS: GoDep[] = ${JSON.stringify(go, null, 2)};
 // Curated — see gen-attributions.mjs's RUNTIME_STACK. Nothing in this repo
 // declares these; they're external processes this app launches or proxies.
 export const RUNTIME_STACK: RuntimeComponent[] = ${JSON.stringify(RUNTIME_STACK, null, 2)};
+
+// Curated — see gen-attributions.mjs's FONTS. Font files this app serves itself.
+export const FONTS: FontAsset[] = ${JSON.stringify(FONTS, null, 2)};
 `;
 
   writeFileSync(OUT_PATH, out, "utf8");
-  console.log(`[gen-attributions] wrote ${npm.length} npm deps, ${go.length} Go deps, ${RUNTIME_STACK.length} runtime components → ${OUT_PATH}`);
+  console.log(`[gen-attributions] wrote ${npm.length} npm deps, ${go.length} Go deps, ${RUNTIME_STACK.length} runtime components, ${FONTS.length} fonts → ${OUT_PATH}`);
 }
 
 main();
