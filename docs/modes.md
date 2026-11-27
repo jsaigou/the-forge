@@ -10,7 +10,7 @@ apply across configs, not a list of specific models.
 
 Vulkan is the default backend and generally wins on token-generation throughput. It has a hard
 ceiling, though: it cannot load models much above **~63 GB** (`radv: Not enough memory for
-command submission`). ROCm with `GGML_CUDA_ENABLE_UNIFIED_MEMORY=ON` reaches the full unified-memory
+command submission`). ROCm reaches the full shared-memory
 GTT pool (~120 GB on a Strix Halo-class host) - use `backend = "rocm"` for anything larger.
 Backend is set per-config; the dashboard exposes a toggle. See
 [docs/pitfalls.md](pitfalls.md) for the underlying memory-accounting detail.

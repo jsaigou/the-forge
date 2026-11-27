@@ -157,7 +157,7 @@ Do not remove a config that's currently loaded on a slot. Unload it first.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `n_ctx` lower than configured | GTT contiguous block too small | Reduce `n_ctx`, reboot to defragment GTT, or switch to a smaller quant |
-| `cudaMalloc failed: out of memory` (ROCm backend) | Missing `GGML_CUDA_ENABLE_UNIFIED_MEMORY=ON` | Verify `/etc/sysconfig/forge-a{1,2,3,4}-env` all contain this var - see `docs/pitfalls.md` |
+| `cudaMalloc failed: out of memory` (ROCm backend) | The model and its context do not fit in the GTT pool | Reduce `n_ctx`, use a smaller quant, or check the GTT size - see `docs/pitfalls.md` |
 | Add Model preflight blocks on disk | Not enough free space for the file + 10% margin | Free up space, or pick a smaller quant |
 | Add Model preflight warns "requires rocm" | File is over the ~63 GB Vulkan ceiling | Expected for large models - the generated Config will need a ROCm Build to actually load |
 | Download fails immediately, "gated or private" | No HuggingFace token configured, or the account hasn't accepted the repo's license | Settings → Security → set a token; accept the license on huggingface.co if you haven't |
